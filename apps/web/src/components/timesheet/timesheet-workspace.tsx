@@ -677,7 +677,7 @@ export function TimesheetWorkspace({
   }
 
   return (
-    <main className="min-h-screen bg-slate-100">
+    <main className="bg-slate-100">
       <header className="border-b border-slate-200 bg-white/95 px-5 py-4 shadow-sm backdrop-blur">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -708,7 +708,7 @@ export function TimesheetWorkspace({
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-[1600px] gap-4 p-4 lg:grid-cols-[minmax(680px,1fr)_420px] xl:grid-cols-[minmax(760px,1fr)_460px]">
+      <div className="mx-auto grid max-w-[1600px] gap-4 px-4 pb-1 pt-4 lg:grid-cols-[minmax(680px,1fr)_420px] xl:grid-cols-[minmax(760px,1fr)_460px]">
         <section className="min-w-0 rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
             <div className="flex items-center gap-2">

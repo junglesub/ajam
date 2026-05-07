@@ -29,6 +29,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile=false
 
+      - name: Prepare build version
+        run: echo "BUILD_VERSION=#${GITHUB_RUN_NUMBER}-$(TZ=Asia/Seoul date +%y%m%d)" >> "$GITHUB_ENV"
+
       - name: Lint
         run: pnpm lint
 
@@ -50,7 +53,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare image name
-        run: echo "IMAGE_NAME=ghcr.io/junglesub/ajam" >> "$GITHUB_ENV"
+        run: |
+          echo "IMAGE_NAME=ghcr.io/junglesub/ajam" >> "$GITHUB_ENV"
+          echo "BUILD_VERSION=#${GITHUB_RUN_NUMBER}-$(TZ=Asia/Seoul date +%y%m%d)" >> "$GITHUB_ENV"
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -66,6 +71,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          build-args: |
+            BUILD_VERSION=${{ env.BUILD_VERSION }}
           push: true
           tags: |
             ${{ env.IMAGE_NAME }}:latest

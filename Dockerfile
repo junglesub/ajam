@@ -17,6 +17,9 @@ RUN pnpm install --frozen-lockfile
 
 COPY . .
 
+ARG BUILD_VERSION
+ENV BUILD_VERSION=${BUILD_VERSION}
+
 RUN pnpm build
 
 ENV NODE_ENV=production \

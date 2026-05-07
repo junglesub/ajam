@@ -2,6 +2,7 @@ import { CalendarDays, CheckCircle2, Languages, ShieldCheck } from "lucide-react
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
+import { getBuildInfo } from "@/lib/build-info";
 import { getSession } from "@/server/session";
 
 import { LoginForm } from "./login-form";
@@ -32,13 +33,14 @@ const highlights = [
 
 export default async function LoginPage() {
   const session = await getSession();
+  const buildInfo = getBuildInfo();
 
   if (session) {
     redirect("/timesheet");
   }
 
   return (
-    <main className="grid min-h-screen grid-cols-1 bg-slate-950 text-white lg:grid-cols-[minmax(0,1.08fr)_minmax(420px,0.92fr)]">
+    <main className="grid min-h-screen grid-cols-1 bg-slate-950 text-white lg:grid-cols-[minmax(0,1.08fr)_minmax(420px,0.92fr)]" data-footer-scope="auth">
       <section className="relative flex min-h-[42rem] flex-col justify-between overflow-hidden px-6 py-8 sm:px-10 lg:px-14">
         <div className="relative flex items-center justify-between">
           <div>
@@ -62,6 +64,18 @@ export default async function LoginPage() {
             })}
           </div>
         </div>
+
+        <footer className="relative flex flex-col gap-3 border-t border-white/10 pt-5 text-sm text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+          <p className="font-medium">&copy; {buildInfo.copyrightYear} aJam. All rights reserved.</p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <a className="font-semibold text-slate-300 transition hover:text-white" href={buildInfo.repositoryUrl} rel="noreferrer" target="_blank">
+              {buildInfo.repositoryLabel}
+            </a>
+            <span className="rounded-full border border-emerald-300/30 bg-emerald-400/10 px-2.5 py-1 font-mono text-xs font-bold text-emerald-200 shadow-sm shadow-emerald-950/20">
+              {buildInfo.version}
+            </span>
+          </div>
+        </footer>
       </section>
 
       <section className="flex items-center justify-center bg-slate-50 px-6 py-10 text-slate-950 sm:px-10">

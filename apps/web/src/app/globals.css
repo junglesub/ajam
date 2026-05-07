@@ -34,3 +34,7 @@ select {
   background: #0f172a;
   color: #ffffff;
 }
+
+body:has([data-footer-scope="auth"]) .site-footer {
+  display: none;
+}
