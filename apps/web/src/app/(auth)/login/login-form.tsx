@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useState } from "react";
 
 import { Button, Input, Label } from "@timesheet/ui";
 import { ArrowRight, LockKeyhole, UserRound } from "lucide-react";
@@ -11,6 +11,17 @@ const initialState: LoginState = {};
 
 export function LoginForm() {
   const [state, formAction, isPending] = useActionState(loginAction, initialState);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+
+  useEffect(() => {
+    if (!state.error) {
+      return;
+    }
+
+    setUsername(state.username ?? "");
+    setPassword("");
+  }, [state]);
 
   return (
     <form action={formAction} className="space-y-5">
@@ -18,7 +29,7 @@ export function LoginForm() {
         <Label htmlFor="username">아이디</Label>
         <div className="relative">
           <UserRound aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-          <Input autoComplete="username" className="pl-10" id="username" name="username" />
+          <Input autoComplete="username" className="pl-10" id="username" name="username" onChange={(event) => setUsername(event.target.value)} value={username} />
         </div>
       </div>
 
@@ -26,7 +37,7 @@ export function LoginForm() {
         <Label htmlFor="password">비밀번호</Label>
         <div className="relative">
           <LockKeyhole aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-          <Input autoComplete="current-password" className="pl-10" id="password" name="password" type="password" />
+          <Input autoComplete="current-password" className="pl-10" id="password" name="password" onChange={(event) => setPassword(event.target.value)} type="password" value={password} />
         </div>
       </div>
 

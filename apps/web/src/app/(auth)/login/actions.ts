@@ -7,6 +7,7 @@ import { createSession } from "@/server/session";
 
 export type LoginState = {
   error?: string;
+  username?: string;
 };
 
 export async function loginAction(_previousState: LoginState, formData: FormData): Promise<LoginState> {
@@ -16,7 +17,8 @@ export async function loginAction(_previousState: LoginState, formData: FormData
 
   if (!username || !password) {
     return {
-      error: "아이디와 비밀번호를 모두 입력해 주세요."
+      error: "아이디와 비밀번호를 모두 입력해 주세요.",
+      username
     };
   }
 
@@ -30,7 +32,8 @@ export async function loginAction(_previousState: LoginState, formData: FormData
 
   if (!user || !verifyPassword(password, user.passwordHash)) {
     return {
-      error: "계정 정보를 다시 확인해 주세요."
+      error: "계정 정보를 다시 확인해 주세요.",
+      username
     };
   }
 
