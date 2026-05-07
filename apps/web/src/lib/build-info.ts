@@ -25,6 +25,14 @@ function formatYYMMDD(date: Date): string {
   return `${year}${month}${day}`;
 }
 
+function formatBuildVersion(version: string | undefined): string {
+  if (!version) {
+    return `dev-${formatYYMMDD(new Date())}`;
+  }
+
+  return version.startsWith("#") ? version : `#${version}`;
+}
+
 export function getBuildInfo() {
   const configuredVersion = process.env.NEXT_PUBLIC_BUILD_VERSION || process.env.BUILD_VERSION;
 
@@ -32,6 +40,6 @@ export function getBuildInfo() {
     copyrightYear: new Date().getFullYear(),
     repositoryLabel: getRepositoryLabel(repositoryUrl),
     repositoryUrl,
-    version: configuredVersion || `dev-${formatYYMMDD(new Date())}`
+    version: formatBuildVersion(configuredVersion)
   };
 }
