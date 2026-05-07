@@ -8,6 +8,7 @@ import { destroySession, getSession } from "@/server/session";
 import {
   addProjectAction,
   createUserAction,
+  deleteTimesheetEntryAction,
   loadTimesheetMonthAction,
   logoutAction,
   resetHolidayCacheAction,
@@ -47,6 +48,7 @@ export default async function TimesheetPage() {
       addProjectAction={addProjectAction}
       createUserAction={createUserAction}
       currentUser={currentUser}
+      deleteEntryAction={deleteTimesheetEntryAction}
       initialHolidayApiKey={holidayApiKey ?? ""}
       initialManagedUsers={managedUsers}
       initialMonthData={initialMonthData}

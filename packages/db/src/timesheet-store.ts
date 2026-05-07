@@ -374,6 +374,13 @@ export async function upsertTimesheetEntry(params: { entry: StoredTimesheetDraft
   return entry;
 }
 
+export async function deleteTimesheetEntry(params: { dateKey: string; userId: string }) {
+  await ensureTimesheetSchema();
+
+  await prisma.$executeRawUnsafe(`DELETE FROM "TimesheetEntry" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);
+  await prisma.$executeRawUnsafe(`DELETE FROM "Vacation" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);
+}
+
 export async function addProject(params: { name: string; userId: string }) {
   await ensureTimesheetSchema();
 

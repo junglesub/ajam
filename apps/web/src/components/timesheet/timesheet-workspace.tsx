@@ -57,6 +57,7 @@ type HolidayApiKeyTestResult = {
 };
 
 type SaveState = "idle" | "saving" | "saved" | "error";
+type DeleteState = "idle" | "deleting" | "error";
 type ProjectAddState = "idle" | "saving" | "error";
 type SettingsSaveState = "idle" | "saving" | "saved" | "error";
 type HolidayResetState = "idle" | "saving" | "saved" | "error";
@@ -69,6 +70,7 @@ type TimesheetWorkspaceProps = {
   addProjectAction: (name: string) => Promise<string>;
   createUserAction: (params: { password: string; role: UserRole; username: string }) => Promise<ManagedUser>;
   currentUser: ManagedUser;
+  deleteEntryAction: (dateKey: string) => Promise<void>;
   initialHolidayApiKey: string;
   initialManagedUsers: ManagedUser[];
   initialMonthData: TimesheetMonthData;
@@ -207,6 +209,7 @@ export function TimesheetWorkspace({
   addProjectAction,
   createUserAction,
   currentUser: initialCurrentUser,
+  deleteEntryAction,
   initialHolidayApiKey,
   initialManagedUsers,
   initialMonthData,
@@ -232,6 +235,7 @@ export function TimesheetWorkspace({
   const [currentUser, setCurrentUser] = useState(initialCurrentUser);
   const [records, setRecords] = useState<Record<string, TimesheetDraft>>(() => buildDraftsFromMonthData(initialMonthData));
   const [savedRecords, setSavedRecords] = useState<Record<string, TimesheetDraft>>(() => buildDraftsFromMonthData(initialMonthData));
+  const [savedEntryDateKeys, setSavedEntryDateKeys] = useState(() => new Set(initialMonthData.entries.map((entry) => entry.dateKey)));
   const [projects, setProjects] = useState(() => mergeProjects([], initialMonthData.projects));
   const [loadedMonthKeys, setLoadedMonthKeys] = useState(() => {
     const today = new Date();
@@ -240,6 +244,8 @@ export function TimesheetWorkspace({
   });
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState("");
+  const [deleteState, setDeleteState] = useState<DeleteState>("idle");
+  const [deleteError, setDeleteError] = useState("");
   const [isDirty, setIsDirty] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [projectAddState, setProjectAddState] = useState<ProjectAddState>("idle");
@@ -300,7 +306,9 @@ export function TimesheetWorkspace({
   const missingCount = monthRows.filter((row) => row.status === "MISSING").length;
   const dayOffCount = monthRows.filter((row) => row.status === "HOLIDAY" || row.status === "VACATION").length;
   const isViewingToday = selectedDateKey === todayKey;
-  const isFuture = selectedRow.status === "FUTURE";
+  const isFutureDate = selectedDateKey > todayKey;
+  const isFutureWork = isFutureDate && selectedRow.kind === "WORK";
+  const canDeleteSelected = savedEntryDateKeys.has(selectedDateKey);
   const isAdmin = currentUser.role === "ADMIN";
 
   useEffect(() => {
@@ -324,6 +332,15 @@ export function TimesheetWorkspace({
         ...monthDrafts
       }));
       setProjects((current) => mergeProjects(current, monthData.projects));
+      setSavedEntryDateKeys((current) => {
+        const next = new Set(current);
+
+        for (const entry of monthData.entries) {
+          next.add(entry.dateKey);
+        }
+
+        return next;
+      });
       setLoadedMonthKeys((current) => new Set(current).add(monthKey));
     });
   }, [loadMonthAction, loadedMonthKeys, monthCursor.monthIndex, monthCursor.year]);
@@ -343,6 +360,13 @@ export function TimesheetWorkspace({
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [isDirty]);
 
+  function resetEntryFeedback() {
+    setSaveState("idle");
+    setSaveError("");
+    setDeleteState("idle");
+    setDeleteError("");
+  }
+
   function discardSelectedDraft() {
     setRecords((current) => {
       const next = { ...current };
@@ -357,11 +381,14 @@ export function TimesheetWorkspace({
       return next;
     });
     setIsDirty(false);
-    setSaveState("idle");
-    setSaveError("");
+    resetEntryFeedback();
   }
 
   function prepareDraftForDate(dateKey: string) {
+    if (dateKey > todayKey) {
+      return;
+    }
+
     if (records[dateKey]) {
       return;
     }
@@ -382,17 +409,13 @@ export function TimesheetWorkspace({
         [dateKey]: draft
       };
     });
-    setIsDirty(true);
-    setSaveState("idle");
-    setSaveError("");
   }
 
   function runNavigation(navigation: PendingNavigation) {
     if (navigation.kind === "date") {
       prepareDraftForDate(navigation.dateKey);
       setSelectedDateKey(navigation.dateKey);
-      setSaveState("idle");
-      setSaveError("");
+      resetEntryFeedback();
       return;
     }
 
@@ -405,8 +428,7 @@ export function TimesheetWorkspace({
         monthIndex: today.getMonth(),
         year: today.getFullYear()
       });
-      setSaveState("idle");
-      setSaveError("");
+      resetEntryFeedback();
       return;
     }
 
@@ -453,12 +475,19 @@ export function TimesheetWorkspace({
     requestNavigation({ kind: "today" });
   }
 
+  function createDraftForSelectedDate(current: Record<string, TimesheetDraft>): TimesheetDraft {
+    if (selectedDateKey > todayKey) {
+      return createEmptyDraft(selectedDateKey);
+    }
+
+    return createDraftForDate(selectedDateKey, current);
+  }
+
   function updateSelectedDraft(patch: Partial<TimesheetDraft>) {
-    setSaveState("idle");
-    setSaveError("");
+    resetEntryFeedback();
     setIsDirty(true);
     setRecords((current) => {
-      const previous = current[selectedDateKey] ?? createDraftForDate(selectedDateKey, current);
+      const previous = current[selectedDateKey] ?? createDraftForSelectedDate(current);
       const next = {
         ...previous,
         ...patch
@@ -532,6 +561,8 @@ export function TimesheetWorkspace({
 
     setSaveState("saving");
     setSaveError("");
+    setDeleteState("idle");
+    setDeleteError("");
 
     try {
       const savedEntry = await saveEntryAction(entry);
@@ -544,11 +575,46 @@ export function TimesheetWorkspace({
         ...current,
         [savedEntry.dateKey]: savedEntry
       }));
+      setSavedEntryDateKeys((current) => new Set(current).add(savedEntry.dateKey));
       setIsDirty(false);
       setSaveState("saved");
     } catch {
       setSaveState("error");
       setSaveError("저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    }
+  }
+
+  async function deleteSelectedEntry() {
+    if (!canDeleteSelected || deleteState === "deleting") {
+      return;
+    }
+
+    setDeleteState("deleting");
+    setDeleteError("");
+
+    try {
+      await deleteEntryAction(selectedDateKey);
+
+      setRecords((current) => {
+        const next = { ...current };
+        delete next[selectedDateKey];
+        return next;
+      });
+      setSavedRecords((current) => {
+        const next = { ...current };
+        delete next[selectedDateKey];
+        return next;
+      });
+      setSavedEntryDateKeys((current) => {
+        const next = new Set(current);
+        next.delete(selectedDateKey);
+        return next;
+      });
+      setIsDirty(false);
+      resetEntryFeedback();
+    } catch {
+      setDeleteState("error");
+      setDeleteError("삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.");
     }
   }
 
@@ -668,6 +734,15 @@ export function TimesheetWorkspace({
       setRecords(mergeResetMonth);
       setSavedRecords(mergeResetMonth);
       setProjects((current) => mergeProjects(current, monthData.projects));
+      setSavedEntryDateKeys((current) => {
+        const next = new Set(current);
+
+        for (const entry of monthData.entries) {
+          next.add(entry.dateKey);
+        }
+
+        return next;
+      });
       setLoadedMonthKeys((current) => new Set(current).add(monthKey));
       setHolidayResetState("saved");
     } catch {
@@ -777,7 +852,7 @@ export function TimesheetWorkspace({
             </div>
           </div>
 
-          <div className={cn("space-y-5 p-5", isFuture && "pointer-events-none opacity-55")}>
+          <div className={cn("space-y-5 p-5", isFutureWork && "opacity-70")}>
             <div className="space-y-2">
               <SegmentedControl items={kindOptions} onChange={updateKind} value={selectedRow.kind} />
             </div>
@@ -806,6 +881,7 @@ export function TimesheetWorkspace({
               <Field label="진행한 프로젝트">
                 <select
                   className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                  disabled={isFutureWork}
                   onChange={updateProject}
                   value={selectedRow.project}
                 >
@@ -821,6 +897,7 @@ export function TimesheetWorkspace({
 
               <Field label="일한 시간">
                 <Input
+                  disabled={isFutureWork}
                   max={24}
                   min={0}
                   onChange={(event) => updateSelectedDraft({ hours: Number(event.target.value) })}
@@ -833,6 +910,7 @@ export function TimesheetWorkspace({
 
             <Field label="내용">
               <Textarea
+                disabled={isFutureWork}
                 onChange={(event) => updateSelectedDraft({ content: event.target.value })}
                 placeholder="오늘 진행한 일을 간단히 적어주세요."
                 rows={5}
@@ -842,6 +920,7 @@ export function TimesheetWorkspace({
 
             <Field label="영문 번역본">
               <Textarea
+                disabled={isFutureWork}
                 onChange={(event) => updateSelectedDraft({ aiTranslation: event.target.value })}
                 placeholder="오늘 진행한 일을 영어로 간단히 적어주세요."
                 rows={4}
@@ -850,20 +929,34 @@ export function TimesheetWorkspace({
             </Field>
 
             <Field label="짧은 버전">
-              <Input onChange={(event) => updateSelectedDraft({ shortVersion: event.target.value })} placeholder="월간 캘린더에 표시할 한 줄 요약" value={selectedRow.shortVersion} />
+              <Input disabled={isFutureWork} onChange={(event) => updateSelectedDraft({ shortVersion: event.target.value })} placeholder="월간 캘린더에 표시할 한 줄 요약" value={selectedRow.shortVersion} />
             </Field>
 
             <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-5">
-              <p className={cn("text-sm font-medium", saveState === "error" ? "text-red-600" : "text-slate-500")}>
-                {saveState === "saved" ? "저장됨" : saveState === "saving" ? "저장 중" : saveError}
-              </p>
-              <Button className="h-10 px-4" disabled={isFuture || saveState === "saving"} onClick={saveSelectedDraft}>
-                {saveState === "saving" ? "저장 중" : "저장"}
-              </Button>
+              <div>
+                {canDeleteSelected ? (
+                  <button
+                    className="text-sm font-semibold text-red-600 underline-offset-4 transition hover:text-red-700 hover:underline disabled:cursor-not-allowed disabled:text-red-300"
+                    disabled={deleteState === "deleting"}
+                    onClick={() => void deleteSelectedEntry()}
+                    type="button"
+                  >
+                    {deleteState === "deleting" ? "삭제 중" : "삭제"}
+                  </button>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-3">
+                <p className={cn("text-sm font-medium", saveState === "error" || deleteState === "error" ? "text-red-600" : "text-slate-500")}>
+                  {deleteState === "error" ? deleteError : saveState === "saved" ? "저장됨" : saveState === "saving" ? "저장 중" : saveError}
+                </p>
+                <Button className="h-10 px-4" disabled={isFutureWork || saveState === "saving" || deleteState === "deleting"} onClick={saveSelectedDraft}>
+                  {saveState === "saving" ? "저장 중" : "저장"}
+                </Button>
+              </div>
             </div>
           </div>
 
-          {isFuture ? (
+          {isFutureWork ? (
             <div className="mx-5 mb-5 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-500">
               미래 날짜는 아직 작성하지 않습니다.
             </div>

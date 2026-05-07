@@ -3,6 +3,7 @@
 import {
   addProject,
   createManagedUser,
+  deleteTimesheetEntry,
   getManagedUser,
   listHolidays,
   listProjects,
@@ -169,6 +170,16 @@ export async function saveTimesheetEntryAction(entry: StoredTimesheetDraft) {
   }
 
   return upsertTimesheetEntry({ entry, userId: user.id });
+}
+
+export async function deleteTimesheetEntryAction(dateKey: string) {
+  const user = await requireSession();
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    throw new Error("날짜 형식이 올바르지 않습니다.");
+  }
+
+  await deleteTimesheetEntry({ dateKey, userId: user.id });
 }
 
 export async function addProjectAction(name: string) {
