@@ -72,7 +72,7 @@ jobs:
         with:
           context: .
           build-args: |
-            BUILD_VERSION=#${{ env.BUILD_VERSION }}
+            BUILD_VERSION="#${{ env.BUILD_VERSION }}"
           push: true
           tags: |
             ${{ env.IMAGE_NAME }}:latest
