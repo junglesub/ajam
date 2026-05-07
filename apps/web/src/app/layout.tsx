@@ -24,7 +24,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
       <body>
         <div className="flex min-h-screen flex-col">
           <div>{children}</div>
-          <footer className="site-footer px-5 py-0 text-xs leading-none text-slate-400">
+          <footer className="site-footer my-1 px-5 py-0 text-xs leading-none text-slate-400">
             <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <p className="font-medium">&copy; {buildInfo.copyrightYear} aJam. All rights reserved.</p>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
