@@ -35,10 +35,13 @@ RUN pnpm build
 
 FROM base AS runner
 
+ARG BUILD_VERSION
+
 ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     PORT=3000 \
-    DATABASE_URL=file:/data/timesheet.db
+    DATABASE_URL=file:/data/timesheet.db \
+    BUILD_VERSION=${BUILD_VERSION}
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates openssl \
