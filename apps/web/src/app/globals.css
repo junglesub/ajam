@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@source "../../../../packages/ui/src/**/*.{ts,tsx}";
+
+@theme {
+  --font-sans: "Inter", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.98)),
+    #f8fafc;
+  color: #0f172a;
+  font-family: var(--font-sans);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+::selection {
+  background: #0f172a;
+  color: #ffffff;
+}

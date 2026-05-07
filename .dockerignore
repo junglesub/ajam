@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+.next
+**/.next
+**/dist
+**/*.tsbuildinfo
+.git
+.gitignore
+.env
+.env.*
+packages/db/prisma/*.db
+packages/db/prisma/*.db-*

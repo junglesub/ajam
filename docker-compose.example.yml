@@ -1,0 +1,14 @@
+services:
+  ajam:
+    image: ghcr.io/junglesub/ajam:latest
+    container_name: ajam
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      DATABASE_URL: file:/data/timesheet.db
+    volumes:
+      - ./ajam-data:/data

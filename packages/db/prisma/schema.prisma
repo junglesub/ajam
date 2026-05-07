@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  role         String   @default("USER")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  projects         Project[]
+  timesheetEntries TimesheetEntry[]
+  vacations        Vacation[]
+}
+
+model TimesheetEntry {
+  id            String   @id @default(cuid())
+  userId        String
+  dateKey       String
+  kind          String
+  project       String   @default("")
+  hours         Float    @default(8)
+  content       String   @default("")
+  aiTranslation String   @default("")
+  shortVersion  String   @default("")
+  vacationName  String   @default("")
+  holidayName   String   @default("")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dateKey])
+  @@index([dateKey])
+}
+
+model Holiday {
+  id        String   @id @default(cuid())
+  dateKey   String   @unique
+  name      String
+  source    String   @default("data-go-kr")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Vacation {
+  id        String   @id @default(cuid())
+  userId    String
+  dateKey   String
+  name      String
+  hours     Float    @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dateKey])
+}
+
+model Project {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
+}
+
+model HolidayFetchLog {
+  id        String   @id @default(cuid())
+  solYear   Int
+  solMonth  Int
+  source    String   @default("data-go-kr")
+  fetchedAt DateTime @default(now())
+
+  @@unique([solYear, solMonth, source])
+}
+
+model AppSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

@@ -1,0 +1,33 @@
+{
+  "name": "timesheet-suite",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.20.0",
+  "engines": {
+    "node": "24.15.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "better-sqlite3",
+      "prisma"
+    ]
+  },
+  "scripts": {
+    "dev": "pnpm --filter @timesheet/web dev",
+    "build": "pnpm db:generate && pnpm --filter @timesheet/web build",
+    "lint": "pnpm db:generate && eslint .",
+    "typecheck": "pnpm db:generate && pnpm -r --if-present typecheck",
+    "db:generate": "pnpm --filter @timesheet/db db:generate",
+    "db:seed": "pnpm --filter @timesheet/db db:seed",
+    "db:deploy": "pnpm db:seed"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^24.10.0",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.0"
+  }
+}
