@@ -16,8 +16,23 @@ model User {
   updatedAt    DateTime @updatedAt
 
   projects         Project[]
+  timesheetDays    TimesheetDay[]
   timesheetEntries TimesheetEntry[]
   vacations        Vacation[]
+}
+
+model TimesheetDay {
+  id           String   @id @default(cuid())
+  userId       String
+  dateKey      String
+  shortVersion String   @default("")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dateKey])
+  @@index([dateKey])
 }
 
 model TimesheetEntry {
@@ -32,13 +47,14 @@ model TimesheetEntry {
   shortVersion  String   @default("")
   vacationName  String   @default("")
   holidayName   String   @default("")
+  sortOrder     Int      @default(0)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, dateKey])
   @@index([dateKey])
+  @@index([userId, dateKey])
 }
 
 model Holiday {

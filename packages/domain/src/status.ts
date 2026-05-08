@@ -3,7 +3,7 @@ export type TimesheetStatus = "HOLIDAY" | "VACATION" | "COMPLETED" | "MISSING" |
 export type WorkRecordKind = "WORK" | "VACATION" | "HOLIDAY";
 
 export const statusLabel: Record<TimesheetStatus, string> = {
-  COMPLETED: "입력완료",
+  COMPLETED: "완료",
   FUTURE: "미래",
   HOLIDAY: "공휴일",
   MISSING: "입력안됨",

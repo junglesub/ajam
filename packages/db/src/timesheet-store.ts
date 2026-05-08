@@ -3,17 +3,27 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "./client";
 import { ensureApplicationSchema, getAppSetting } from "./settings-store";
 
-export type StoredTimesheetDraft = {
+export type StoredTimesheetEntry = {
   aiTranslation: string;
+  clientId: string;
   content: string;
-  dateKey: string;
   holidayName: string;
   hours: number;
+  id: string;
   kind: "WORK" | "VACATION" | "HOLIDAY";
   project: string;
-  shortVersion: string;
+  sortOrder: number;
   vacationName: string;
 };
+
+export type StoredTimesheetDay = {
+  dateKey: string;
+  entries: StoredTimesheetEntry[];
+  holidayName: string;
+  shortVersion: string;
+};
+
+export type StoredTimesheetDraft = StoredTimesheetDay;
 
 export type HolidayRecord = {
   dateKey: string;
@@ -26,7 +36,14 @@ export type VacationRecord = {
   name: string;
 };
 
-type TimesheetEntryRow = StoredTimesheetDraft & {
+type TimesheetEntryRow = StoredTimesheetEntry & {
+  dateKey: string;
+  userId: string;
+};
+
+type TimesheetDayRow = {
+  dateKey: string;
+  shortVersion: string;
   userId: string;
 };
 
@@ -49,6 +66,10 @@ type HolidayFetchLogRow = {
   fetchedAt: string;
 };
 
+type TableInfoRow = {
+  name: string;
+};
+
 type DataGoKrHolidayItem = {
   dateName?: string;
   isHoliday?: string;
@@ -57,18 +78,54 @@ type DataGoKrHolidayItem = {
 
 let schemaReady = false;
 
-function normalizeDraft(entry: StoredTimesheetDraft): StoredTimesheetDraft {
+function normalizeEntry(entry: StoredTimesheetEntry, sortOrder: number): StoredTimesheetEntry {
+  const kind = entry.kind;
+  const isWork = kind === "WORK";
+  const isVacation = kind === "VACATION";
+  const isHoliday = kind === "HOLIDAY";
+
   return {
-    aiTranslation: entry.aiTranslation.trim(),
-    content: entry.content.trim(),
-    dateKey: entry.dateKey,
-    holidayName: entry.holidayName.trim(),
+    aiTranslation: isWork ? entry.aiTranslation.trim() : "",
+    clientId: entry.clientId || entry.id || randomUUID(),
+    content: isWork ? entry.content.trim() : "",
+    holidayName: isHoliday ? entry.holidayName.trim() : "",
     hours: Number.isFinite(entry.hours) ? entry.hours : 0,
-    kind: entry.kind,
-    project: entry.project.trim(),
-    shortVersion: entry.shortVersion.trim(),
-    vacationName: entry.vacationName.trim()
+    id: entry.id.trim(),
+    kind,
+    project: isWork ? entry.project.trim() : "",
+    sortOrder,
+    vacationName: isVacation ? entry.vacationName.trim() : ""
   };
+}
+
+function normalizeDay(day: StoredTimesheetDay): StoredTimesheetDay {
+  return {
+    dateKey: day.dateKey,
+    entries: day.entries.map((entry, index) => normalizeEntry(entry, index)),
+    holidayName: day.holidayName.trim(),
+    shortVersion: day.shortVersion.trim()
+  };
+}
+
+async function hasColumn(tableName: string, columnName: string): Promise<boolean> {
+  const rows = await prisma.$queryRawUnsafe<TableInfoRow[]>(`PRAGMA table_info("${tableName}")`);
+  return rows.some((row) => row.name === columnName);
+}
+
+async function migrateTimesheetDaySummaries() {
+  await prisma.$executeRawUnsafe(`
+    INSERT INTO "TimesheetDay" ("id", "userId", "dateKey", "shortVersion", "createdAt", "updatedAt")
+    SELECT lower(hex(randomblob(16))), "userId", "dateKey", max("shortVersion"), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    FROM "TimesheetEntry"
+    WHERE trim("shortVersion") <> ''
+    GROUP BY "userId", "dateKey"
+    ON CONFLICT("userId", "dateKey") DO UPDATE SET
+      "shortVersion" = CASE
+        WHEN trim("TimesheetDay"."shortVersion") = '' THEN excluded."shortVersion"
+        ELSE "TimesheetDay"."shortVersion"
+      END,
+      "updatedAt" = CURRENT_TIMESTAMP
+  `);
 }
 
 export async function ensureTimesheetSchema() {
@@ -88,12 +145,30 @@ export async function ensureTimesheetSchema() {
     "shortVersion" TEXT NOT NULL DEFAULT '',
     "vacationName" TEXT NOT NULL DEFAULT '',
     "holidayName" TEXT NOT NULL DEFAULT '',
+    "sortOrder" INTEGER NOT NULL DEFAULT 0,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "TimesheetEntry_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
   )`);
-  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "TimesheetEntry_userId_dateKey_key" ON "TimesheetEntry"("userId", "dateKey")`);
+  if (!(await hasColumn("TimesheetEntry", "sortOrder"))) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "TimesheetEntry" ADD COLUMN "sortOrder" INTEGER NOT NULL DEFAULT 0`);
+  }
+  await prisma.$executeRawUnsafe(`DROP INDEX IF EXISTS "TimesheetEntry_userId_dateKey_key"`);
+  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "TimesheetEntry_userId_dateKey_idx" ON "TimesheetEntry"("userId", "dateKey")`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "TimesheetEntry_dateKey_idx" ON "TimesheetEntry"("dateKey")`);
+
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "TimesheetDay" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
+    "dateKey" TEXT NOT NULL,
+    "shortVersion" TEXT NOT NULL DEFAULT '',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "TimesheetDay_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`);
+  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "TimesheetDay_userId_dateKey_key" ON "TimesheetDay"("userId", "dateKey")`);
+  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "TimesheetDay_dateKey_idx" ON "TimesheetDay"("dateKey")`);
+  await migrateTimesheetDaySummaries();
 
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Holiday" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -142,15 +217,76 @@ export async function ensureTimesheetSchema() {
 export async function listTimesheetEntries(params: { endDateKey: string; startDateKey: string; userId: string }) {
   await ensureTimesheetSchema();
 
-  return prisma.$queryRawUnsafe<TimesheetEntryRow[]>(
-    `SELECT "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "shortVersion", "vacationName", "holidayName"
+  const [entries, dayRows] = await Promise.all([
+    prisma.$queryRawUnsafe<TimesheetEntryRow[]>(
+      `SELECT "id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "sortOrder", "vacationName", "holidayName"
+       FROM "TimesheetEntry"
+       WHERE "userId" = ? AND "dateKey" BETWEEN ? AND ?
+       ORDER BY "dateKey" ASC, "sortOrder" ASC, "createdAt" ASC`,
+      params.userId,
+      params.startDateKey,
+      params.endDateKey
+    ),
+    prisma.$queryRawUnsafe<TimesheetDayRow[]>(
+      `SELECT "userId", "dateKey", "shortVersion"
+       FROM "TimesheetDay"
+       WHERE "userId" = ? AND "dateKey" BETWEEN ? AND ?
+       ORDER BY "dateKey" ASC`,
+      params.userId,
+      params.startDateKey,
+      params.endDateKey
+    )
+  ]);
+  const days = new Map<string, StoredTimesheetDay>();
+
+  for (const day of dayRows) {
+    days.set(day.dateKey, {
+      dateKey: day.dateKey,
+      entries: [],
+      holidayName: "",
+      shortVersion: day.shortVersion
+    });
+  }
+
+  for (const entry of entries) {
+    const day = days.get(entry.dateKey) ?? {
+      dateKey: entry.dateKey,
+      entries: [],
+      holidayName: entry.kind === "HOLIDAY" ? entry.holidayName : "",
+      shortVersion: ""
+    };
+    day.entries.push({
+      aiTranslation: entry.kind === "WORK" ? entry.aiTranslation : "",
+      content: entry.kind === "WORK" ? entry.content : "",
+      holidayName: entry.kind === "HOLIDAY" ? entry.holidayName : "",
+      hours: entry.hours,
+      id: entry.id,
+      clientId: entry.id,
+      kind: entry.kind,
+      project: entry.kind === "WORK" ? entry.project : "",
+      sortOrder: entry.sortOrder,
+      vacationName: entry.kind === "VACATION" ? entry.vacationName : ""
+    });
+    days.set(entry.dateKey, day);
+  }
+
+  return Array.from(days.values()).sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+}
+
+export async function findLatestWorkProjectBefore(params: { beforeDateKey: string; userId: string }): Promise<string> {
+  await ensureTimesheetSchema();
+
+  const rows = await prisma.$queryRawUnsafe<ProjectRow[]>(
+    `SELECT "project" AS "name"
      FROM "TimesheetEntry"
-     WHERE "userId" = ? AND "dateKey" BETWEEN ? AND ?
-     ORDER BY "dateKey" ASC`,
+     WHERE "userId" = ? AND "dateKey" < ? AND "kind" = 'WORK' AND trim("project") <> ''
+     ORDER BY "dateKey" DESC, "sortOrder" ASC, "createdAt" DESC
+     LIMIT 1`,
     params.userId,
-    params.startDateKey,
-    params.endDateKey
+    params.beforeDateKey
   );
+
+  return rows[0]?.name ?? "";
 }
 
 async function getDataGoKrServiceKey(): Promise<string | null> {
@@ -325,61 +461,75 @@ export async function listVacations(params: { endDateKey: string; startDateKey: 
   );
 }
 
-export async function upsertTimesheetEntry(params: { entry: StoredTimesheetDraft; userId: string }) {
+export async function saveTimesheetDay(params: { day: StoredTimesheetDay; userId: string }) {
   await ensureTimesheetSchema();
 
-  const entry = normalizeDraft(params.entry);
+  const day = normalizeDay(params.day);
 
-  await prisma.$executeRawUnsafe(
-    `INSERT INTO "TimesheetEntry" ("id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "shortVersion", "vacationName", "holidayName", "createdAt", "updatedAt")
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-     ON CONFLICT("userId", "dateKey") DO UPDATE SET
-       "kind" = excluded."kind",
-       "project" = excluded."project",
-       "hours" = excluded."hours",
-       "content" = excluded."content",
-       "aiTranslation" = excluded."aiTranslation",
-       "shortVersion" = excluded."shortVersion",
-       "vacationName" = excluded."vacationName",
-       "holidayName" = excluded."holidayName",
-       "updatedAt" = CURRENT_TIMESTAMP`,
-    randomUUID(),
-    params.userId,
-    entry.dateKey,
-    entry.kind,
-    entry.project,
-    entry.hours,
-    entry.content,
-    entry.aiTranslation,
-    entry.shortVersion,
-    entry.vacationName,
-    entry.holidayName
-  );
+  await prisma.$transaction(async (transaction) => {
+    await transaction.$executeRawUnsafe(
+      `INSERT INTO "TimesheetDay" ("id", "userId", "dateKey", "shortVersion", "createdAt", "updatedAt")
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT("userId", "dateKey") DO UPDATE SET "shortVersion" = excluded."shortVersion", "updatedAt" = CURRENT_TIMESTAMP`,
+      randomUUID(),
+      params.userId,
+      day.dateKey,
+      day.shortVersion
+    );
+    await transaction.$executeRawUnsafe(`DELETE FROM "TimesheetEntry" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, day.dateKey);
 
-  if (entry.kind === "VACATION") {
-    await prisma.$executeRawUnsafe(
+    for (const entry of day.entries) {
+      await transaction.$executeRawUnsafe(
+        `INSERT INTO "TimesheetEntry" ("id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "shortVersion", "sortOrder", "vacationName", "holidayName", "createdAt", "updatedAt")
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        entry.id || randomUUID(),
+        params.userId,
+        day.dateKey,
+        entry.kind,
+        entry.project,
+        entry.hours,
+        entry.content,
+        entry.aiTranslation,
+        entry.sortOrder,
+        entry.vacationName,
+        entry.holidayName
+      );
+    }
+
+    const vacationEntries = day.entries.filter((entry) => entry.kind === "VACATION");
+
+    if (vacationEntries.length === 0) {
+      await transaction.$executeRawUnsafe(`DELETE FROM "Vacation" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, day.dateKey);
+      return;
+    }
+
+    const totalHours = vacationEntries.reduce((sum, entry) => sum + entry.hours, 0);
+    const name = vacationEntries.map((entry) => entry.vacationName.trim()).filter(Boolean).join(", ") || "휴가";
+
+    await transaction.$executeRawUnsafe(
       `INSERT INTO "Vacation" ("id", "userId", "dateKey", "name", "hours", "createdAt", "updatedAt")
        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
        ON CONFLICT("userId", "dateKey") DO UPDATE SET "name" = excluded."name", "hours" = excluded."hours", "updatedAt" = CURRENT_TIMESTAMP`,
       randomUUID(),
       params.userId,
-      entry.dateKey,
-      entry.vacationName || entry.content || "휴가",
-      entry.hours
+      day.dateKey,
+      name,
+      totalHours
     );
-  } else {
-    await prisma.$executeRawUnsafe(`DELETE FROM "Vacation" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, entry.dateKey);
-  }
+  });
 
-  return entry;
+  return day;
 }
 
 export async function deleteTimesheetEntry(params: { dateKey: string; userId: string }) {
   await ensureTimesheetSchema();
 
   await prisma.$executeRawUnsafe(`DELETE FROM "TimesheetEntry" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);
+  await prisma.$executeRawUnsafe(`DELETE FROM "TimesheetDay" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);
   await prisma.$executeRawUnsafe(`DELETE FROM "Vacation" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);
 }
+
+export const upsertTimesheetEntry = saveTimesheetDay;
 
 export async function addProject(params: { name: string; userId: string }) {
   await ensureTimesheetSchema();

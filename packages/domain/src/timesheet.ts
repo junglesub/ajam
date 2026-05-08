@@ -1,42 +1,68 @@
 import type { TimesheetStatus, WorkRecordKind } from "./status";
 
-export type TimesheetDraft = {
+export type TimesheetEntryDraft = {
   aiTranslation: string;
+  clientId: string;
   content: string;
-  dateKey: string;
   holidayName: string;
   hours: number;
+  hoursTouched?: boolean;
+  id: string;
   kind: WorkRecordKind;
   project: string;
-  shortVersion: string;
+  sortOrder: number;
   vacationName: string;
 };
 
-export type TimesheetRow = TimesheetDraft & {
-  status: TimesheetStatus;
+export type TimesheetDayDraft = {
+  dateKey: string;
+  entries: TimesheetEntryDraft[];
+  holidayName: string;
+  shortVersion: string;
 };
 
-export function createEmptyDraft(dateKey: string): TimesheetDraft {
+export type TimesheetRow = TimesheetDayDraft & {
+  aiTranslation: string;
+  content: string;
+  entryCount: number;
+  hasVacation: boolean;
+  hours: number;
+  kind: WorkRecordKind;
+  previewContent: string;
+  project: string;
+  projectCount: number;
+  status: TimesheetStatus;
+  vacationName: string;
+};
+
+export function createEmptyEntryDraft(sortOrder = 0): TimesheetEntryDraft {
   return {
     aiTranslation: "",
+    clientId: "",
     content: "",
-    dateKey,
     holidayName: "",
     hours: 8,
+    hoursTouched: false,
+    id: "",
     kind: "WORK",
     project: "",
-    shortVersion: "",
+    sortOrder,
     vacationName: ""
+  };
+}
+
+export function createEmptyDraft(dateKey: string): TimesheetDayDraft {
+  return {
+    dateKey,
+    entries: [],
+    holidayName: "",
+    shortVersion: ""
   };
 }
 
 export function getDisplayContent(row: TimesheetRow): string {
   if (row.status === "HOLIDAY") {
     return row.holidayName || "공휴일";
-  }
-
-  if (row.status === "VACATION") {
-    return row.vacationName || "휴가";
   }
 
   if (row.status === "MISSING") {
@@ -47,5 +73,5 @@ export function getDisplayContent(row: TimesheetRow): string {
     return "작성 예정";
   }
 
-  return row.shortVersion || row.content;
+  return row.previewContent;
 }

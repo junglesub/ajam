@@ -4,6 +4,7 @@ import {
   addProject,
   createManagedUser,
   deleteTimesheetEntry,
+  findLatestWorkProjectBefore,
   getManagedUser,
   listHolidays,
   listProjects,
@@ -12,9 +13,10 @@ import {
   resetHolidayCache,
   setAppSetting,
   updateManagedUser,
-  upsertTimesheetEntry,
+  saveTimesheetDay,
   type ManagedUser,
   type StoredTimesheetDraft,
+  type StoredTimesheetEntry,
   type UserRole
 } from "@timesheet/db";
 import { redirect } from "next/navigation";
@@ -71,6 +73,42 @@ async function requireAdmin() {
   }
 
   return user;
+}
+
+function mergeLegacyVacations(entries: StoredTimesheetDraft[], vacations: Array<{ dateKey: string; hours: number; name: string }>): StoredTimesheetDraft[] {
+  const days = new Map(entries.map((entry) => [entry.dateKey, { ...entry, entries: [...entry.entries] }]));
+
+  for (const vacation of vacations) {
+    const day = days.get(vacation.dateKey) ?? {
+      dateKey: vacation.dateKey,
+      entries: [],
+      holidayName: "",
+      shortVersion: ""
+    };
+
+    if (day.entries.some((entry) => entry.kind === "VACATION")) {
+      days.set(vacation.dateKey, day);
+      continue;
+    }
+
+    const vacationEntry: StoredTimesheetEntry = {
+      aiTranslation: "",
+      clientId: `legacy-vacation-${vacation.dateKey}`,
+      content: "",
+      holidayName: "",
+      hours: vacation.hours,
+      id: "",
+      kind: "VACATION",
+      project: "",
+      sortOrder: day.entries.length,
+      vacationName: vacation.name
+    };
+
+    day.entries.push(vacationEntry);
+    days.set(vacation.dateKey, day);
+  }
+
+  return Array.from(days.values()).sort((left, right) => left.dateKey.localeCompare(right.dateKey));
 }
 
 function encodeServiceKey(serviceKey: string): string {
@@ -151,25 +189,27 @@ export async function loadTimesheetMonthAction(year: number, monthIndex: number)
   ]);
 
   return {
-    entries,
+    entries: mergeLegacyVacations(entries, vacations),
     holidays,
     projects,
     vacations
   };
 }
 
-export async function saveTimesheetEntryAction(entry: StoredTimesheetDraft) {
+export async function saveTimesheetEntryAction(day: StoredTimesheetDraft) {
   const user = await requireSession();
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(entry.dateKey)) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day.dateKey)) {
     throw new Error("날짜 형식이 올바르지 않습니다.");
   }
 
-  if (!["WORK", "VACATION", "HOLIDAY"].includes(entry.kind)) {
+  for (const entry of day.entries) {
+    if (!["WORK", "VACATION", "HOLIDAY"].includes(entry.kind)) {
     throw new Error("업무 유형이 올바르지 않습니다.");
+    }
   }
 
-  return upsertTimesheetEntry({ entry, userId: user.id });
+  return saveTimesheetDay({ day, userId: user.id });
 }
 
 export async function deleteTimesheetEntryAction(dateKey: string) {
@@ -180,6 +220,16 @@ export async function deleteTimesheetEntryAction(dateKey: string) {
   }
 
   await deleteTimesheetEntry({ dateKey, userId: user.id });
+}
+
+export async function findPreviousProjectAction(dateKey: string): Promise<string> {
+  const user = await requireSession();
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    throw new Error("날짜 형식이 올바르지 않습니다.");
+  }
+
+  return findLatestWorkProjectBefore({ beforeDateKey: dateKey, userId: user.id });
 }
 
 export async function addProjectAction(name: string) {
