@@ -2327,7 +2327,7 @@ function CalendarView({
                         {row.projectCount > 1 ? <span className="shrink-0 text-[10px] font-bold text-slate-500">+{row.projectCount}</span> : null}
                       </div>
                     ) : null}
-                    <p className={cn("truncate text-sm leading-5 text-slate-600", row && row.entryCount > 1 && "pr-8", row?.status === "MISSING" && !draftPreviewText(row) && "font-bold text-red-600")}>
+                    <p className={cn("line-clamp-2 break-words text-sm leading-5 text-slate-600", row && row.entryCount > 1 && "pr-8", row?.status === "MISSING" && !draftPreviewText(row) && "font-bold text-red-600")}>
                       {row ? calendarStatusText(row, selectedDateKey === cell.dateKey) : ""}
                     </p>
                   </div>
