@@ -649,6 +649,7 @@ export function TimesheetWorkspace({
   const selectedEditorKind: WorkRecordKind = selectedEntry?.kind ?? (selectedDay.holidayName ? "HOLIDAY" : isFutureDate ? "VACATION" : "WORK");
 
   const monthRows = Object.values(rows).filter((row) => row.dateKey.startsWith(`${monthCursor.year}-${String(monthCursor.monthIndex + 1).padStart(2, "0")}`));
+  const businessDayCount = monthRows.filter((row) => row.status !== "HOLIDAY").length;
   const completedCount = monthRows.filter((row) => row.status === "COMPLETED").length;
   const missingCount = monthRows.filter((row) => row.status === "MISSING").length;
   const vacationHours = monthRows.reduce((sum, row) => sum + row.entries.filter((entry) => entry.kind === "VACATION").reduce((entrySum, entry) => entrySum + entry.hours, 0), 0);
@@ -1991,7 +1992,7 @@ export function TimesheetWorkspace({
           </div>
 
           <div className="grid border-b border-slate-200 bg-slate-50 px-4 py-3 sm:grid-cols-4">
-            <Metric icon={CalendarDays} label="업무일" value={`${listDateKeys.length + calendarWeeks.flat().filter((cell) => cell && cell.dateKey > todayKey).length}일`} />
+            <Metric icon={CalendarDays} label="업무일" value={`${businessDayCount}일`} />
             <Metric icon={Sparkles} label="입력완료" value={`${completedCount}일`} />
             <Metric icon={Search} label="입력안됨" tone="red" value={`${missingCount}일`} />
             <Metric icon={Clock3} label="휴가" value={vacationMetricValue} />
