@@ -71,6 +71,7 @@ type ManagedUser = {
 
 type TimesheetMonthData = {
   entries: TimesheetDayDraft[];
+  holidayWarning?: string;
   holidays: Array<{ dateKey: string; name: string }>;
   projects: string[];
   vacations: Array<{ dateKey: string; hours: number; name: string }>;
@@ -97,6 +98,7 @@ type ConnectedVacationPrompt = {
   hours: number;
   vacationName: string;
 };
+type ConnectedVacationAction = "delete" | "save";
 
 type TimesheetWorkspaceProps = {
   addProjectAction: (name: string) => Promise<string>;
@@ -109,6 +111,7 @@ type TimesheetWorkspaceProps = {
   initialMonthData: TimesheetMonthData;
   loadMonthAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   logoutAction: () => Promise<void>;
+  resetAllHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   resetHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   saveEntryAction: (entry: TimesheetDayDraft) => Promise<TimesheetDayDraft>;
   saveHolidayApiKeyAction: (serviceKey: string) => Promise<void>;
@@ -198,6 +201,14 @@ function getDateKeyMonthCursor(dateKey: string): { monthIndex: number; year: num
     monthIndex: date.getMonth(),
     year: date.getFullYear()
   };
+}
+
+function getInclusiveDateSpan(startDateKey: string, endDateKey: string): number {
+  const start = parseDateKey(startDateKey).getTime();
+  const end = parseDateKey(endDateKey).getTime();
+  const dayMs = 24 * 60 * 60 * 1000;
+
+  return Math.floor((end - start) / dayMs) + 1;
 }
 
 function getDefaultSelectedDateForMonth(year: number, monthIndex: number): string {
@@ -373,6 +384,10 @@ function firstHolidayEntry(day: TimesheetDayDraft): TimesheetEntryDraft | undefi
   return day.entries.find((entry) => entry.kind === "HOLIDAY");
 }
 
+function hasHolidayMarker(day: TimesheetDayDraft | undefined): boolean {
+  return Boolean(day?.holidayName || day?.entries.some((entry) => entry.kind === "HOLIDAY"));
+}
+
 function uniqueWorkProjectCount(day: TimesheetDayDraft): number {
   return new Set(day.entries.filter((entry) => entry.kind === "WORK").map((entry) => entry.project.trim()).filter(Boolean)).size;
 }
@@ -511,6 +526,7 @@ export function TimesheetWorkspace({
   initialMonthData,
   loadMonthAction,
   logoutAction,
+  resetAllHolidayCacheAction,
   resetHolidayCacheAction,
   saveEntryAction,
   saveHolidayApiKeyAction,
@@ -558,6 +574,13 @@ export function TimesheetWorkspace({
   const [holidayApiKeyError, setHolidayApiKeyError] = useState("");
   const [holidayApiKeyTestState, setHolidayApiKeyTestState] = useState<SettingsSaveState>("idle");
   const [holidayApiKeyTestMessage, setHolidayApiKeyTestMessage] = useState("");
+  const [holidayWarning, setHolidayWarning] = useState(initialMonthData.holidayWarning ?? "");
+  const [holidayWarningMonthKeys, setHolidayWarningMonthKeys] = useState(() => {
+    const today = new Date();
+    const initialMonthKey = getMonthCacheKey(today.getFullYear(), today.getMonth());
+
+    return new Set(initialMonthData.holidayWarning ? [initialMonthKey] : []);
+  });
   const [holidayResetState, setHolidayResetState] = useState<HolidayResetState>("idle");
   const [holidayResetError, setHolidayResetError] = useState("");
   const [managedUsers, setManagedUsers] = useState(initialManagedUsers);
@@ -577,8 +600,11 @@ export function TimesheetWorkspace({
   const [vacationRangeError, setVacationRangeError] = useState("");
   const [vacationRangeMessage, setVacationRangeMessage] = useState("");
   const [vacationRangeConflictKeys, setVacationRangeConflictKeys] = useState<string[]>([]);
+  const [vacationRangeProgress, setVacationRangeProgress] = useState({ completed: 0, total: 0 });
   const [connectedVacationPrompt, setConnectedVacationPrompt] = useState<ConnectedVacationPrompt | null>(null);
+  const [connectedVacationAction, setConnectedVacationAction] = useState<ConnectedVacationAction>("save");
   const [isConnectedVacationSaving, setIsConnectedVacationSaving] = useState(false);
+  const [connectedVacationProgress, setConnectedVacationProgress] = useState({ completed: 0, total: 0 });
   const [isMonthPending, startMonthTransition] = useTransition();
 
   const calendarWeeks = useMemo(
@@ -591,7 +617,13 @@ export function TimesheetWorkspace({
   );
   const rows = useMemo(() => {
     const entries: Record<string, TimesheetRow> = {};
-    const getVisibleDraft = (dateKey: string) => dateKey > todayKey && !savedEntryDateKeys.has(dateKey) ? undefined : records[dateKey];
+    const getVisibleDraft = (dateKey: string) => {
+      if (dateKey <= todayKey || savedEntryDateKeys.has(dateKey)) {
+        return records[dateKey];
+      }
+
+      return hasHolidayMarker(savedRecords[dateKey]) ? savedRecords[dateKey] : undefined;
+    };
 
     for (const week of calendarWeeks) {
       for (const cell of week) {
@@ -608,7 +640,7 @@ export function TimesheetWorkspace({
     entries[selectedDateKey] = rowFromDraft(selectedDateKey, todayKey, getVisibleDraft(selectedDateKey), savedEntryDateKeys.has(selectedDateKey));
 
     return entries;
-  }, [calendarWeeks, listDateKeys, records, savedEntryDateKeys, selectedDateKey, todayKey]);
+  }, [calendarWeeks, listDateKeys, records, savedEntryDateKeys, savedRecords, selectedDateKey, todayKey]);
   const isFutureDate = selectedDateKey > todayKey;
   const selectedDay = records[selectedDateKey] ?? (isFutureDate ? createFutureDraftForDate(selectedDateKey) : createDraftForDate(selectedDateKey, records));
   const selectedEntryIdCandidate = selectedEntryIdByDate[selectedDateKey] ?? selectedDay.entries[0]?.clientId ?? "";
@@ -636,6 +668,7 @@ export function TimesheetWorkspace({
   const selectedHasWork = selectedDay.entries.some((entry) => entry.kind === "WORK");
   const selectedIsHoliday = selectedEditorKind === "HOLIDAY";
   const selectedIsSingleVacation = selectedDay.entries.length === 1 && selectedEntry?.kind === "VACATION";
+  const isDevelopment = process.env.NODE_ENV === "development";
   const entryDragSensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -659,6 +692,18 @@ export function TimesheetWorkspace({
 
       const monthDrafts = buildDraftsFromMonthData(monthData);
 
+      setHolidayWarning(monthData.holidayWarning ?? "");
+      setHolidayWarningMonthKeys((current) => {
+        const next = new Set(current);
+
+        if (monthData.holidayWarning) {
+          next.add(monthKey);
+        } else {
+          next.delete(monthKey);
+        }
+
+        return next;
+      });
       setRecords((current) => ({
         ...current,
         ...monthDrafts
@@ -915,10 +960,11 @@ export function TimesheetWorkspace({
       return getMonthCacheKey(cursor.year, cursor.monthIndex);
     }));
     const knownMonthKeys = new Set(loadedMonthKeys);
+    const warningMonthKeys = new Set(holidayWarningMonthKeys);
     let loadedDrafts: Record<string, TimesheetDayDraft> = {};
 
     for (const monthKey of monthKeys) {
-      if (knownMonthKeys.has(monthKey)) {
+      if (knownMonthKeys.has(monthKey) && !warningMonthKeys.has(monthKey)) {
         continue;
       }
 
@@ -944,6 +990,18 @@ export function TimesheetWorkspace({
         ...current,
         ...Object.fromEntries(Object.values(monthDrafts).flatMap((day) => day.entries[0] ? [[day.dateKey, day.entries[0].clientId]] : []))
       }));
+      setHolidayWarning(monthData.holidayWarning ?? "");
+      setHolidayWarningMonthKeys((current) => {
+        const next = new Set(current);
+
+        if (monthData.holidayWarning) {
+          next.add(monthKey);
+        } else {
+          next.delete(monthKey);
+        }
+
+        return next;
+      });
       setProjects((current) => mergeProjects(current, monthData.projects));
       setSavedEntryDateKeys((current) => {
         const next = new Set(current);
@@ -1008,12 +1066,14 @@ export function TimesheetWorkspace({
     return Boolean(savedEntryDateKeys.has(dateKey) || draft?.entries.length || draft?.shortVersion.trim());
   }
 
-  async function saveVacationDays(dateKeys: string[], vacationName: string, hours: number): Promise<TimesheetDayDraft[]> {
+  async function saveVacationDays(dateKeys: string[], vacationName: string, hours: number, onProgress?: (completed: number, total: number) => void): Promise<TimesheetDayDraft[]> {
     const savedDays: TimesheetDayDraft[] = [];
+    const total = dateKeys.length;
 
     for (const dateKey of dateKeys) {
       const savedDay = withClientIds(await saveEntryAction(sanitizeDayForSave(createVacationDay(dateKey, vacationName || "휴가", hours))));
       savedDays.push(savedDay);
+      onProgress?.(savedDays.length, total);
 
       setRecords((current) => ({
         ...current,
@@ -1146,6 +1206,7 @@ export function TimesheetWorkspace({
     setVacationRangeState("idle");
     setVacationRangeError("");
     setVacationRangeMessage("");
+    setVacationRangeProgress({ completed: 0, total: 0 });
     setVacationRangeConflictKeys([]);
     setIsVacationRangeOpen(true);
 
@@ -1182,6 +1243,7 @@ export function TimesheetWorkspace({
     setVacationRangeConflictKeys([]);
     setVacationRangeError("");
     setVacationRangeMessage("");
+    setVacationRangeProgress({ completed: 0, total: 0 });
   }
 
   async function applyVacationRange(confirmReplace = false) {
@@ -1197,11 +1259,18 @@ export function TimesheetWorkspace({
       return;
     }
 
+    if (getInclusiveDateSpan(vacationRangeStart, vacationRangeEnd) > 30) {
+      setVacationRangeState("error");
+      setVacationRangeError("기간 설정은 최대 30일까지 가능합니다.");
+      return;
+    }
+
     const businessDateKeys = getBusinessDateKeysInRange(vacationRangeStart, vacationRangeEnd);
 
     setVacationRangeState("saving");
     setVacationRangeError("");
     setVacationRangeMessage("");
+    setVacationRangeProgress({ completed: 0, total: 0 });
 
     try {
       const loadedDrafts = await loadDateKeysForVacation(businessDateKeys);
@@ -1211,6 +1280,7 @@ export function TimesheetWorkspace({
 
       if (conflictKeys.length > 0 && !confirmReplace) {
         setVacationRangeConflictKeys(conflictKeys);
+        setVacationRangeProgress({ completed: 0, total: 0 });
         setVacationRangeState("idle");
         return;
       }
@@ -1222,7 +1292,10 @@ export function TimesheetWorkspace({
         return;
       }
 
-      const savedDays = await saveVacationDays(targetDateKeys, vacationRangeName, vacationRangeHours);
+      setVacationRangeProgress({ completed: 0, total: targetDateKeys.length });
+      const savedDays = await saveVacationDays(targetDateKeys, vacationRangeName, vacationRangeHours, (completed, total) => {
+        setVacationRangeProgress({ completed, total });
+      });
       const selectedSavedDay = savedDays.find((day) => day.dateKey === selectedDateKey);
 
       if (selectedSavedDay) {
@@ -1295,17 +1368,99 @@ export function TimesheetWorkspace({
 
     setIsConnectedVacationSaving(true);
     setSaveError("");
+    setConnectedVacationProgress({ completed: 0, total: 0 });
 
     try {
       const loadedDrafts = await loadDateKeysForVacation(connectedVacationPrompt.dateKeys);
       const targetDateKeys = connectedVacationPrompt.dateKeys.filter((dateKey) => !isHolidayVacationDate(dateKey, loadedDrafts));
-      await saveVacationDays(targetDateKeys, connectedVacationPrompt.vacationName, connectedVacationPrompt.hours);
+      setConnectedVacationProgress({ completed: 0, total: targetDateKeys.length });
+      await saveVacationDays(targetDateKeys, connectedVacationPrompt.vacationName, connectedVacationPrompt.hours, (completed, total) => {
+        setConnectedVacationProgress({ completed, total });
+      });
       setConnectedVacationPrompt(null);
+      setConnectedVacationProgress({ completed: 0, total: 0 });
       setIsDirty(false);
       setSaveState("saved");
     } catch {
       setSaveState("error");
       setSaveError("연결된 휴가를 함께 저장하지 못했습니다.");
+    } finally {
+      setIsConnectedVacationSaving(false);
+    }
+  }
+
+  function removeDeletedDates(dateKeys: string[]) {
+    setRecords((current) => {
+      const next = { ...current };
+
+      for (const dateKey of dateKeys) {
+        delete next[dateKey];
+      }
+
+      if (dateKeys.includes(selectedDateKey)) {
+        const draft = selectedDateKey > todayKey ? createFutureDraftForDate(selectedDateKey) : createDraftForDate(selectedDateKey, next);
+
+        if (draft.entries.length > 0) {
+          next[selectedDateKey] = draft;
+        }
+
+        setSelectedEntryIdByDate((selected) => ({
+          ...selected,
+          [selectedDateKey]: draft.entries[0]?.clientId ?? ""
+        }));
+      }
+
+      return next;
+    });
+    setSavedRecords((current) => {
+      const next = { ...current };
+
+      for (const dateKey of dateKeys) {
+        delete next[dateKey];
+      }
+
+      return next;
+    });
+    setSavedEntryDateKeys((current) => {
+      const next = new Set(current);
+
+      for (const dateKey of dateKeys) {
+        next.delete(dateKey);
+      }
+
+      return next;
+    });
+  }
+
+  async function deleteConnectedVacationPrompt() {
+    if (!connectedVacationPrompt) {
+      return;
+    }
+
+    setIsConnectedVacationSaving(true);
+    setDeleteError("");
+    setConnectedVacationProgress({ completed: 0, total: 0 });
+
+    try {
+      const loadedDrafts = await loadDateKeysForVacation(connectedVacationPrompt.dateKeys);
+      const targetDateKeys = connectedVacationPrompt.dateKeys.filter((dateKey) => !isSavedHolidayDate(dateKey, loadedDrafts));
+      setConnectedVacationProgress({ completed: 0, total: targetDateKeys.length });
+      let completed = 0;
+
+      for (const dateKey of targetDateKeys) {
+        await deleteEntryAction(dateKey);
+        completed += 1;
+        setConnectedVacationProgress({ completed, total: targetDateKeys.length });
+      }
+
+      removeDeletedDates(targetDateKeys);
+      setConnectedVacationPrompt(null);
+      setConnectedVacationProgress({ completed: 0, total: 0 });
+      setIsDirty(false);
+      resetEntryFeedback();
+    } catch {
+      setDeleteState("error");
+      setDeleteError("연결된 휴가를 함께 삭제하지 못했습니다.");
     } finally {
       setIsConnectedVacationSaving(false);
     }
@@ -1496,6 +1651,8 @@ export function TimesheetWorkspace({
         const prompt = await findConnectedVacationPrompt();
 
         if (prompt) {
+          setConnectedVacationProgress({ completed: 0, total: 0 });
+          setConnectedVacationAction("save");
           setConnectedVacationPrompt(prompt);
           return;
         }
@@ -1538,9 +1695,26 @@ export function TimesheetWorkspace({
     }
   }
 
-  async function deleteSelectedEntry() {
+  async function deleteSelectedEntry(options: { skipConnectedVacation?: boolean } = {}) {
     if (!canDeleteSelected || deleteState === "deleting") {
       return;
+    }
+
+    if (selectedIsSingleVacation && !options.skipConnectedVacation) {
+      try {
+        const prompt = await findConnectedVacationPrompt();
+
+        if (prompt) {
+          setConnectedVacationProgress({ completed: 0, total: 0 });
+          setConnectedVacationAction("delete");
+          setConnectedVacationPrompt(prompt);
+          return;
+        }
+      } catch {
+        setDeleteState("error");
+        setDeleteError("연결된 휴가를 확인하지 못했습니다.");
+        return;
+      }
     }
 
     setDeleteState("deleting");
@@ -1548,30 +1722,7 @@ export function TimesheetWorkspace({
 
     try {
       await deleteEntryAction(selectedDateKey);
-
-      setRecords((current) => {
-        const next = { ...current };
-        delete next[selectedDateKey];
-        const draft = selectedDateKey > todayKey ? createFutureDraftForDate(selectedDateKey) : createDraftForDate(selectedDateKey, next);
-        if (draft.entries.length > 0) {
-          next[selectedDateKey] = draft;
-        }
-        setSelectedEntryIdByDate((selected) => ({
-          ...selected,
-          [selectedDateKey]: draft.entries[0]?.clientId ?? ""
-        }));
-        return next;
-      });
-      setSavedRecords((current) => {
-        const next = { ...current };
-        delete next[selectedDateKey];
-        return next;
-      });
-      setSavedEntryDateKeys((current) => {
-        const next = new Set(current);
-        next.delete(selectedDateKey);
-        return next;
-      });
+      removeDeletedDates([selectedDateKey]);
       setIsDirty(false);
       resetEntryFeedback();
     } catch {
@@ -1695,6 +1846,18 @@ export function TimesheetWorkspace({
 
       setRecords(mergeResetMonth);
       setSavedRecords(mergeResetMonth);
+      setHolidayWarning(monthData.holidayWarning ?? "");
+      setHolidayWarningMonthKeys((current) => {
+        const next = new Set(current);
+
+        if (monthData.holidayWarning) {
+          next.add(monthKey);
+        } else {
+          next.delete(monthKey);
+        }
+
+        return next;
+      });
       setProjects((current) => mergeProjects(current, monthData.projects));
       setSavedEntryDateKeys((current) => {
         const next = new Set(current);
@@ -1710,6 +1873,54 @@ export function TimesheetWorkspace({
     } catch {
       setHolidayResetState("error");
       setHolidayResetError("공휴일 정보를 다시 불러오지 못했습니다.");
+    }
+  }
+
+  async function resetAllHolidays() {
+    if (!isAdmin || !isDevelopment) {
+      return;
+    }
+
+    setHolidayResetState("saving");
+    setHolidayResetError("");
+
+    try {
+      const monthData = await resetAllHolidayCacheAction(monthCursor.year, monthCursor.monthIndex);
+      const monthDrafts = buildDraftsFromMonthData(monthData);
+      const removeApiHolidayDrafts = (current: Record<string, TimesheetDayDraft>) => {
+        const next = { ...current };
+
+        for (const [dateKey, draft] of Object.entries(next)) {
+          if (draft.entries.length === 0 && draft.holidayName) {
+            delete next[dateKey];
+          }
+        }
+
+        return {
+          ...next,
+          ...monthDrafts
+        };
+      };
+
+      setRecords(removeApiHolidayDrafts);
+      setSavedRecords(removeApiHolidayDrafts);
+      setHolidayWarning(monthData.holidayWarning ?? "");
+      setHolidayWarningMonthKeys(new Set());
+      setProjects((current) => mergeProjects(current, monthData.projects));
+      setSavedEntryDateKeys((current) => {
+        const next = new Set(current);
+
+        for (const entry of monthData.entries) {
+          next.add(entry.dateKey);
+        }
+
+        return next;
+      });
+      setLoadedMonthKeys(new Set([getMonthCacheKey(monthCursor.year, monthCursor.monthIndex)]));
+      setHolidayResetState("saved");
+    } catch (error) {
+      setHolidayResetState("error");
+      setHolidayResetError(error instanceof Error ? error.message : "공휴일 정보를 삭제하지 못했습니다.");
     }
   }
 
@@ -1785,6 +1996,12 @@ export function TimesheetWorkspace({
             <Metric icon={Search} label="입력안됨" tone="red" value={`${missingCount}일`} />
             <Metric icon={Clock3} label="휴가" value={vacationMetricValue} />
           </div>
+
+          {holidayWarning ? (
+            <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              공휴일 정보를 불러오지 못했습니다. 설정에서 API 키를 확인해주세요. {holidayWarning}
+            </div>
+          ) : null}
 
           {viewMode === "calendar" ? (
             <CalendarView
@@ -2021,7 +2238,13 @@ export function TimesheetWorkspace({
                 <p className="mt-1 text-sm leading-6 text-slate-600">현재 표시 중인 월의 공휴일 캐시를 삭제하고 다시 조회합니다.</p>
                 {holidayResetState === "saved" ? <p className="mt-3 text-sm font-semibold text-emerald-700">공휴일 정보를 다시 불러왔습니다.</p> : null}
                 {holidayResetState === "error" ? <p className="mt-3 text-sm font-semibold text-red-600">{holidayResetError}</p> : null}
-                <div className="mt-4 flex justify-end">
+                <div className="mt-4 flex flex-wrap justify-end gap-2">
+                  {isDevelopment ? (
+                    <Button disabled={holidayResetState === "saving"} onClick={() => void resetAllHolidays()} type="button" variant="secondary">
+                      <Trash2 aria-hidden="true" className="size-4" />
+                      모든 API 공휴일 삭제
+                    </Button>
+                  ) : null}
                   <Button disabled={holidayResetState === "saving"} onClick={() => void resetCurrentMonthHolidays()} type="button" variant="secondary">
                     <RotateCcw aria-hidden="true" className="size-4" />
                     {holidayResetState === "saving" ? "다시 불러오는 중" : "현재 월 공휴일 리셋"}
@@ -2131,6 +2354,20 @@ export function TimesheetWorkspace({
                 기존 기록이 있는 {vacationRangeConflictKeys.length}일이 휴가로 교체됩니다. 공휴일은 교체하지 않습니다.
               </div>
             ) : null}
+            {vacationRangeProgress.total > 0 ? (
+              <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                  <span>저장 진행</span>
+                  <span>{vacationRangeProgress.completed}/{vacationRangeProgress.total}</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                  <div
+                    className="h-full rounded-full bg-slate-950 transition-all"
+                    style={{ width: `${Math.round((vacationRangeProgress.completed / vacationRangeProgress.total) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
             {vacationRangeMessage ? <p className="text-sm font-semibold text-emerald-700">{vacationRangeMessage}</p> : null}
             {vacationRangeState === "error" ? <p className="text-sm font-semibold text-red-600">{vacationRangeError}</p> : null}
             <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
@@ -2145,7 +2382,32 @@ export function TimesheetWorkspace({
         </ModalShell>
       ) : null}
 
-      {connectedVacationPrompt ? (
+      {connectedVacationPrompt && connectedVacationAction === "delete" ? (
+        <ModalShell onClose={() => setConnectedVacationPrompt(null)} title="연결된 휴가 삭제">
+          <div className="space-y-4">
+            <p className="text-sm leading-6 text-slate-600">
+              붙어있는 휴가 {connectedVacationPrompt.dateKeys.length}일이 있습니다. 연결된 휴가를 함께 삭제할까요?
+            </p>
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600">
+              {formatKoreanDate(connectedVacationPrompt.dateKeys[0]!)} - {formatKoreanDate(connectedVacationPrompt.dateKeys[connectedVacationPrompt.dateKeys.length - 1]!)}
+            </div>
+            <ProgressBar label="삭제 진행" progress={connectedVacationProgress} />
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <Button disabled={isConnectedVacationSaving} onClick={() => setConnectedVacationPrompt(null)} type="button" variant="secondary">
+                취소
+              </Button>
+              <Button disabled={isConnectedVacationSaving} onClick={() => { setConnectedVacationPrompt(null); void deleteSelectedEntry({ skipConnectedVacation: true }); }} type="button" variant="secondary">
+                현재 날짜만 삭제
+              </Button>
+              <Button disabled={isConnectedVacationSaving} onClick={() => void deleteConnectedVacationPrompt()} type="button" variant="danger">
+                {isConnectedVacationSaving ? "삭제 중" : "함께 삭제"}
+              </Button>
+            </div>
+          </div>
+        </ModalShell>
+      ) : null}
+
+      {connectedVacationPrompt && connectedVacationAction === "save" ? (
         <ModalShell onClose={() => setConnectedVacationPrompt(null)} title="연결된 휴가 수정">
           <div className="space-y-4">
             <p className="text-sm leading-6 text-slate-600">
@@ -2154,6 +2416,7 @@ export function TimesheetWorkspace({
             <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600">
               {formatKoreanDate(connectedVacationPrompt.dateKeys[0]!)} - {formatKoreanDate(connectedVacationPrompt.dateKeys[connectedVacationPrompt.dateKeys.length - 1]!)}
             </div>
+            <ProgressBar label="저장 진행" progress={connectedVacationProgress} />
             <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
               <Button disabled={isConnectedVacationSaving} onClick={() => setConnectedVacationPrompt(null)} type="button" variant="secondary">
                 취소
@@ -2260,6 +2523,26 @@ function TimeMismatchIcon({ hours }: { hours: number }) {
     >
       <Clock3 aria-label="총 시간 경고" className="size-3.5" />
     </span>
+  );
+}
+
+function ProgressBar({ label, progress }: { label: string; progress: { completed: number; total: number } }) {
+  if (progress.total <= 0) {
+    return null;
+  }
+
+  const percentage = Math.round((progress.completed / progress.total) * 100);
+
+  return (
+    <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+      <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+        <span>{label}</span>
+        <span>{progress.completed}/{progress.total}</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+        <div className="h-full rounded-full bg-slate-950 transition-all" style={{ width: `${percentage}%` }} />
+      </div>
+    </div>
   );
 }
 

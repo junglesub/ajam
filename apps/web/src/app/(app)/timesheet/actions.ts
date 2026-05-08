@@ -25,6 +25,7 @@ import { createSession, destroySession, getSession } from "@/server/session";
 
 export type TimesheetMonthData = {
   entries: StoredTimesheetDraft[];
+  holidayWarning?: string;
   holidays: Array<{ dateKey: string; name: string }>;
   projects: string[];
   vacations: Array<{ dateKey: string; hours: number; name: string }>;
@@ -181,16 +182,22 @@ async function fetchRestDeInfoWithKey(params: { serviceKey: string; solMonth: nu
 export async function loadTimesheetMonthAction(year: number, monthIndex: number): Promise<TimesheetMonthData> {
   const user = await requireSession();
   const range = getMonthRange(year, monthIndex);
-  const [entries, holidays, projects, vacations] = await Promise.all([
+  const [entries, holidayResult, projects, vacations] = await Promise.all([
     listTimesheetEntries({ ...range, userId: user.id }),
-    listHolidays(range),
+    listHolidays(range)
+      .then((holidays) => ({ holidayWarning: undefined, holidays }))
+      .catch((error) => ({
+        holidayWarning: error instanceof Error ? error.message : "공휴일 정보를 불러오지 못했습니다.",
+        holidays: []
+      })),
     listProjects({ userId: user.id }),
     listVacations({ ...range, userId: user.id })
   ]);
 
   return {
     entries: mergeLegacyVacations(entries, vacations),
-    holidays,
+    holidayWarning: holidayResult.holidayWarning,
+    holidays: holidayResult.holidays,
     projects,
     vacations
   };
@@ -243,6 +250,31 @@ export async function resetHolidayCacheAction(year: number, monthIndex: number):
   await resetHolidayCache({ solMonth: monthIndex + 1, solYear: year });
 
   return loadTimesheetMonthAction(year, monthIndex);
+}
+
+export async function resetAllHolidayCacheAction(year: number, monthIndex: number): Promise<TimesheetMonthData> {
+  const user = await requireAdmin();
+
+  if (process.env.NODE_ENV !== "development") {
+    throw new Error("개발 환경에서만 사용할 수 있습니다.");
+  }
+
+  await resetHolidayCache();
+
+  const range = getMonthRange(year, monthIndex);
+  const [entries, projects, vacations] = await Promise.all([
+    listTimesheetEntries({ ...range, userId: user.id }),
+    listProjects({ userId: user.id }),
+    listVacations({ ...range, userId: user.id })
+  ]);
+
+  return {
+    entries: mergeLegacyVacations(entries, vacations),
+    holidayWarning: undefined,
+    holidays: [],
+    projects,
+    vacations
+  };
 }
 
 export async function saveHolidayApiKeyAction(serviceKey: string) {
