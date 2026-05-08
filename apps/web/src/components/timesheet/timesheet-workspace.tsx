@@ -609,7 +609,6 @@ export function TimesheetWorkspace({
 
     return entries;
   }, [calendarWeeks, listDateKeys, records, savedEntryDateKeys, selectedDateKey, todayKey]);
-  const selectedRow = rows[selectedDateKey] ?? rowFromDraft(selectedDateKey, todayKey, selectedDateKey > todayKey && !savedEntryDateKeys.has(selectedDateKey) ? undefined : records[selectedDateKey], savedEntryDateKeys.has(selectedDateKey));
   const isFutureDate = selectedDateKey > todayKey;
   const selectedDay = records[selectedDateKey] ?? (isFutureDate ? createFutureDraftForDate(selectedDateKey) : createDraftForDate(selectedDateKey, records));
   const selectedEntryIdCandidate = selectedEntryIdByDate[selectedDateKey] ?? selectedDay.entries[0]?.clientId ?? "";
@@ -974,12 +973,6 @@ export function TimesheetWorkspace({
     const row = rows[dateKey];
 
     return Boolean(row?.status === "HOLIDAY" || draft?.holidayName || draft?.entries.some((entry) => entry.kind === "HOLIDAY"));
-  }
-
-  function isVacationOnlyDate(dateKey: string, loadedDrafts: Record<string, TimesheetDayDraft> = {}): boolean {
-    const draft = getDraftForVacationDate(dateKey, loadedDrafts);
-
-    return Boolean(draft?.entries.some((entry) => entry.kind === "VACATION") && !draft.entries.some((entry) => entry.kind === "WORK" || entry.kind === "HOLIDAY"));
   }
 
   function isSavedHolidayDate(dateKey: string, loadedDrafts: Record<string, TimesheetDayDraft> = {}): boolean {
