@@ -37,7 +37,8 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - Vacation-only days show the vacation tag with text.
 - If a day has more than one entry, the entry count appears at the bottom right.
 - If a work day has multiple unique projects, `+N` appears next to the project name.
-- Calendar text is one line and truncates with ellipsis.
+- Project names stay on one line.
+- Calendar preview content can use up to two lines and truncates with ellipsis.
 - Saved non-holiday days whose total hours are not `8h` show an orange timer icon next to the date. The icon hover text shows the current total hours.
 - Missing unselected days show `미기입`.
 - A selected missing work draft with no content shows `작성 예정`.
@@ -55,6 +56,13 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - Clicking an entry row selects that date and entry in the right editor.
 - Saved non-holiday rows whose total hours are not `8h` show the same orange timer icon as the calendar view.
 
+## Holiday API
+
+- data.go.kr holiday loading failures do not break the whole timesheet page.
+- If holiday loading fails, the page still loads work, vacation, and project data and shows a warning asking the user to check the API key.
+- If vacation range save covers a month whose holiday load previously failed, that month is retried before deciding which dates are holidays.
+- In development only, admins can delete all cached data.go.kr holidays for debugging.
+
 ## Vacation Range Save
 
 - `기간 저장` is available only when the selected date has exactly one vacation entry.
@@ -63,11 +71,13 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - In the normal case, the start date is fixed and the user chooses only the end date.
 - If an earlier connected vacation exists, the start date is shown as editable.
 - The end date cannot be earlier than the start date.
+- A range can span at most 30 calendar days.
 - Range save includes weekdays only.
 - Holidays are skipped and never replaced.
 - Existing saved records in the target range require a warning before replacement.
 - Replacement saves each target date as one vacation entry and clears work fields and short version.
 - Replacement warnings use saved records only, not transient editor drafts.
+- Range save shows a progress bar with completed and total date counts while saving.
 
 ## Connected Vacation Updates
 
@@ -76,6 +86,8 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - Missing, draft-only, work, or mixed-entry dates break the connection.
 - A connected vacation date must have exactly one saved vacation entry.
 - When a single vacation is saved and connected vacation days are found, the user can cancel, save only the selected date, or save the same vacation type and hours to all connected vacation dates.
+- When a single vacation is deleted and connected vacation days are found, the user can cancel, delete only the selected date, or delete all connected vacation dates.
+- Together save and together delete both show a progress bar with completed and total date counts.
 
 ## Persistence Notes
 
@@ -87,4 +99,4 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 ## Verification
 
 - Run `pnpm --filter @timesheet/web typecheck` after changes.
-- Check calendar, list, and editor behavior for missing dates, projectless saved work, multiple work entries, mixed work and vacation days, future vacation/holiday drafts, vacation range saves with holidays and existing records, connected vacation saves across holidays, month navigation selecting an in-month business day, previous-project auto-fill across month boundaries, and saved non-holiday days with totals below or above `8h`.
+- Check calendar, list, and editor behavior for missing dates, projectless saved work, multiple work entries, mixed work and vacation days, future vacation/holiday drafts, vacation range saves with holidays and existing records, connected vacation saves and deletes across holidays, month navigation selecting an in-month business day, previous-project auto-fill across month boundaries, saved non-holiday days with totals below or above `8h`, and holiday API warning behavior.
