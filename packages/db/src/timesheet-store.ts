@@ -62,6 +62,20 @@ type ProjectRow = {
   name: string;
 };
 
+export type ProjectSummary = {
+  entryCount: number;
+  latestDateKey: string | null;
+  name: string;
+  totalHours: number;
+};
+
+type ProjectSummaryRow = {
+  entryCount: number | bigint | null;
+  latestDateKey: string | null;
+  name: string;
+  totalHours: number | null;
+};
+
 type HolidayFetchLogRow = {
   fetchedAt: string;
 };
@@ -561,4 +575,137 @@ export async function listProjects(params: { userId: string }) {
   );
 
   return projects.map((project) => project.name);
+}
+
+export async function listProjectSummaries(params: { userId: string }): Promise<ProjectSummary[]> {
+  await ensureTimesheetSchema();
+
+  const rows = await prisma.$queryRawUnsafe<ProjectSummaryRow[]>(
+    `WITH project_names AS (
+       SELECT trim("name") AS "name"
+       FROM "Project"
+       WHERE "userId" = ? AND trim("name") <> ''
+       UNION
+       SELECT trim("project") AS "name"
+       FROM "TimesheetEntry"
+       WHERE "userId" = ? AND "kind" = 'WORK' AND trim("project") <> ''
+     ),
+     work_summary AS (
+       SELECT trim("project") AS "name",
+              count(*) AS "entryCount",
+              coalesce(sum("hours"), 0) AS "totalHours",
+              max("dateKey") AS "latestDateKey"
+       FROM "TimesheetEntry"
+       WHERE "userId" = ? AND "kind" = 'WORK' AND trim("project") <> ''
+       GROUP BY trim("project")
+     )
+     SELECT project_names."name",
+            coalesce(work_summary."entryCount", 0) AS "entryCount",
+            coalesce(work_summary."totalHours", 0) AS "totalHours",
+            work_summary."latestDateKey"
+     FROM project_names
+     LEFT JOIN work_summary ON work_summary."name" = project_names."name"
+     ORDER BY work_summary."latestDateKey" IS NULL ASC, work_summary."latestDateKey" DESC, project_names."name" ASC`,
+    params.userId,
+    params.userId,
+    params.userId
+  );
+
+  return rows
+    .map((row) => ({
+      entryCount: Number(row.entryCount ?? 0),
+      latestDateKey: row.latestDateKey,
+      name: row.name,
+      totalHours: Number(row.totalHours ?? 0)
+    }))
+    .sort((left, right) => {
+      if (left.latestDateKey && right.latestDateKey && left.latestDateKey !== right.latestDateKey) {
+        return right.latestDateKey.localeCompare(left.latestDateKey);
+      }
+
+      if (left.latestDateKey && !right.latestDateKey) {
+        return -1;
+      }
+
+      if (!left.latestDateKey && right.latestDateKey) {
+        return 1;
+      }
+
+      return left.name.localeCompare(right.name, "ko-KR");
+    });
+}
+
+export async function renameProject(params: { fromName: string; toName: string; userId: string }): Promise<void> {
+  await ensureTimesheetSchema();
+
+  const fromName = params.fromName.trim();
+  const toName = params.toName.trim();
+
+  if (!fromName) {
+    throw new Error("변경할 프로젝트를 찾을 수 없습니다.");
+  }
+
+  if (!toName) {
+    throw new Error("프로젝트명을 입력해 주세요.");
+  }
+
+  if (fromName === toName) {
+    return;
+  }
+
+  await prisma.$transaction(async (transaction) => {
+    const duplicates = await transaction.$queryRawUnsafe<Array<{ name: string }>>(
+      `SELECT "name" FROM "Project" WHERE "userId" = ? AND trim("name") = ?
+       UNION
+       SELECT "project" AS "name" FROM "TimesheetEntry" WHERE "userId" = ? AND "kind" = 'WORK' AND trim("project") = ?
+       LIMIT 1`,
+      params.userId,
+      toName,
+      params.userId,
+      toName
+    );
+
+    if (duplicates.length > 0) {
+      throw new Error("이미 사용 중인 프로젝트명입니다.");
+    }
+
+    const existingProjects = await transaction.$queryRawUnsafe<Array<{ id: string }>>(
+      `SELECT "id" FROM "Project" WHERE "userId" = ? AND trim("name") = ? LIMIT 1`,
+      params.userId,
+      fromName
+    );
+    const existingEntries = await transaction.$queryRawUnsafe<Array<{ id: string }>>(
+      `SELECT "id" FROM "TimesheetEntry" WHERE "userId" = ? AND "kind" = 'WORK' AND trim("project") = ? LIMIT 1`,
+      params.userId,
+      fromName
+    );
+
+    if (existingProjects.length === 0 && existingEntries.length === 0) {
+      throw new Error("프로젝트를 찾을 수 없습니다.");
+    }
+
+    if (existingProjects.length > 0) {
+      await transaction.$executeRawUnsafe(
+        `UPDATE "Project" SET "name" = ?, "updatedAt" = CURRENT_TIMESTAMP WHERE "userId" = ? AND trim("name") = ?`,
+        toName,
+        params.userId,
+        fromName
+      );
+    } else {
+      await transaction.$executeRawUnsafe(
+        `INSERT INTO "Project" ("id", "userId", "name", "createdAt", "updatedAt")
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        randomUUID(),
+        params.userId,
+        toName
+      );
+    }
+
+    await transaction.$executeRawUnsafe(
+      `UPDATE "TimesheetEntry" SET "project" = ?, "updatedAt" = CURRENT_TIMESTAMP WHERE "userId" = ? AND "kind" = 'WORK' AND trim("project") = ?`,
+      toName,
+      params.userId,
+      fromName
+    );
+  });
 }

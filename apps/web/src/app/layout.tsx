@@ -21,6 +21,9 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
 
   return (
     <html lang="ko">
+      <head>
+        <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable.css" rel="stylesheet" />
+      </head>
       <body>
         <div className="flex min-h-screen flex-col">
           <div>{children}</div>

@@ -47,7 +47,6 @@ import {
   GripVertical,
   ListChecks,
   Plus,
-  LogOut,
   Trash2,
   ArrowDown,
   ArrowUp,
@@ -110,7 +109,6 @@ type TimesheetWorkspaceProps = {
   initialManagedUsers: ManagedUser[];
   initialMonthData: TimesheetMonthData;
   loadMonthAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
-  logoutAction: () => Promise<void>;
   resetAllHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   resetHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   saveEntryAction: (entry: TimesheetDayDraft) => Promise<TimesheetDayDraft>;
@@ -525,7 +523,6 @@ export function TimesheetWorkspace({
   initialManagedUsers,
   initialMonthData,
   loadMonthAction,
-  logoutAction,
   resetAllHolidayCacheAction,
   resetHolidayCacheAction,
   saveEntryAction,
@@ -1926,37 +1923,7 @@ export function TimesheetWorkspace({
   }
 
   return (
-    <main className="bg-slate-100">
-      <header className="border-b border-slate-200 bg-white/95 px-5 py-4 shadow-sm backdrop-blur">
-        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-md bg-slate-950 text-white">
-              <CalendarDays aria-hidden="true" className="size-5" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-slate-500">aJam</p>
-              <h1 className="text-xl font-bold text-slate-950">월간 업무 기록</h1>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <div className="hidden rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 sm:block">
-              <span className="font-semibold text-slate-950">{currentUser.username}</span> 계정
-            </div>
-            <Button className="h-9 px-3" onClick={openSettings} variant="secondary">
-              <Settings aria-hidden="true" className="size-4" />
-              설정
-            </Button>
-            <form action={logoutAction}>
-              <Button className="h-9 px-3" type="submit" variant="secondary">
-                <LogOut aria-hidden="true" className="size-4" />
-                로그아웃
-              </Button>
-            </form>
-          </div>
-        </div>
-      </header>
-
+    <>
       <div className="mx-auto grid max-w-[1600px] gap-4 px-4 pb-0 pt-4 lg:grid-cols-[minmax(680px,1fr)_420px] xl:grid-cols-[minmax(760px,1fr)_460px]">
         <section className="min-w-0 rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
@@ -1979,6 +1946,10 @@ export function TimesheetWorkspace({
               <Button className="h-9 px-3" onClick={goToday} variant="secondary">
                 <TimerReset aria-hidden="true" className="size-4" />
                 오늘
+              </Button>
+              <Button className="h-9 px-3" onClick={openSettings} variant="secondary">
+                <Settings aria-hidden="true" className="size-4" />
+                설정
               </Button>
               <SegmentedControl
                 items={[
@@ -2448,7 +2419,7 @@ export function TimesheetWorkspace({
           </div>
         </ModalShell>
       ) : null}
-    </main>
+    </>
   );
 }
 

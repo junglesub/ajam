@@ -11,7 +11,6 @@ import {
   deleteTimesheetEntryAction,
   findPreviousProjectAction,
   loadTimesheetMonthAction,
-  logoutAction,
   resetAllHolidayCacheAction,
   resetHolidayCacheAction,
   saveHolidayApiKeyAction,
@@ -56,7 +55,6 @@ export default async function TimesheetPage() {
       initialManagedUsers={managedUsers}
       initialMonthData={initialMonthData}
       loadMonthAction={loadTimesheetMonthAction}
-      logoutAction={logoutAction}
       resetAllHolidayCacheAction={resetAllHolidayCacheAction}
       resetHolidayCacheAction={resetHolidayCacheAction}
       saveEntryAction={saveTimesheetEntryAction}

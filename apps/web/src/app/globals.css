@@ -3,7 +3,7 @@
 @source "../../../../packages/ui/src/**/*.{ts,tsx}";
 
 @theme {
-  --font-sans: "Inter", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-sans: "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
 }
 
 :root {
