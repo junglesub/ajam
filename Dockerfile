@@ -49,10 +49,15 @@ RUN apt-get update \
   && mkdir -p /data \
   && chown -R node:node /data
 
-COPY --from=build --chown=node:node /app /app
+COPY --from=build --chown=node:node /app/apps/web/.next/standalone ./
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
+COPY --from=build --chown=node:node /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build --chown=node:node /app/apps/web/public ./apps/web/public
+COPY --from=build --chown=node:node /app/packages/db ./packages/db
 
 USER node
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "pnpm db:seed && pnpm --filter @timesheet/web start"]
+CMD ["sh", "-c", "pnpm db:seed && node apps/web/server.js"]
