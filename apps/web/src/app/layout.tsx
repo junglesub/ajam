@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   },
   title: {
     default: "aJam",
-    template: "%s | aJam"
+    template: "%s - aJam"
   }
 };
 
