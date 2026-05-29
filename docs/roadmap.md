@@ -35,7 +35,12 @@ Status: Done.
 
 - 한국어 업무 내용의 영어 번역 생성
 - 짧은 버전 자동 요약
-- 날짜별 생성과 월 단위 일괄 생성
+- 월말 AI 정리 탭 추가
+- 월별 업무 기록 JSON 내보내기
+- LLM 복붙용 엄격한 JSON 변환 프롬프트 제공
+- LLM 결과 JSON 붙여넣기와 미리보기
+- 업무 entry별 `aiTranslation` 및 날짜별 `shortVersion` 일괄 적용
+- 추가 수정 요청 프롬프트로 결과 재생성 지원
 - 사용자 수정본 보존
 
 ## Phase 5 - Jamis Extension

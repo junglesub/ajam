@@ -56,6 +56,16 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - Clicking an entry row selects that date and entry in the right editor.
 - Saved non-holiday rows whose total hours are not `8h` show the same orange timer icon as the calendar view.
 
+## Month-End AI Summary
+
+- The app will provide a separate `AI 월말 정리` tab for monthly report preparation.
+- The tab exports the selected month as JSON for use with an external LLM.
+- The LLM prompt must require valid JSON only, preserve the original structure, and allow changes only to work-entry `aiTranslation` and day-level `shortVersion`.
+- Imported JSON is previewed before it is applied to the calendar/list data.
+- Import validation rejects changed IDs, dates, entry kinds, project names, hours, Korean content, vacation entries, and holiday entries.
+- Vacation-only and holiday-only days do not receive work summaries.
+- A revision prompt lets the user rerun the LLM with extra style instructions while preserving the same JSON rules.
+
 ## Holiday API
 
 - data.go.kr holiday loading failures do not break the whole timesheet page.
