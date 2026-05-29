@@ -25,7 +25,7 @@ export default async function AppLayout({ children }: Readonly<{ children: React
   }
 
   return (
-    <main className="min-h-screen bg-slate-100">
+    <main className="min-h-full bg-slate-100">
       <header className="border-b border-slate-200 bg-white/95 px-5 py-4 shadow-sm backdrop-blur">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-4">
           <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-3">
