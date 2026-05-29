@@ -224,42 +224,57 @@ function getEntryId(entry: Pick<MonthlyAiSummaryEntry, "clientId" | "id">): stri
 }
 
 export function buildMonthlyAiSummaryPrompt(): string {
-  return `You are helping prepare a concise English month-end work summary.
+  return `You are helping me prepare a concise English monthly work report.
 
-Return only valid JSON. Do not include Markdown, code fences, comments, or explanations.
+I will provide a JSON export of my monthly timesheet.
+Return ONLY valid JSON. Do not include Markdown, comments, explanations, or extra text.
 
-Rules:
-1. Preserve the exact JSON object shape and all existing fields.
-2. Only modify WORK entry aiTranslation values and day shortVersion values.
-3. Do not change schemaVersion, month, dateKey, holidayName, IDs, clientId, kind, project, content, hours, sortOrder, or vacationName.
-4. For each WORK entry, write concise, professional English in aiTranslation.
-5. For each day with one or more WORK entries, write a concise English shortVersion that summarizes the day.
-6. Keep VACATION and HOLIDAY entry aiTranslation values empty.
-7. Do not set shortVersion for days without WORK entries.
-8. Do not invent unsupported facts.
-9. The response must be parseable by JSON.parse.
+Your task:
+1. Preserve the exact JSON structure.
+2. Do not change any IDs, dateKey values, kind values, project names, hours, vacation entries, holiday entries, or Korean source content.
+3. For each WORK entry, fill or rewrite aiTranslation in concise, natural English.
+4. For each day that has one or more WORK entries, fill shortVersion with a short English summary for calendar display.
+5. Keep all English suitable for a professional monthly report.
+6. Keep translations brief, context-aware, and polished.
+7. If the Korean content is vague, infer the most likely business meaning from the project name and nearby entries, but do not invent specific facts.
+8. If a WORK entry has empty content, set aiTranslation to an empty string unless the project name alone clearly indicates the work.
+9. For VACATION and HOLIDAY entries, keep aiTranslation empty and do not create a work summary from them.
+10. Use past-tense or noun-phrase style consistently, such as:
+    - "Implemented user login flow."
+    - "Updated monthly timesheet UI."
+    - "Reviewed deployment configuration."
+11. shortVersion must be shorter than aiTranslation and should summarize the day, not repeat every detail.
+12. If a day has multiple WORK entries, shortVersion should summarize the combined work in one concise sentence or phrase.
 
-JSON:
+Output requirements:
+- Return the full JSON object.
+- The output must be parseable by JSON.parse.
+- Keep all existing fields.
+- Only modify aiTranslation and shortVersion.
+- Do not wrap the JSON in code fences.
+
+Here is the JSON export:
+
 [PASTE_JSON_HERE]`;
 }
 
 export function buildMonthlyAiSummaryRevisionPrompt(): string {
-  return `Revise the English fields in this timesheet JSON according to the instruction.
+  return `Revise the English fields in this timesheet JSON according to my instruction.
 
 Instruction:
 [WRITE_REVISION_REQUEST_HERE]
 
-Return only valid JSON. Do not include Markdown, code fences, comments, or explanations.
-
 Rules:
-1. Preserve the exact JSON object shape and all existing fields.
-2. Only modify WORK entry aiTranslation values and day shortVersion values.
-3. Do not change schemaVersion, month, dateKey, holidayName, IDs, clientId, kind, project, content, hours, sortOrder, or vacationName.
-4. Keep VACATION and HOLIDAY entry aiTranslation values empty.
-5. Do not set shortVersion for days without WORK entries.
-6. Do not invent unsupported facts.
-7. The response must be parseable by JSON.parse.
+1. Return ONLY valid JSON.
+2. Preserve the exact JSON structure.
+3. Do not change IDs, dateKey values, kind values, project names, hours, Korean content, vacation entries, or holiday entries.
+4. Only modify aiTranslation and shortVersion.
+5. Keep the English concise, professional, context-aware, and suitable for a monthly report.
+6. Do not invent specific facts that are not supported by the Korean source content or project name.
+7. The output must be parseable by JSON.parse.
+8. Do not include Markdown, comments, explanations, or code fences.
 
 Current JSON:
+
 [PASTE_CURRENT_JSON_HERE]`;
 }

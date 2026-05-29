@@ -113,6 +113,20 @@ describe("monthly AI summary export", () => {
     assert.match(buildMonthlyAiSummaryRevisionPrompt(), /\[WRITE_REVISION_REQUEST_HERE\]/);
     assert.match(buildMonthlyAiSummaryRevisionPrompt(), /\[PASTE_CURRENT_JSON_HERE\]/);
   });
+
+  it("builds prompts with the required strict report guidance", () => {
+    const prompt = buildMonthlyAiSummaryPrompt();
+    const revisionPrompt = buildMonthlyAiSummaryRevisionPrompt();
+
+    assert.match(prompt, /monthly work report/);
+    assert.match(prompt, /If the Korean content is vague/);
+    assert.match(prompt, /If a WORK entry has empty content/);
+    assert.match(prompt, /Implemented user login flow/);
+    assert.match(prompt, /shortVersion must be shorter/);
+    assert.match(prompt, /Do not wrap the JSON in code fences/);
+    assert.match(revisionPrompt, /Do not invent specific facts/);
+    assert.match(revisionPrompt, /Do not include Markdown, comments, explanations, or code fences/);
+  });
 });
 
 describe("monthly AI summary import validation", () => {
