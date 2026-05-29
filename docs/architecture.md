@@ -7,6 +7,7 @@
 - `apps/web`: Next.js App Router 기반 웹 앱
 - `packages/db`: Prisma, SQLite, schema bootstrap, seed, 서버 전용 DB 유틸
 - `packages/domain`: 날짜, 상태, 업무 기록 도메인 타입과 순수 함수
+- `packages/n8n-nodes-ajam`: aJam 내부 자동화 API를 n8n action으로 노출하는 custom node package
 - `packages/ui`: Tailwind 기반 공통 UI 컴포넌트
 - `docs`: 제품/구현 결정과 후속 작업 기록
 
@@ -14,6 +15,7 @@
 
 - `User`는 SQLite에 저장한다.
 - `User.role`은 `ADMIN` 또는 `USER` 문자열로 관리한다.
+- `User.email`은 업무 기록 리마인더 수신 주소로 사용하며 비어 있으면 리마인더 대상에서 제외한다.
 - seed는 ADMIN 권한 사용자가 없을 때만 최초 `admin` 관리자를 생성한다. 관리자가 username을 바꾼 뒤에도 ADMIN 사용자가 존재하면 새 `admin` 계정을 다시 만들지 않는다.
 - 비밀번호는 scrypt 해시로 저장한다.
 - 로그인 성공 시 httpOnly signed cookie를 발급한다.
@@ -36,6 +38,7 @@
 - `HolidayFetchLog`: `getRestDeInfo` 월별 조회 여부를 저장해 같은 월을 반복 fetch하지 않게 한다.
 - `Vacation`: 사용자별 휴가 날짜, 이름, 시간을 저장한다. 업무 기록을 휴가로 저장하면 같은 날짜의 휴가 레코드가 동기화된다.
 - `AppSetting`: 공공데이터포털 서비스 키 같은 앱 설정값을 저장한다.
+- `ReminderLog`: 사용자별 날짜와 리마인더 유형의 발송 기록을 저장해 n8n 재시도나 중복 실행 시 같은 리마인더가 반복 발송되지 않게 한다.
 
 ## Holiday Sync
 
@@ -43,6 +46,16 @@
 - 앱은 월 데이터가 필요할 때 해당 월의 `HolidayFetchLog`가 없고 서비스 키가 있을 경우에만 `getRestDeInfo`를 호출한다.
 - 조회된 공휴일은 `Holiday`에 저장하고, fetch 완료 월은 `HolidayFetchLog`에 기록한다.
 - 관리자는 설정에서 현재 표시 중인 월의 공휴일 캐시를 리셋할 수 있다.
+
+## Reminders And n8n
+
+- aJam은 내부 API `POST /api/internal/reminders/daily-timesheet`로 당일 업무 기록 미작성 사용자를 계산한다.
+- 내부 API는 `AJAM_INTERNAL_API_TOKEN` bearer token으로 보호한다.
+- 날짜가 전달되지 않으면 `Asia/Seoul` 기준 오늘을 사용한다.
+- 주말, 공휴일, 휴가-only, 수동 공휴일 entry는 리마인더 대상에서 제외한다.
+- 업무 entry가 있어도 내용이 비어 있으면 미작성으로 본다.
+- n8n은 `packages/n8n-nodes-ajam` custom node package의 `aJam` node를 통해 대상 조회와 발송 기록 API를 호출한다.
+- 퇴근시간 스케줄과 실제 이메일 발송은 n8n workflow가 담당한다.
 
 ## Data Flow
 
@@ -58,9 +71,10 @@
 
 - `Dockerfile`은 Next.js 앱을 빌드하고 production 서버를 실행한다.
 - `docker-compose.example.yml`은 GHCR `ghcr.io/junglesub/ajam:latest` 이미지를 사용하고 SQLite 파일을 서버의 `./ajam-data`에 둔다.
+- GitHub Actions는 `main` 브랜치 push 검증 성공 후 GHCR에 `latest`, commit SHA, `v<run-number>-<yymmdd>` 태그를 push한다.
 - 컨테이너 시작 시 `pnpm db:seed`로 스키마와 초기 관리자 계정을 보장한다.
 - `SESSION_SECRET`은 선택값이다. 지정하면 세션 서명에 사용하고, 지정하지 않으면 앱이 랜덤 값을 생성해 DB `AppSetting`에 저장한 뒤 재사용한다.
 
 ## CI
 
-검증 기준은 install, lint, typecheck, build이다. Docker image push 자동화는 아직 연결하지 않았다.
+검증 기준은 install, lint, typecheck, build이다. `main` 브랜치 push에서는 검증 성공 후 Docker image를 GHCR에 publish한다.

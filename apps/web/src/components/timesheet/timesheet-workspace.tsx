@@ -63,6 +63,7 @@ type ViewMode = "calendar" | "list";
 type UserRole = "ADMIN" | "USER";
 
 type ManagedUser = {
+  email: string;
   id: string;
   role: UserRole;
   username: string;
@@ -101,7 +102,7 @@ type ConnectedVacationAction = "delete" | "save";
 
 type TimesheetWorkspaceProps = {
   addProjectAction: (name: string) => Promise<string>;
-  createUserAction: (params: { password: string; role: UserRole; username: string }) => Promise<ManagedUser>;
+  createUserAction: (params: { email?: string; password: string; role: UserRole; username: string }) => Promise<ManagedUser>;
   currentUser: ManagedUser;
   deleteEntryAction: (dateKey: string) => Promise<void>;
   findPreviousProjectAction: (dateKey: string) => Promise<string>;
@@ -114,7 +115,7 @@ type TimesheetWorkspaceProps = {
   saveEntryAction: (entry: TimesheetDayDraft) => Promise<TimesheetDayDraft>;
   saveHolidayApiKeyAction: (serviceKey: string) => Promise<void>;
   testHolidayApiKeyAction: (serviceKey: string, year: number, monthIndex: number) => Promise<HolidayApiKeyTestResult>;
-  updateProfileAction: (params: { password?: string; username: string }) => Promise<ManagedUser>;
+  updateProfileAction: (params: { email?: string; password?: string; username: string }) => Promise<ManagedUser>;
 };
 
 const weekdays = ["월", "화", "수", "목", "금"];
@@ -563,6 +564,7 @@ export function TimesheetWorkspace({
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [profileUsername, setProfileUsername] = useState(initialCurrentUser.username);
+  const [profileEmail, setProfileEmail] = useState(initialCurrentUser.email);
   const [profilePassword, setProfilePassword] = useState("");
   const [profileState, setProfileState] = useState<SettingsSaveState>("idle");
   const [profileError, setProfileError] = useState("");
@@ -582,6 +584,7 @@ export function TimesheetWorkspace({
   const [holidayResetError, setHolidayResetError] = useState("");
   const [managedUsers, setManagedUsers] = useState(initialManagedUsers);
   const [newUserUsername, setNewUserUsername] = useState("");
+  const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserPassword, setNewUserPassword] = useState("");
   const [newUserRole, setNewUserRole] = useState<UserRole>("USER");
   const [userCreateState, setUserCreateState] = useState<SettingsSaveState>("idle");
@@ -1731,6 +1734,7 @@ export function TimesheetWorkspace({
 
   function openSettings() {
     setProfileUsername(currentUser.username);
+    setProfileEmail(currentUser.email);
     setProfilePassword("");
     setProfileState("idle");
     setProfileError("");
@@ -1751,6 +1755,7 @@ export function TimesheetWorkspace({
 
     try {
       const updatedUser = await updateProfileAction({
+        email: profileEmail,
         password: profilePassword || undefined,
         username: profileUsername
       });
@@ -1799,6 +1804,7 @@ export function TimesheetWorkspace({
 
     try {
       const user = await createUserAction({
+        email: newUserEmail,
         password: newUserPassword,
         role: newUserRole,
         username: newUserUsername
@@ -1806,6 +1812,7 @@ export function TimesheetWorkspace({
 
       setManagedUsers((current) => [...current, user].sort((left, right) => left.username.localeCompare(right.username, "ko-KR")));
       setNewUserUsername("");
+      setNewUserEmail("");
       setNewUserPassword("");
       setNewUserRole("USER");
       setUserCreateState("saved");
@@ -2154,13 +2161,16 @@ export function TimesheetWorkspace({
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h3 className="text-sm font-bold text-slate-950">유저 설정</h3>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">아이디와 비밀번호를 변경합니다.</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">아이디, 이메일, 비밀번호를 변경합니다.</p>
                 </div>
                 <Badge tone={isAdmin ? "green" : "gray"}>{isAdmin ? "관리자" : "일반"}</Badge>
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <Field label="아이디">
                   <Input onChange={(event) => setProfileUsername(event.target.value)} value={profileUsername} />
+                </Field>
+                <Field label="이메일">
+                  <Input autoComplete="email" onChange={(event) => setProfileEmail(event.target.value)} placeholder="reminder@example.com" type="email" value={profileEmail} />
                 </Field>
                 <Field label="새 비밀번호">
                   <Input autoComplete="new-password" onChange={(event) => setProfilePassword(event.target.value)} placeholder="변경 시에만 입력" type="password" value={profilePassword} />
@@ -2231,14 +2241,20 @@ export function TimesheetWorkspace({
                 <div className="mt-3 divide-y divide-slate-100 rounded-md border border-slate-200 bg-slate-50">
                   {managedUsers.map((user) => (
                     <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm" key={user.id}>
-                      <span className="font-semibold text-slate-950">{user.username}</span>
+                      <div className="min-w-0">
+                        <span className="block truncate font-semibold text-slate-950">{user.username}</span>
+                        <span className="block truncate text-xs font-medium text-slate-500">{user.email || "이메일 없음"}</span>
+                      </div>
                       <Badge tone={user.role === "ADMIN" ? "green" : "gray"}>{user.role === "ADMIN" ? "관리자" : "일반"}</Badge>
                     </div>
                   ))}
                 </div>
-                <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_120px]">
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <Field label="아이디">
                     <Input onChange={(event) => setNewUserUsername(event.target.value)} value={newUserUsername} />
+                  </Field>
+                  <Field label="이메일">
+                    <Input autoComplete="email" onChange={(event) => setNewUserEmail(event.target.value)} placeholder="reminder@example.com" type="email" value={newUserEmail} />
                   </Field>
                   <Field label="비밀번호">
                     <Input autoComplete="new-password" onChange={(event) => setNewUserPassword(event.target.value)} type="password" value={newUserPassword} />

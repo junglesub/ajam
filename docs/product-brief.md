@@ -10,6 +10,7 @@
 - 관리자/일반 사용자 역할
 - 사용자 아이디/비밀번호 변경
 - 관리자 사용자 추가
+- 사용자별 이메일 저장
 - 브라우저 timezone 기준 오늘 날짜 선택
 - 주말을 제외한 월간 캘린더/리스트 화면
 - 날짜별 프로젝트, 근무 시간, 내용, 영문 번역본, 짧은 버전 입력 UI
@@ -19,6 +20,9 @@
 - 공휴일 월별 캐시와 관리자 리셋
 - 휴가 유형 저장과 휴가/공휴일/업무 상태 표시
 - Docker Compose 기반 단일 컨테이너 배포 예시
+- n8n 연동용 업무 기록 미작성 리마인더 API
+- n8n custom node package
+- GHCR Docker image 자동 publish
 
 ## Not In Current Scope
 
@@ -26,7 +30,6 @@
 - 휴가 관리/승인 시스템 연동
 - AI 번역/요약 자동 생성
 - Jamis 자동 입력 Chrome extension
-- Docker image registry push 자동화
 
 ## UX Principles
 

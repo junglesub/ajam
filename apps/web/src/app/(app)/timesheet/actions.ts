@@ -292,9 +292,9 @@ export async function testHolidayApiKeyAction(serviceKey: string, year: number, 
   };
 }
 
-export async function updateProfileAction(params: { password?: string; username: string }): Promise<ManagedUser> {
+export async function updateProfileAction(params: { email?: string; password?: string; username: string }): Promise<ManagedUser> {
   const user = await requireSession();
-  const updatedUser = await updateManagedUser({ password: params.password, userId: user.id, username: params.username });
+  const updatedUser = await updateManagedUser({ email: params.email, password: params.password, userId: user.id, username: params.username });
 
   await createSession({
     role: updatedUser.role,
@@ -305,7 +305,7 @@ export async function updateProfileAction(params: { password?: string; username:
   return updatedUser;
 }
 
-export async function createUserAction(params: { password: string; role: UserRole; username: string }): Promise<ManagedUser> {
+export async function createUserAction(params: { email?: string; password: string; role: UserRole; username: string }): Promise<ManagedUser> {
   await requireAdmin();
 
   return createManagedUser(params);

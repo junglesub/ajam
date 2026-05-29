@@ -6,12 +6,14 @@ import { hashPassword } from "./password";
 export type UserRole = "ADMIN" | "USER";
 
 export type ManagedUser = {
+  email: string;
   id: string;
   role: UserRole;
   username: string;
 };
 
 type UserRow = {
+  email: string;
   id: string;
   role: string;
   username: string;
@@ -29,6 +31,7 @@ function normalizeRole(role: string | undefined): UserRole {
 
 function mapUser(row: UserRow): ManagedUser {
   return {
+    email: row.email,
     id: row.id,
     role: normalizeRole(row.role),
     username: row.username
@@ -43,6 +46,7 @@ export async function ensureApplicationSchema() {
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "User" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "username" TEXT NOT NULL,
+    "email" TEXT NOT NULL DEFAULT '',
     "passwordHash" TEXT NOT NULL,
     "role" TEXT NOT NULL DEFAULT 'USER',
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -52,11 +56,17 @@ export async function ensureApplicationSchema() {
 
   const userColumns = await prisma.$queryRawUnsafe<Array<{ name: string }>>(`PRAGMA table_info("User")`);
   const hasRole = userColumns.some((column) => column.name === "role");
+  const hasEmail = userColumns.some((column) => column.name === "email");
 
   if (!hasRole) {
     await prisma.$executeRawUnsafe(`ALTER TABLE "User" ADD COLUMN "role" TEXT NOT NULL DEFAULT 'USER'`);
     await prisma.$executeRawUnsafe(`UPDATE "User" SET "role" = 'ADMIN' WHERE "username" = 'admin'`);
   }
+
+  if (!hasEmail) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "User" ADD COLUMN "email" TEXT NOT NULL DEFAULT ''`);
+  }
+  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "User_email_key" ON "User"("email") WHERE trim("email") <> ''`);
 
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "AppSetting" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -94,7 +104,7 @@ export async function setAppSetting(key: string, value: string) {
 export async function getManagedUser(userId: string): Promise<ManagedUser | null> {
   await ensureApplicationSchema();
 
-  const rows = await prisma.$queryRawUnsafe<UserRow[]>(`SELECT "id", "username", "role" FROM "User" WHERE "id" = ? LIMIT 1`, userId);
+  const rows = await prisma.$queryRawUnsafe<UserRow[]>(`SELECT "id", "username", "email", "role" FROM "User" WHERE "id" = ? LIMIT 1`, userId);
 
   return rows[0] ? mapUser(rows[0]) : null;
 }
@@ -102,19 +112,31 @@ export async function getManagedUser(userId: string): Promise<ManagedUser | null
 export async function listManagedUsers(): Promise<ManagedUser[]> {
   await ensureApplicationSchema();
 
-  const rows = await prisma.$queryRawUnsafe<UserRow[]>(`SELECT "id", "username", "role" FROM "User" ORDER BY "username" ASC`);
+  const rows = await prisma.$queryRawUnsafe<UserRow[]>(`SELECT "id", "username", "email", "role" FROM "User" ORDER BY "username" ASC`);
 
   return rows.map(mapUser);
 }
 
-export async function updateManagedUser(params: { password?: string; userId: string; username: string }): Promise<ManagedUser> {
+function normalizeEmail(email: string | undefined): string {
+  return email?.trim().toLowerCase() ?? "";
+}
+
+function assertValidEmail(email: string) {
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("이메일 형식이 올바르지 않습니다.");
+  }
+}
+
+export async function updateManagedUser(params: { email?: string; password?: string; userId: string; username: string }): Promise<ManagedUser> {
   await ensureApplicationSchema();
 
   const username = params.username.trim();
+  const email = normalizeEmail(params.email);
 
   if (!username) {
     throw new Error("아이디를 입력해 주세요.");
   }
+  assertValidEmail(email);
 
   const duplicates = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
     `SELECT "id" FROM "User" WHERE "username" = ? AND "id" <> ? LIMIT 1`,
@@ -126,17 +148,30 @@ export async function updateManagedUser(params: { password?: string; userId: str
     throw new Error("이미 사용 중인 아이디입니다.");
   }
 
+  if (email) {
+    const emailDuplicates = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+      `SELECT "id" FROM "User" WHERE trim("email") = ? AND "id" <> ? LIMIT 1`,
+      email,
+      params.userId
+    );
+
+    if (emailDuplicates.length > 0) {
+      throw new Error("이미 사용 중인 이메일입니다.");
+    }
+  }
+
   const password = params.password?.trim();
 
   if (password) {
     await prisma.$executeRawUnsafe(
-      `UPDATE "User" SET "username" = ?, "passwordHash" = ?, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = ?`,
+      `UPDATE "User" SET "username" = ?, "email" = ?, "passwordHash" = ?, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = ?`,
       username,
+      email,
       hashPassword(password),
       params.userId
     );
   } else {
-    await prisma.$executeRawUnsafe(`UPDATE "User" SET "username" = ?, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = ?`, username, params.userId);
+    await prisma.$executeRawUnsafe(`UPDATE "User" SET "username" = ?, "email" = ?, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = ?`, username, email, params.userId);
   }
 
   const user = await getManagedUser(params.userId);
@@ -148,16 +183,18 @@ export async function updateManagedUser(params: { password?: string; userId: str
   return user;
 }
 
-export async function createManagedUser(params: { password: string; role: UserRole; username: string }): Promise<ManagedUser> {
+export async function createManagedUser(params: { email?: string; password: string; role: UserRole; username: string }): Promise<ManagedUser> {
   await ensureApplicationSchema();
 
   const username = params.username.trim();
+  const email = normalizeEmail(params.email);
   const password = params.password.trim();
   const role = normalizeRole(params.role);
 
   if (!username || !password) {
     throw new Error("아이디와 비밀번호를 입력해 주세요.");
   }
+  assertValidEmail(email);
 
   const existing = await prisma.$queryRawUnsafe<Array<{ id: string }>>(`SELECT "id" FROM "User" WHERE "username" = ? LIMIT 1`, username);
 
@@ -165,13 +202,22 @@ export async function createManagedUser(params: { password: string; role: UserRo
     throw new Error("이미 사용 중인 아이디입니다.");
   }
 
+  if (email) {
+    const existingEmail = await prisma.$queryRawUnsafe<Array<{ id: string }>>(`SELECT "id" FROM "User" WHERE trim("email") = ? LIMIT 1`, email);
+
+    if (existingEmail.length > 0) {
+      throw new Error("이미 사용 중인 이메일입니다.");
+    }
+  }
+
   const id = randomUUID();
 
   await prisma.$executeRawUnsafe(
-    `INSERT INTO "User" ("id", "username", "passwordHash", "role", "createdAt", "updatedAt")
-     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    `INSERT INTO "User" ("id", "username", "email", "passwordHash", "role", "createdAt", "updatedAt")
+     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
     id,
     username,
+    email,
     hashPassword(password),
     role
   );

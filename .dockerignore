@@ -18,5 +18,6 @@ Thumbs.db
 .env.*
 README.md
 docs
+packages/n8n-nodes-ajam
 packages/db/prisma/*.db
 packages/db/prisma/*.db-*

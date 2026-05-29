@@ -10,6 +10,7 @@
 - 날짜별 업무/휴가/공휴일 기록 저장
 - 한국 공휴일 `getRestDeInfo` 조회, 월별 캐시, 관리자 리셋
 - 사용자 계정 설정과 관리자 사용자 추가
+- 사용자 이메일 저장과 n8n 업무 기록 리마인더 연동
 - 공공데이터포털 서비스 키를 관리자 설정에서 저장/테스트
 
 ## 로컬 시작
@@ -26,7 +27,15 @@ pnpm dev
 
 ## 배포 예시
 
-GitHub Actions가 `main` 브랜치 push 시 GHCR에 이미지를 publish합니다. 서버에서는 `docker-compose.example.yml`을 복사하고 `ghcr.io/junglesub/ajam:latest` 이미지를 사용해 실행합니다.
+GitHub Actions가 `main` 브랜치 push 시 검증 후 GHCR에 Docker 이미지를 publish합니다.
+
+Published tags:
+
+- `ghcr.io/junglesub/ajam:latest`
+- `ghcr.io/junglesub/ajam:<commit-sha>`
+- `ghcr.io/junglesub/ajam:v<github-run-number>-<yymmdd>`
+
+서버에서는 `docker-compose.example.yml`을 복사하고 `ghcr.io/junglesub/ajam:latest` 이미지를 사용해 실행합니다.
 
 ```bash
 cp docker-compose.example.yml docker-compose.yml
@@ -45,14 +54,35 @@ docker compose up -d
 | `NODE_ENV` | 선택 | 실행 환경 기준 | `production`이면 세션 쿠키에 secure 옵션을 적용합니다. |
 | `PORT` | 선택 | `3000` | Next.js 서버 포트입니다. |
 | `HOSTNAME` | 선택 | `0.0.0.0` in Docker | 서버 bind 주소입니다. |
+| `AJAM_INTERNAL_API_TOKEN` | n8n 리마인더 사용 시 필수 | 없음 | n8n custom node가 내부 리마인더 API를 호출할 때 사용하는 bearer token입니다. |
 
 공공데이터포털 서비스 키는 환경변수가 아니라 관리자 설정 화면에서 저장합니다.
+
+## n8n custom node 설치
+
+aJam 자동화를 위한 n8n custom node package는 `packages/n8n-nodes-ajam`에 있습니다. 현재 제공 액션은 업무 기록 미작성 대상 조회와 리마인더 발송 기록입니다.
+
+```bash
+pnpm --filter n8n-nodes-ajam build
+pnpm --filter n8n-nodes-ajam pack --pack-destination ../../dist
+```
+
+n8n 서버의 custom extensions 디렉터리에 package를 설치합니다. 전역 설치가 아니라 n8n custom 디렉터리 안에 설치합니다.
+
+```bash
+mkdir -p ~/.n8n/custom
+cd ~/.n8n/custom
+pnpm add /path/to/ajam/dist/n8n-nodes-ajam-0.1.0.tgz
+```
+
+n8n을 재시작한 뒤 `aJam API` credential을 만들고 `aJam` node를 workflow에 추가합니다. 자세한 내용은 `docs/n8n-custom-node.md`와 `docs/reminders-n8n.md`를 확인하세요.
 
 ## 구조
 
 - `apps/web`: Next.js 웹 앱
 - `packages/db`: Prisma + SQLite, schema bootstrap, seed, 서버 전용 DB 유틸
 - `packages/domain`: 날짜/상태/업무 기록 도메인 규칙
+- `packages/n8n-nodes-ajam`: n8n custom node package
 - `packages/ui`: 공통 UI 컴포넌트
 - `docs`: 제품과 구현 결정 문서
 

@@ -1,0 +1,36 @@
+{
+  "name": "n8n-nodes-ajam",
+  "version": "0.1.0",
+  "description": "n8n community nodes for aJam automation.",
+  "license": "MIT",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/nodes/Ajam/Ajam.node.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "keywords": [
+    "n8n-community-node-package",
+    "n8n",
+    "ajam",
+    "timesheet"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/AjamApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/Ajam/Ajam.node.js"
+    ]
+  },
+  "devDependencies": {
+    "n8n-core": "^1.0.0",
+    "n8n-workflow": "^1.0.0",
+    "typescript": "^5.9.3"
+  }
+}

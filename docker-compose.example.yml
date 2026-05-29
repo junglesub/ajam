@@ -10,5 +10,7 @@ services:
       PORT: 3000
       HOSTNAME: 0.0.0.0
       DATABASE_URL: file:/data/timesheet.db
+      # Set this when using the n8n aJam custom node.
+      # AJAM_INTERNAL_API_TOKEN: change-this-token-for-n8n
     volumes:
       - ./ajam-data:/data
