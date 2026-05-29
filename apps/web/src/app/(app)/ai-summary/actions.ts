@@ -12,7 +12,7 @@ import {
   listProjects,
   listTimesheetEntries,
   listVacations,
-  saveTimesheetDay,
+  saveTimesheetDays,
   type StoredTimesheetDraft,
   type StoredTimesheetEntry
 } from "@timesheet/db";
@@ -144,44 +144,78 @@ export async function loadMonthlyAiSummaryAction(year: number, monthIndex: numbe
 }
 
 export async function applyMonthlyAiSummaryAction(params: {
+  baseline: MonthlyAiSummaryPayload;
   imported: MonthlyAiSummaryPayload;
   monthIndex: number;
   year: number;
 }): Promise<MonthlyAiSummaryApplyResult> {
   const user = await requireSession();
   const { days, month } = await loadMonthData({ monthIndex: params.monthIndex, userId: user.id, year: params.year });
-  const baseline = buildMonthlyAiSummaryExport({ days, month });
-  const validation = validateMonthlyAiSummaryImport({ baseline, imported: params.imported });
+  const currentPayload = buildMonthlyAiSummaryExport({ days, month });
+  const baselineValidation = validateMonthlyAiSummaryImport({ baseline: currentPayload, imported: params.baseline });
+
+  if (baselineValidation.errors.length > 0) {
+    throw new Error(baselineValidation.errors[0]);
+  }
+
+  const validation = validateMonthlyAiSummaryImport({ baseline: params.baseline, imported: params.imported });
 
   if (validation.errors.length > 0) {
     throw new Error(validation.errors[0]);
   }
 
-  const patches = getMonthlyAiSummaryPatches({ baseline, imported: params.imported });
+  const patches = getMonthlyAiSummaryPatches({ baseline: params.baseline, imported: params.imported });
   const daysByDate = new Map(days.map((day) => [day.dateKey, day]));
+  const baselineDaysByDate = new Map(params.baseline.days.map((day) => [day.dateKey, day]));
+  const currentDaysByDate = new Map(currentPayload.days.map((day) => [day.dateKey, day]));
+  const patchedDays: StoredTimesheetDraft[] = [];
 
   for (const patch of patches) {
     const day = daysByDate.get(patch.dateKey);
+    const baselineDay = baselineDaysByDate.get(patch.dateKey);
+    const currentDay = currentDaysByDate.get(patch.dateKey);
 
-    if (!day) {
+    if (!day || !baselineDay || !currentDay) {
       throw new Error(`${patch.dateKey} 기록을 찾을 수 없습니다.`);
     }
 
-    await saveTimesheetDay({
-      day: {
-        ...day,
-        shortVersion: patch.shortVersion,
-        entries: day.entries.map((entry) => {
-          const patchedEntry = patch.entries.find((candidate) => candidate.id === (entry.id || entry.clientId));
+    const shortVersionChanged = patch.shortVersion !== baselineDay.shortVersion;
 
-          return patchedEntry ? { ...entry, aiTranslation: patchedEntry.aiTranslation } : entry;
-        })
-      },
-      userId: user.id
+    if (shortVersionChanged && currentDay.shortVersion !== baselineDay.shortVersion) {
+      throw new Error(`${patch.dateKey} shortVersion has changed since this JSON was exported. Reload the month and reapply the import.`);
+    }
+
+    for (const patchedEntry of patch.entries) {
+      const baselineEntry = baselineDay.entries.find((entry) => getEntryId(entry) === patchedEntry.id);
+      const currentEntry = currentDay.entries.find((entry) => getEntryId(entry) === patchedEntry.id);
+
+      if (!baselineEntry || !currentEntry) {
+        throw new Error(`${patch.dateKey} entry ${patchedEntry.id} 기록을 찾을 수 없습니다.`);
+      }
+
+      if (currentEntry.aiTranslation !== baselineEntry.aiTranslation) {
+        throw new Error(`${patch.dateKey} entry ${patchedEntry.id} aiTranslation has changed since this JSON was exported. Reload the month and reapply the import.`);
+      }
+    }
+
+    patchedDays.push({
+      ...day,
+      shortVersion: shortVersionChanged ? patch.shortVersion : day.shortVersion,
+      entries: day.entries.map((entry) => {
+        const patchedEntry = patch.entries.find((candidate) => candidate.id === getEntryId(entry));
+
+        return patchedEntry ? { ...entry, aiTranslation: patchedEntry.aiTranslation } : entry;
+      })
     });
   }
+
+  await saveTimesheetDays({ days: patchedDays, userId: user.id });
 
   return {
     appliedDateKeys: patches.map((patch) => patch.dateKey)
   };
+}
+
+function getEntryId(entry: Pick<StoredTimesheetEntry, "clientId" | "id">): string {
+  return entry.id || entry.clientId;
 }

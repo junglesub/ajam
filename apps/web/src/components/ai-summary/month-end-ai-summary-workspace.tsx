@@ -35,6 +35,7 @@ type MonthlyAiSummaryApplyResult = {
 
 type MonthEndAiSummaryWorkspaceProps = {
   applyMonthlyAiSummaryAction: (params: {
+    baseline: MonthlyAiSummaryPayload;
     imported: MonthlyAiSummaryPayload;
     monthIndex: number;
     year: number;
@@ -172,13 +173,14 @@ export function MonthEndAiSummaryWorkspace({
     }
 
     const imported = parsedImport.payload;
+    const baseline = data.payload;
 
     setSaveState("saving");
     setStatusMessage("");
 
     startTransition(async () => {
       try {
-        const result = await applyMonthlyAiSummaryAction({ imported, monthIndex, year });
+        const result = await applyMonthlyAiSummaryAction({ baseline, imported, monthIndex, year });
         const refreshed = await loadMonthlyAiSummaryAction(year, monthIndex);
 
         setData(refreshed);

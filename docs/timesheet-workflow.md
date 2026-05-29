@@ -63,6 +63,9 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - The LLM prompt must require valid JSON only, preserve the original structure, and allow changes only to work-entry `aiTranslation` and day-level `shortVersion`.
 - Imported JSON is previewed before it is applied to the calendar/list data.
 - Import validation rejects changed IDs, dates, entry kinds, project names, hours, Korean content, vacation entries, and holiday entries.
+- Import apply sends the original exported JSON as a baseline, so patches are computed from that baseline instead of the current database snapshot.
+- Import apply rejects stale JSON when the current saved `aiTranslation` or `shortVersion` differs from the original exported baseline for a field the import wants to change.
+- Multi-day import apply saves all patched days in one transaction; if any day fails or conflicts, no patched day is persisted.
 - Vacation-only and holiday-only days do not receive work summaries.
 - A revision prompt lets the user rerun the LLM with extra style instructions while preserving the same JSON rules.
 

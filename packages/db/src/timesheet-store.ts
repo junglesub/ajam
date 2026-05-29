@@ -76,6 +76,8 @@ type ProjectSummaryRow = {
   totalHours: number | null;
 };
 
+type TimesheetTransaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
 type HolidayFetchLogRow = {
   fetchedAt: string;
 };
@@ -481,58 +483,80 @@ export async function saveTimesheetDay(params: { day: StoredTimesheetDay; userId
   const day = normalizeDay(params.day);
 
   await prisma.$transaction(async (transaction) => {
-    await transaction.$executeRawUnsafe(
-      `INSERT INTO "TimesheetDay" ("id", "userId", "dateKey", "shortVersion", "createdAt", "updatedAt")
-       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-       ON CONFLICT("userId", "dateKey") DO UPDATE SET "shortVersion" = excluded."shortVersion", "updatedAt" = CURRENT_TIMESTAMP`,
-      randomUUID(),
-      params.userId,
-      day.dateKey,
-      day.shortVersion
-    );
-    await transaction.$executeRawUnsafe(`DELETE FROM "TimesheetEntry" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, day.dateKey);
-
-    for (const entry of day.entries) {
-      await transaction.$executeRawUnsafe(
-        `INSERT INTO "TimesheetEntry" ("id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "shortVersion", "sortOrder", "vacationName", "holidayName", "createdAt", "updatedAt")
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-        entry.id || randomUUID(),
-        params.userId,
-        day.dateKey,
-        entry.kind,
-        entry.project,
-        entry.hours,
-        entry.content,
-        entry.aiTranslation,
-        entry.sortOrder,
-        entry.vacationName,
-        entry.holidayName
-      );
-    }
-
-    const vacationEntries = day.entries.filter((entry) => entry.kind === "VACATION");
-
-    if (vacationEntries.length === 0) {
-      await transaction.$executeRawUnsafe(`DELETE FROM "Vacation" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, day.dateKey);
-      return;
-    }
-
-    const totalHours = vacationEntries.reduce((sum, entry) => sum + entry.hours, 0);
-    const name = vacationEntries.map((entry) => entry.vacationName.trim()).filter(Boolean).join(", ") || "휴가";
-
-    await transaction.$executeRawUnsafe(
-      `INSERT INTO "Vacation" ("id", "userId", "dateKey", "name", "hours", "createdAt", "updatedAt")
-       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-       ON CONFLICT("userId", "dateKey") DO UPDATE SET "name" = excluded."name", "hours" = excluded."hours", "updatedAt" = CURRENT_TIMESTAMP`,
-      randomUUID(),
-      params.userId,
-      day.dateKey,
-      name,
-      totalHours
-    );
+    await saveTimesheetDayInTransaction({ day, transaction, userId: params.userId });
   });
 
   return day;
+}
+
+export async function saveTimesheetDays(params: { days: StoredTimesheetDay[]; userId: string }) {
+  await ensureTimesheetSchema();
+
+  const days = params.days.map(normalizeDay);
+
+  await prisma.$transaction(async (transaction) => {
+    for (const day of days) {
+      await saveTimesheetDayInTransaction({ day, transaction, userId: params.userId });
+    }
+  });
+
+  return days;
+}
+
+async function saveTimesheetDayInTransaction(params: {
+  day: StoredTimesheetDay;
+  transaction: TimesheetTransaction;
+  userId: string;
+}) {
+  await params.transaction.$executeRawUnsafe(
+    `INSERT INTO "TimesheetDay" ("id", "userId", "dateKey", "shortVersion", "createdAt", "updatedAt")
+     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT("userId", "dateKey") DO UPDATE SET "shortVersion" = excluded."shortVersion", "updatedAt" = CURRENT_TIMESTAMP`,
+    randomUUID(),
+    params.userId,
+    params.day.dateKey,
+    params.day.shortVersion
+  );
+  await params.transaction.$executeRawUnsafe(`DELETE FROM "TimesheetEntry" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.day.dateKey);
+
+  for (const entry of params.day.entries) {
+    await params.transaction.$executeRawUnsafe(
+      `INSERT INTO "TimesheetEntry" ("id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "shortVersion", "sortOrder", "vacationName", "holidayName", "createdAt", "updatedAt")
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      entry.id || randomUUID(),
+      params.userId,
+      params.day.dateKey,
+      entry.kind,
+      entry.project,
+      entry.hours,
+      entry.content,
+      entry.aiTranslation,
+      entry.sortOrder,
+      entry.vacationName,
+      entry.holidayName
+    );
+  }
+
+  const vacationEntries = params.day.entries.filter((entry) => entry.kind === "VACATION");
+
+  if (vacationEntries.length === 0) {
+    await params.transaction.$executeRawUnsafe(`DELETE FROM "Vacation" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.day.dateKey);
+    return;
+  }
+
+  const totalHours = vacationEntries.reduce((sum, entry) => sum + entry.hours, 0);
+  const name = vacationEntries.map((entry) => entry.vacationName.trim()).filter(Boolean).join(", ") || "휴가";
+
+  await params.transaction.$executeRawUnsafe(
+    `INSERT INTO "Vacation" ("id", "userId", "dateKey", "name", "hours", "createdAt", "updatedAt")
+     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT("userId", "dateKey") DO UPDATE SET "name" = excluded."name", "hours" = excluded."hours", "updatedAt" = CURRENT_TIMESTAMP`,
+    randomUUID(),
+    params.userId,
+    params.day.dateKey,
+    name,
+    totalHours
+  );
 }
 
 export async function deleteTimesheetEntry(params: { dateKey: string; userId: string }) {
