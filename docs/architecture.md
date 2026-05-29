@@ -72,6 +72,9 @@
 - `Dockerfile`은 Next.js 앱을 빌드하고 production 서버를 실행한다.
 - `docker-compose.example.yml`은 GHCR `ghcr.io/junglesub/ajam:latest` 이미지를 사용하고 SQLite 파일을 서버의 `./ajam-data`에 둔다.
 - GitHub Actions는 `main` 브랜치 push 검증 성공 후 GHCR에 `latest`, commit SHA, `v<run-number>-<yymmdd>` 태그를 push한다.
+- GitHub Actions는 `packages/n8n-nodes-ajam`을 GitHub Packages npm registry에 `@junglesub/n8n-nodes-ajam`으로 publish한다.
+- GHCR image publish는 웹 앱, DB/domain/ui 패키지, Docker, workspace 설정이 변경된 경우에만 실행한다.
+- n8n package publish는 `packages/n8n-nodes-ajam` 또는 workspace/package 설정이 변경된 경우에만 실행한다.
 - 컨테이너 시작 시 `pnpm db:seed`로 스키마와 초기 관리자 계정을 보장한다.
 - `SESSION_SECRET`은 선택값이다. 지정하면 세션 서명에 사용하고, 지정하지 않으면 앱이 랜덤 값을 생성해 DB `AppSetting`에 저장한 뒤 재사용한다.
 

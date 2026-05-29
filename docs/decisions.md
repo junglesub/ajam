@@ -19,6 +19,8 @@
 ## 2026-05-29
 
 - 업무 기록 미작성 리마인더는 aJam 백엔드가 대상 계산 API를 제공하고 n8n custom node가 해당 API를 action으로 노출한다.
+- n8n custom node package는 GitHub Packages에 `@junglesub/n8n-nodes-ajam`으로 publish한다.
+- GHCR image와 n8n package publish는 관련 파일 변경이 있을 때만 실행한다.
 - 내부 리마인더 API는 `AJAM_INTERNAL_API_TOKEN` bearer token으로 보호한다.
 - 사용자 이메일은 `User.email`에 저장하고, 이메일이 없는 사용자는 리마인더 대상에서 제외한다.
 - 발송 중복 방지는 `ReminderLog`에 사용자/날짜/유형별 발송 기록을 남기는 방식으로 처리한다.

@@ -1,11 +1,13 @@
 {
-  "name": "n8n-nodes-ajam",
+  "name": "@junglesub/n8n-nodes-ajam",
   "version": "0.1.0",
   "description": "n8n community nodes for aJam automation.",
   "license": "MIT",
-  "private": true,
   "type": "commonjs",
   "main": "dist/nodes/Ajam/Ajam.node.js",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "files": [
     "dist"
   ],

@@ -1,4 +1,4 @@
-# n8n-nodes-ajam
+# @junglesub/n8n-nodes-ajam
 
 Custom n8n community node package for aJam automation.
 
@@ -20,7 +20,11 @@ Create an `aJam API` credential in n8n:
 Build the package from the repository root:
 
 ```powershell
-pnpm --filter n8n-nodes-ajam build
+pnpm --filter @junglesub/n8n-nodes-ajam build
 ```
 
-Install the package into n8n's custom nodes directory or publish it to a private npm registry and install it as a community node.
+Install from GitHub Packages:
+
+```bash
+pnpm add @junglesub/n8n-nodes-ajam
+```

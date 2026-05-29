@@ -2,7 +2,7 @@
 
 ## Package
 
-The custom node package lives at `packages/n8n-nodes-ajam`.
+The custom node package lives at `packages/n8n-nodes-ajam` and publishes to GitHub Packages as `@junglesub/n8n-nodes-ajam`.
 
 It follows n8n's community node package shape:
 
@@ -61,7 +61,7 @@ Suggested growth path:
 ## Build
 
 ```powershell
-pnpm --filter n8n-nodes-ajam build
+pnpm --filter @junglesub/n8n-nodes-ajam build
 ```
 
 The build emits JavaScript and copies the codex/icon assets into `dist`.
@@ -69,7 +69,7 @@ The build emits JavaScript and copies the codex/icon assets into `dist`.
 Create a tarball:
 
 ```powershell
-pnpm --filter n8n-nodes-ajam pack --pack-destination ../../dist
+pnpm --filter @junglesub/n8n-nodes-ajam pack --pack-destination ../../dist
 ```
 
 ## Local n8n Install
@@ -79,7 +79,7 @@ Install the package into n8n's custom extensions directory. This is a local inst
 ```powershell
 New-Item -ItemType Directory -Force $env:USERPROFILE\.n8n\custom
 Set-Location $env:USERPROFILE\.n8n\custom
-pnpm add C:\path\to\ajam\dist\n8n-nodes-ajam-0.1.0.tgz
+pnpm add C:\path\to\ajam\dist\junglesub-n8n-nodes-ajam-0.1.0.tgz
 ```
 
 Restart n8n after installation.
@@ -90,15 +90,38 @@ For a self-hosted n8n container, mount or copy the tarball into the container an
 
 ```bash
 mkdir -p ./n8n-custom
-cp ./dist/n8n-nodes-ajam-0.1.0.tgz ./n8n-custom/
-docker compose exec -u node n8n sh -lc "mkdir -p /home/node/.n8n/custom && cd /home/node/.n8n/custom && pnpm add /home/node/.n8n/custom/n8n-nodes-ajam-0.1.0.tgz"
+cp ./dist/junglesub-n8n-nodes-ajam-0.1.0.tgz ./n8n-custom/
+docker compose exec -u node n8n sh -lc "mkdir -p /home/node/.n8n/custom && cd /home/node/.n8n/custom && pnpm add /home/node/.n8n/custom/junglesub-n8n-nodes-ajam-0.1.0.tgz"
 docker compose restart n8n
 ```
 
 If the n8n image does not include `pnpm`, enable it inside the container with Corepack before running the install:
 
 ```bash
-docker compose exec -u node n8n sh -lc "corepack enable && cd /home/node/.n8n/custom && pnpm add /home/node/.n8n/custom/n8n-nodes-ajam-0.1.0.tgz"
+docker compose exec -u node n8n sh -lc "corepack enable && cd /home/node/.n8n/custom && pnpm add /home/node/.n8n/custom/junglesub-n8n-nodes-ajam-0.1.0.tgz"
+```
+
+## GitHub Packages Install
+
+Create or edit `.npmrc` in n8n's custom extensions directory:
+
+```ini
+@junglesub:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PACKAGES_TOKEN
+```
+
+Then install the package:
+
+```bash
+cd ~/.n8n/custom
+pnpm add @junglesub/n8n-nodes-ajam
+```
+
+For a Docker n8n container:
+
+```bash
+docker compose exec -u node n8n sh -lc "mkdir -p /home/node/.n8n/custom && cd /home/node/.n8n/custom && printf '@junglesub:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=%s\n' '$GITHUB_PACKAGES_TOKEN' > .npmrc && pnpm add @junglesub/n8n-nodes-ajam"
+docker compose restart n8n
 ```
 
 ## In n8n
