@@ -92,6 +92,20 @@ type DataGoKrHolidayItem = {
   locdate?: number | string;
 };
 
+type TimesheetAiSummaryBaselineEntry = Pick<StoredTimesheetEntry, "aiTranslation" | "clientId" | "id" | "kind">;
+
+type TimesheetAiSummaryBaselineDay = {
+  dateKey: string;
+  entries: TimesheetAiSummaryBaselineEntry[];
+  shortVersion: string;
+};
+
+type TimesheetAiSummaryPatch = {
+  dateKey: string;
+  entries: Array<{ aiTranslation: string; id: string }>;
+  shortVersion: string;
+};
+
 let schemaReady = false;
 
 function normalizeEntry(entry: StoredTimesheetEntry, sortOrder: number): StoredTimesheetEntry {
@@ -501,6 +515,144 @@ export async function saveTimesheetDays(params: { days: StoredTimesheetDay[]; us
   });
 
   return days;
+}
+
+export async function applyTimesheetAiSummaryPatches(params: {
+  baseline: { days: TimesheetAiSummaryBaselineDay[] };
+  days: StoredTimesheetDay[];
+  patches: TimesheetAiSummaryPatch[];
+  userId: string;
+}): Promise<void> {
+  await ensureTimesheetSchema();
+
+  if (params.patches.length === 0) {
+    return;
+  }
+
+  const requestedDaysByDate = new Map(params.days.map((day) => [day.dateKey, day]));
+  const baselineDaysByDate = new Map(params.baseline.days.map((day) => [day.dateKey, day]));
+  const patchDateKeys = [...new Set(params.patches.map((patch) => patch.dateKey))];
+
+  await prisma.$transaction(async (transaction) => {
+    const currentDays = await listTimesheetDaysInTransaction({
+      dateKeys: patchDateKeys,
+      transaction,
+      userId: params.userId
+    });
+    const currentDaysByDate = new Map(currentDays.map((day) => [day.dateKey, day]));
+
+    for (const patch of params.patches) {
+      const requestedDay = requestedDaysByDate.get(patch.dateKey);
+      const baselineDay = baselineDaysByDate.get(patch.dateKey);
+      const currentDay = currentDaysByDate.get(patch.dateKey);
+
+      if (!requestedDay || !baselineDay || !currentDay) {
+        throw new Error(`${patch.dateKey} 기록을 찾을 수 없습니다.`);
+      }
+
+      const shortVersionChanged = patch.shortVersion !== baselineDay.shortVersion;
+
+      if (shortVersionChanged && currentDay.shortVersion !== baselineDay.shortVersion) {
+        throw new Error(`${patch.dateKey} shortVersion has changed since this JSON was exported. Reload the month and reapply the import.`);
+      }
+
+      for (const patchedEntry of patch.entries) {
+        const baselineEntry = baselineDay.entries.find((entry) => getAiSummaryEntryId(entry) === patchedEntry.id);
+        const currentEntry = currentDay.entries.find((entry) => entry.kind === "WORK" && getAiSummaryEntryId(entry) === patchedEntry.id);
+
+        if (!baselineEntry || baselineEntry.kind !== "WORK" || !currentEntry) {
+          throw new Error(`${patch.dateKey} entry ${patchedEntry.id} 기록을 찾을 수 없습니다.`);
+        }
+
+        if (currentEntry.aiTranslation !== baselineEntry.aiTranslation) {
+          throw new Error(`${patch.dateKey} entry ${patchedEntry.id} aiTranslation has changed since this JSON was exported. Reload the month and reapply the import.`);
+        }
+      }
+
+      const patchedEntriesById = new Map(patch.entries.map((entry) => [entry.id, entry]));
+      const nextDay: StoredTimesheetDay = normalizeDay({
+        ...currentDay,
+        shortVersion: shortVersionChanged ? patch.shortVersion : currentDay.shortVersion,
+        entries: currentDay.entries.map((entry) => {
+          const patchedEntry = entry.kind === "WORK" ? patchedEntriesById.get(getAiSummaryEntryId(entry)) : undefined;
+
+          return patchedEntry ? { ...entry, aiTranslation: patchedEntry.aiTranslation } : entry;
+        })
+      });
+
+      await saveTimesheetDayInTransaction({ day: nextDay, transaction, userId: params.userId });
+    }
+  });
+}
+
+async function listTimesheetDaysInTransaction(params: {
+  dateKeys: string[];
+  transaction: TimesheetTransaction;
+  userId: string;
+}): Promise<StoredTimesheetDay[]> {
+  const dateKeys = [...new Set(params.dateKeys)].sort((left, right) => left.localeCompare(right));
+
+  if (dateKeys.length === 0) {
+    return [];
+  }
+
+  const dateKeyPlaceholders = dateKeys.map(() => "?").join(", ");
+  const [entries, dayRows] = await Promise.all([
+    params.transaction.$queryRawUnsafe<TimesheetEntryRow[]>(
+      `SELECT "id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "sortOrder", "vacationName", "holidayName"
+       FROM "TimesheetEntry"
+       WHERE "userId" = ? AND "dateKey" IN (${dateKeyPlaceholders})
+       ORDER BY "dateKey" ASC, "sortOrder" ASC, "createdAt" ASC`,
+      params.userId,
+      ...dateKeys
+    ),
+    params.transaction.$queryRawUnsafe<TimesheetDayRow[]>(
+      `SELECT "userId", "dateKey", "shortVersion"
+       FROM "TimesheetDay"
+       WHERE "userId" = ? AND "dateKey" IN (${dateKeyPlaceholders})
+       ORDER BY "dateKey" ASC`,
+      params.userId,
+      ...dateKeys
+    )
+  ]);
+  const days = new Map<string, StoredTimesheetDay>();
+
+  for (const day of dayRows) {
+    days.set(day.dateKey, {
+      dateKey: day.dateKey,
+      entries: [],
+      holidayName: "",
+      shortVersion: day.shortVersion
+    });
+  }
+
+  for (const entry of entries) {
+    const day = days.get(entry.dateKey) ?? {
+      dateKey: entry.dateKey,
+      entries: [],
+      holidayName: entry.kind === "HOLIDAY" ? entry.holidayName : "",
+      shortVersion: ""
+    };
+    day.entries.push({
+      aiTranslation: entry.kind === "WORK" ? entry.aiTranslation : "",
+      content: entry.kind === "WORK" ? entry.content : "",
+      holidayName: entry.kind === "HOLIDAY" ? entry.holidayName : "",
+      hours: entry.hours,
+      id: entry.id,
+      clientId: entry.id,
+      kind: entry.kind,
+      project: entry.kind === "WORK" ? entry.project : "",
+      sortOrder: entry.sortOrder,
+      vacationName: entry.kind === "VACATION" ? entry.vacationName : ""
+    });
+    days.set(entry.dateKey, day);
+  }
+
+  return Array.from(days.values()).sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+}
+
+function getAiSummaryEntryId(entry: Pick<StoredTimesheetEntry, "clientId" | "id">): string {
+  return entry.id || entry.clientId;
 }
 
 async function saveTimesheetDayInTransaction(params: {

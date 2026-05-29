@@ -7,12 +7,12 @@ import {
   type MonthlyAiSummaryPayload
 } from "@timesheet/domain";
 import {
+  applyTimesheetAiSummaryPatches,
   getManagedUser,
   listHolidays,
   listProjects,
   listTimesheetEntries,
   listVacations,
-  saveTimesheetDays,
   type StoredTimesheetDraft,
   type StoredTimesheetEntry
 } from "@timesheet/db";
@@ -165,57 +165,9 @@ export async function applyMonthlyAiSummaryAction(params: {
   }
 
   const patches = getMonthlyAiSummaryPatches({ baseline: params.baseline, imported: params.imported });
-  const daysByDate = new Map(days.map((day) => [day.dateKey, day]));
-  const baselineDaysByDate = new Map(params.baseline.days.map((day) => [day.dateKey, day]));
-  const currentDaysByDate = new Map(currentPayload.days.map((day) => [day.dateKey, day]));
-  const patchedDays: StoredTimesheetDraft[] = [];
-
-  for (const patch of patches) {
-    const day = daysByDate.get(patch.dateKey);
-    const baselineDay = baselineDaysByDate.get(patch.dateKey);
-    const currentDay = currentDaysByDate.get(patch.dateKey);
-
-    if (!day || !baselineDay || !currentDay) {
-      throw new Error(`${patch.dateKey} 기록을 찾을 수 없습니다.`);
-    }
-
-    const shortVersionChanged = patch.shortVersion !== baselineDay.shortVersion;
-
-    if (shortVersionChanged && currentDay.shortVersion !== baselineDay.shortVersion) {
-      throw new Error(`${patch.dateKey} shortVersion has changed since this JSON was exported. Reload the month and reapply the import.`);
-    }
-
-    for (const patchedEntry of patch.entries) {
-      const baselineEntry = baselineDay.entries.find((entry) => getEntryId(entry) === patchedEntry.id);
-      const currentEntry = currentDay.entries.find((entry) => getEntryId(entry) === patchedEntry.id);
-
-      if (!baselineEntry || !currentEntry) {
-        throw new Error(`${patch.dateKey} entry ${patchedEntry.id} 기록을 찾을 수 없습니다.`);
-      }
-
-      if (currentEntry.aiTranslation !== baselineEntry.aiTranslation) {
-        throw new Error(`${patch.dateKey} entry ${patchedEntry.id} aiTranslation has changed since this JSON was exported. Reload the month and reapply the import.`);
-      }
-    }
-
-    patchedDays.push({
-      ...day,
-      shortVersion: shortVersionChanged ? patch.shortVersion : day.shortVersion,
-      entries: day.entries.map((entry) => {
-        const patchedEntry = patch.entries.find((candidate) => candidate.id === getEntryId(entry));
-
-        return patchedEntry ? { ...entry, aiTranslation: patchedEntry.aiTranslation } : entry;
-      })
-    });
-  }
-
-  await saveTimesheetDays({ days: patchedDays, userId: user.id });
+  await applyTimesheetAiSummaryPatches({ baseline: params.baseline, days, patches, userId: user.id });
 
   return {
     appliedDateKeys: patches.map((patch) => patch.dateKey)
   };
-}
-
-function getEntryId(entry: Pick<StoredTimesheetEntry, "clientId" | "id">): string {
-  return entry.id || entry.clientId;
 }
