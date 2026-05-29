@@ -46,7 +46,7 @@ type MonthEndAiSummaryWorkspaceProps = {
   loadMonthlyAiSummaryAction: (year: number, monthIndex: number) => Promise<MonthlyAiSummaryLoadResult>;
 };
 
-type CopyTarget = "export" | "mainPrompt" | "revisionPrompt";
+type CopyTarget = string;
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 type ParsedImport =
@@ -123,6 +123,21 @@ export function MonthEndAiSummaryWorkspace({
         };
       }),
     [data.payload.days, parsedImport.payload, validation.patches]
+  );
+  const manualRows = useMemo(
+    () =>
+      data.payload.days.flatMap((day) =>
+        day.entries
+          .filter((entry) => entry.kind === "WORK")
+          .map((entry) => ({
+            aiTranslation: entry.aiTranslation,
+            content: entry.content,
+            dateKey: day.dateKey,
+            id: entry.id || entry.clientId,
+            shortVersion: day.shortVersion
+          }))
+      ),
+    [data.payload.days]
   );
 
   const monthLabel = `${year}년 ${monthIndex + 1}월`;
@@ -253,6 +268,36 @@ export function MonthEndAiSummaryWorkspace({
               <Textarea className="h-[384px] font-mono text-xs leading-5" readOnly value={revisionPrompt} />
             </div>
           </Panel>
+
+          <Panel
+            className="lg:col-span-2"
+            icon={<Clipboard aria-hidden="true" className="size-4" />}
+            title="수동 제출 리스트"
+          >
+            {manualRows.length === 0 ? (
+              <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-8 text-center text-sm font-semibold text-slate-500">
+                이 달에 제출할 업무 기록이 없습니다.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-[920px] w-full border-separate border-spacing-0 text-left text-sm">
+                  <thead>
+                    <tr className="text-xs font-bold uppercase text-slate-500">
+                      <th className="w-32 border-b border-slate-200 px-3 py-2">날짜</th>
+                      <th className="border-b border-slate-200 px-3 py-2">한국어 내용</th>
+                      <th className="border-b border-slate-200 px-3 py-2">AI 번역본</th>
+                      <th className="border-b border-slate-200 px-3 py-2">요약</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {manualRows.map((row) => (
+                      <ManualCopyRow copiedTarget={copiedTarget} copyText={copyText} key={`${row.dateKey}-${row.id}`} row={row} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Panel>
         </div>
       </section>
 
@@ -375,16 +420,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function Panel({
   actions,
   children,
+  className,
   icon,
   title
 }: {
   actions?: ReactNode;
   children: ReactNode;
+  className?: string;
   icon: ReactNode;
   title: string;
 }) {
   return (
-    <section className="min-w-0 rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+    <section className={cn("min-w-0 rounded-md border border-slate-200 bg-white p-4 shadow-sm", className)}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-slate-950">
           {icon}
@@ -395,6 +442,86 @@ function Panel({
       {children}
     </section>
   );
+}
+
+type ManualCopyRowData = {
+  aiTranslation: string;
+  content: string;
+  dateKey: string;
+  id: string;
+  shortVersion: string;
+};
+
+function ManualCopyRow({
+  copiedTarget,
+  copyText,
+  row
+}: {
+  copiedTarget: CopyTarget | null;
+  copyText: (target: CopyTarget, value: string) => void;
+  row: ManualCopyRowData;
+}) {
+  return (
+    <tr className="align-top">
+      <ManualCopyCell
+        copied={copiedTarget === getManualCopyTarget(row, "date")}
+        copyLabel="날짜 복사"
+        onCopy={() => copyText(getManualCopyTarget(row, "date"), row.dateKey)}
+        value={row.dateKey}
+      />
+      <ManualCopyCell
+        copied={copiedTarget === getManualCopyTarget(row, "content")}
+        copyLabel="한국어 내용 복사"
+        onCopy={() => copyText(getManualCopyTarget(row, "content"), row.content)}
+        value={row.content}
+      />
+      <ManualCopyCell
+        copied={copiedTarget === getManualCopyTarget(row, "translation")}
+        copyLabel="AI 번역본 복사"
+        onCopy={() => copyText(getManualCopyTarget(row, "translation"), row.aiTranslation)}
+        value={row.aiTranslation}
+      />
+      <ManualCopyCell
+        copied={copiedTarget === getManualCopyTarget(row, "summary")}
+        copyLabel="요약 복사"
+        onCopy={() => copyText(getManualCopyTarget(row, "summary"), row.shortVersion)}
+        value={row.shortVersion}
+      />
+    </tr>
+  );
+}
+
+function ManualCopyCell({
+  copied,
+  copyLabel,
+  onCopy,
+  value
+}: {
+  copied: boolean;
+  copyLabel: string;
+  onCopy: () => void;
+  value: string;
+}) {
+  return (
+    <td className="border-b border-slate-100 px-3 py-3">
+      <div className="flex items-start gap-2">
+        <p className="min-w-0 flex-1 whitespace-pre-wrap text-sm font-medium leading-5 text-slate-700">{value || "-"}</p>
+        <button
+          aria-label={copyLabel}
+          className="flex size-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+          onClick={onCopy}
+          title={copyLabel}
+          type="button"
+        >
+          {copied ? <ClipboardCheck aria-hidden="true" className="size-4" /> : <Clipboard aria-hidden="true" className="size-4" />}
+        </button>
+      </div>
+    </td>
+  );
+}
+
+function getManualCopyTarget(row: ManualCopyRowData, field: "content" | "date" | "summary" | "translation"): CopyTarget {
+  return `manual:${row.dateKey}:${row.id}:${field}`;
 }
 
 function CopyButton({

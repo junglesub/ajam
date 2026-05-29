@@ -71,6 +71,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - Domain tests cover export payloads, prompt markers, immutable-field rejection, and valid patch extraction.
 - Vacation-only and holiday-only days do not receive work summaries.
 - A revision prompt lets the user rerun the LLM with extra style instructions while preserving the same JSON rules.
+- The AI summary tab also shows a manual submission list for work entries. Date, Korean content, AI translation, and day summary each have their own copy control, and each control copies only that field's raw value.
 
 ## Holiday API
 
