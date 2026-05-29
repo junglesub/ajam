@@ -82,6 +82,29 @@ cd ~/.n8n/custom
 pnpm add @junglesub/n8n-nodes-ajam
 ```
 
+또는 npm을 사용합니다.
+
+```bash
+cd ~/.n8n/custom
+npm install @junglesub/n8n-nodes-ajam
+```
+
+GitHub Packages npm registry는 public package 설치에도 token이 필요합니다. `.npmrc` 파일을 만들지 않고 설치하려면 일회성 CLI 옵션으로 registry와 token을 전달할 수 있습니다.
+
+```bash
+pnpm add @junglesub/n8n-nodes-ajam \
+  --registry=https://npm.pkg.github.com \
+  --//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PACKAGES_TOKEN
+```
+
+```bash
+npm install @junglesub/n8n-nodes-ajam \
+  --registry=https://npm.pkg.github.com \
+  --//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PACKAGES_TOKEN
+```
+
+Shell마다 특수문자 옵션 처리가 다를 수 있어 운영 서버에서는 `.npmrc` 방식이 가장 안정적입니다.
+
 n8n을 재시작한 뒤 `aJam API` credential을 만들고 `aJam` node를 workflow에 추가합니다. 자세한 내용은 `docs/n8n-custom-node.md`와 `docs/reminders-n8n.md`를 확인하세요.
 
 ## 구조

@@ -117,6 +117,29 @@ cd ~/.n8n/custom
 pnpm add @junglesub/n8n-nodes-ajam
 ```
 
+Or with npm:
+
+```bash
+cd ~/.n8n/custom
+npm install @junglesub/n8n-nodes-ajam
+```
+
+GitHub Packages npm registry requires an access token even when installing public packages. You can also install without creating an `.npmrc` file by passing registry and token as one-time CLI options:
+
+```bash
+pnpm add @junglesub/n8n-nodes-ajam \
+  --registry=https://npm.pkg.github.com \
+  --//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PACKAGES_TOKEN
+```
+
+```bash
+npm install @junglesub/n8n-nodes-ajam \
+  --registry=https://npm.pkg.github.com \
+  --//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PACKAGES_TOKEN
+```
+
+Because shell support for special characters in CLI options varies, the `.npmrc` method is the most stable option for servers.
+
 For a Docker n8n container:
 
 ```bash
