@@ -7,6 +7,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "test": "tsc --noEmit false --outDir .test-build --rootDir src && node --test .test-build/**/*.test.js",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
