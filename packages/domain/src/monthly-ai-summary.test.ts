@@ -160,6 +160,20 @@ describe("monthly AI summary import validation", () => {
     ]);
   });
 
+  it("does not emit shortVersion patches for days without work entries", () => {
+    const baseline = buildMonthlyAiSummaryExport({ days, month: "2026-05" });
+    const imported: MonthlyAiSummaryPayload = {
+      ...baseline,
+      days: baseline.days.map((day) =>
+        day.dateKey === "2026-05-05" ? { ...day, shortVersion: "Holiday." } : day
+      )
+    };
+
+    const patches = getMonthlyAiSummaryPatches({ baseline, imported });
+
+    assert.deepEqual(patches, []);
+  });
+
   it("rejects payload-level and day-level structural changes", () => {
     const baseline = buildMonthlyAiSummaryExport({ days, month: "2026-05" });
     const imported: MonthlyAiSummaryPayload = {

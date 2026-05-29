@@ -7,7 +7,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "tsc --noEmit false --outDir .test-build --rootDir src && node --test .test-build/**/*.test.js",
+    "test": "node -e \"require('node:fs').rmSync('.test-build', { recursive: true, force: true })\" && tsc --noEmit false --outDir .test-build --rootDir src && node --test .test-build/**/*.test.js",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

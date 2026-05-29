@@ -9,6 +9,7 @@ out/
 dist/
 build/
 coverage/
+.test-build/
 
 *.log
 

@@ -205,7 +205,8 @@ export function getMonthlyAiSummaryPatches(params: {
       }
     }
 
-    const shortVersionChanged = importedDay.shortVersion !== baselineDay.shortVersion;
+    const hasWorkEntries = baselineDay.entries.some((entry) => entry.kind === "WORK");
+    const shortVersionChanged = hasWorkEntries && importedDay.shortVersion !== baselineDay.shortVersion;
 
     if (entries.length > 0 || shortVersionChanged) {
       patches.push({
