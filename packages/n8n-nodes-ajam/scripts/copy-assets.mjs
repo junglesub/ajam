@@ -1,5 +1,6 @@
 import { copyFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import process from "node:process";
 
 const files = [
   ["nodes/Ajam/Ajam.node.json", "dist/nodes/Ajam/Ajam.node.json"],
