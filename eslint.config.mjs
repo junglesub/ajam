@@ -8,6 +8,7 @@ export default tseslint.config(
       "**/dist/**",
       "**/build/**",
       "**/coverage/**",
+      "**/.test-build/**",
       "**/node_modules/**",
       "packages/db/src/generated/**"
     ]
