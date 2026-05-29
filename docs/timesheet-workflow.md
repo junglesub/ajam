@@ -62,9 +62,9 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - The tab exports the selected month as JSON for use with an external LLM.
 - The implementation uses a dedicated server action to build the authoritative month export payload.
 - The UI owns its own month selector and defaults to the current month.
-- The LLM prompt must require valid JSON only, preserve the original structure, and allow changes only to work-entry `aiTranslation` and day-level `shortVersion`.
+- The LLM prompt sends full source context, but the LLM must return a smaller patch JSON containing only `dateKey`, day-level `shortVersion`, work entry `id`, and work entry `aiTranslation`.
 - Imported JSON is previewed before it is applied to the calendar/list data.
-- Import validation rejects changed IDs, dates, entry kinds, project names, hours, Korean content, vacation entries, and holiday entries.
+- Import validation rejects unknown dates, duplicate dates, unknown entry IDs, duplicate entry IDs, vacation entries, and holiday entries.
 - Import apply sends the original exported JSON as a baseline, so patches are computed from that baseline instead of the current database snapshot.
 - Import apply rejects stale JSON transactionally when the current saved `aiTranslation` or `shortVersion` differs from the original exported baseline for a field the import wants to change.
 - Multi-day import apply checks conflicts and saves all patched days in one transaction; if any day fails or conflicts, no patched day is persisted.

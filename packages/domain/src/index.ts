@@ -14,11 +14,15 @@ export {
   buildMonthlyAiSummaryRevisionPrompt,
   getMonthlyAiSummaryPatches,
   monthlyAiSummarySchemaVersion,
+  validateMonthlyAiSummaryBaseline,
   validateMonthlyAiSummaryImport
 } from "./monthly-ai-summary";
 export type {
   MonthlyAiSummaryDay,
   MonthlyAiSummaryEntry,
+  MonthlyAiSummaryImportDay,
+  MonthlyAiSummaryImportEntry,
+  MonthlyAiSummaryImportPayload,
   MonthlyAiSummaryPatch,
   MonthlyAiSummaryPayload,
   MonthlyAiSummaryValidationResult

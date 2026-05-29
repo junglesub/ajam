@@ -28,7 +28,7 @@ This keeps the app simple, avoids API key management for now, and lets the user 
 2. The tab defaults to the visible/current month, such as May 2026.
 3. User clicks a copy/export control to copy a JSON payload and the main LLM prompt.
 4. User pastes the prompt and JSON into an external LLM.
-5. The LLM returns a full JSON object with the same structure.
+5. The LLM returns a patch JSON object with only dates, short summaries, work entry IDs, and English translations.
 6. User pastes the JSON into the app.
 7. The app validates the JSON and shows a preview of changes.
 8. User applies the changes, saving updated `aiTranslation` and `shortVersion` values.
@@ -62,7 +62,7 @@ The exported JSON should contain enough context for useful reporting while prese
 }
 ```
 
-Import must treat `dateKey`, entry identity, `kind`, `project`, `hours`, and `content` as immutable. The app should reject or clearly flag imports that change structural fields. Only `aiTranslation` on `WORK` entries and `shortVersion` on days with work entries are applied.
+Import JSON should be smaller than export JSON. It contains only `schemaVersion`, `month`, `days[].dateKey`, `days[].shortVersion`, `days[].entries[].id`, and `days[].entries[].aiTranslation`. The app matches these patch fields against the original export baseline and rejects unknown dates, duplicate dates, unknown entry IDs, duplicate entry IDs, vacation entries, and holiday entries.
 
 ## Main Prompt
 
@@ -73,15 +73,15 @@ I will provide a JSON export of my monthly timesheet.
 Return ONLY valid JSON. Do not include Markdown, comments, explanations, or extra text.
 
 Your task:
-1. Preserve the exact JSON structure.
-2. Do not change any IDs, dateKey values, kind values, project names, hours, vacation entries, holiday entries, or Korean source content.
-3. For each WORK entry, fill or rewrite aiTranslation in concise, natural English.
-4. For each day that has one or more WORK entries, fill shortVersion with a short English summary for calendar display.
+1. Read the input JSON as source context only.
+2. Return a smaller patch JSON. Do not return Korean content, project names, hours, vacation entries, holiday entries, or any other source-only fields.
+3. For each WORK entry, return its id and aiTranslation in concise, natural English.
+4. For each day that has one or more WORK entries, return dateKey, shortVersion, and entries.
 5. Keep all English suitable for a professional monthly report.
 6. Keep translations brief, context-aware, and polished.
 7. If the Korean content is vague, infer the most likely business meaning from the project name and nearby entries, but do not invent specific facts.
 8. If a WORK entry has empty content, set aiTranslation to an empty string unless the project name alone clearly indicates the work.
-9. For VACATION and HOLIDAY entries, keep aiTranslation empty and do not create a work summary from them.
+9. Exclude VACATION and HOLIDAY entries from the output.
 10. Use past-tense or noun-phrase style consistently, such as:
     - "Implemented user login flow."
     - "Updated monthly timesheet UI."
@@ -90,10 +90,27 @@ Your task:
 12. If a day has multiple WORK entries, shortVersion should summarize the combined work in one concise sentence or phrase.
 
 Output requirements:
-- Return the full JSON object.
+- Return only this patch JSON shape:
+{
+  "schemaVersion": 1,
+  "month": "YYYY-MM",
+  "days": [
+    {
+      "dateKey": "YYYY-MM-DD",
+      "shortVersion": "Short English day summary.",
+      "entries": [
+        {
+          "id": "entry-id",
+          "aiTranslation": "Concise English work translation."
+        }
+      ]
+    }
+  ]
+}
 - The output must be parseable by JSON.parse.
-- Keep all existing fields.
-- Only modify aiTranslation and shortVersion.
+- Include only days that have WORK entries.
+- Include only WORK entries.
+- Do not include content, project, hours, kind, clientId, holidayName, vacationName, sortOrder, or any fields not shown above.
 - Do not wrap the JSON in ```json fences.
 
 Here is the JSON export:
@@ -111,9 +128,9 @@ Instruction:
 
 Rules:
 1. Return ONLY valid JSON.
-2. Preserve the exact JSON structure.
-3. Do not change IDs, dateKey values, kind values, project names, hours, Korean content, vacation entries, or holiday entries.
-4. Only modify aiTranslation and shortVersion.
+2. Preserve the same patch JSON structure.
+3. Do not add content, project, hours, kind, clientId, holidayName, vacationName, sortOrder, vacation entries, holiday entries, or any fields outside the patch shape.
+4. Only revise aiTranslation and shortVersion values.
 5. Keep the English concise, professional, context-aware, and suitable for a monthly report.
 6. Do not invent specific facts that are not supported by the Korean source content or project name.
 7. The output must be parseable by JSON.parse.
@@ -130,7 +147,7 @@ Current JSON:
 - Server page: load the selected month's timesheet data for the current user.
 - Client workspace: render export prompt, JSON textarea, import textarea, validation messages, preview, and apply action.
 - Server actions: load month data and save validated day updates using existing timesheet persistence.
-- Validation helper: compare imported JSON against the current exported baseline and allow only permitted English fields to differ.
+- Validation helper: compare imported patch JSON against the original exported baseline and allow only known work entry IDs and work-day summaries.
 
 ## Data Flow
 

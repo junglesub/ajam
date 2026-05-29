@@ -19,7 +19,7 @@ import {
   buildMonthlyAiSummaryRevisionPrompt,
   getMonthlyAiSummaryPatches,
   validateMonthlyAiSummaryImport,
-  type MonthlyAiSummaryEntry,
+  type MonthlyAiSummaryImportPayload,
   type MonthlyAiSummaryPayload
 } from "@timesheet/domain";
 import { Badge, Button, Textarea, cn } from "@timesheet/ui";
@@ -36,7 +36,7 @@ type MonthlyAiSummaryApplyResult = {
 type MonthEndAiSummaryWorkspaceProps = {
   applyMonthlyAiSummaryAction: (params: {
     baseline: MonthlyAiSummaryPayload;
-    imported: MonthlyAiSummaryPayload;
+    imported: MonthlyAiSummaryImportPayload;
     monthIndex: number;
     year: number;
   }) => Promise<MonthlyAiSummaryApplyResult>;
@@ -51,7 +51,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 
 type ParsedImport =
   | { error: string; payload: null }
-  | { error: ""; payload: MonthlyAiSummaryPayload };
+  | { error: ""; payload: MonthlyAiSummaryImportPayload };
 
 const defaultRevisionInstruction = "Make the English more concise and suitable for a professional monthly report.";
 
@@ -77,7 +77,7 @@ export function MonthEndAiSummaryWorkspace({
   const exportJson = useMemo(() => JSON.stringify(data.payload, null, 2), [data.payload]);
   const mainPrompt = useMemo(() => buildMonthlyAiSummaryPrompt().replace("[PASTE_JSON_HERE]", exportJson), [exportJson]);
   const revisionPrompt = useMemo(() => {
-    const currentJson = importText.trim() || exportJson;
+    const currentJson = importText.trim() || JSON.stringify(createEmptyImportPayload(data.payload), null, 2);
     const instruction = revisionInstruction.trim() || defaultRevisionInstruction;
 
     return buildMonthlyAiSummaryRevisionPrompt()
@@ -274,7 +274,7 @@ export function MonthEndAiSummaryWorkspace({
               setSaveState("idle");
               setStatusMessage("");
             }}
-            placeholder="LLM이 반환한 전체 JSON을 붙여넣으세요."
+            placeholder="LLM이 반환한 patch JSON을 붙여넣으세요."
             value={importText}
           />
           <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -328,7 +328,7 @@ function parseMonthlyPayload(value: string): ParsedImport {
     const parsed: unknown = JSON.parse(value);
 
     if (!isMonthlyAiSummaryPayload(parsed)) {
-      return { error: "month, schemaVersion, days 배열을 포함한 JSON이어야 합니다.", payload: null };
+      return { error: "month, schemaVersion, days 배열을 포함한 patch JSON이어야 합니다.", payload: null };
     }
 
     return { error: "", payload: parsed };
@@ -337,7 +337,7 @@ function parseMonthlyPayload(value: string): ParsedImport {
   }
 }
 
-function isMonthlyAiSummaryPayload(value: unknown): value is MonthlyAiSummaryPayload {
+function isMonthlyAiSummaryPayload(value: unknown): value is MonthlyAiSummaryImportPayload {
   if (!isRecord(value) || typeof value.month !== "string" || typeof value.schemaVersion !== "number" || !Array.isArray(value.days)) {
     return false;
   }
@@ -346,27 +346,26 @@ function isMonthlyAiSummaryPayload(value: unknown): value is MonthlyAiSummaryPay
     (day) =>
       isRecord(day) &&
       typeof day.dateKey === "string" &&
-      typeof day.holidayName === "string" &&
       typeof day.shortVersion === "string" &&
       Array.isArray(day.entries) &&
       day.entries.every(isMonthlyAiSummaryEntry)
   );
 }
 
-function isMonthlyAiSummaryEntry(value: unknown): value is MonthlyAiSummaryEntry {
+function isMonthlyAiSummaryEntry(value: unknown): value is { aiTranslation: string; id: string } {
   return (
     isRecord(value) &&
     typeof value.aiTranslation === "string" &&
-    typeof value.clientId === "string" &&
-    typeof value.content === "string" &&
-    typeof value.holidayName === "string" &&
-    typeof value.hours === "number" &&
-    typeof value.id === "string" &&
-    (value.kind === "WORK" || value.kind === "VACATION" || value.kind === "HOLIDAY") &&
-    typeof value.project === "string" &&
-    typeof value.sortOrder === "number" &&
-    typeof value.vacationName === "string"
+    typeof value.id === "string"
   );
+}
+
+function createEmptyImportPayload(payload: MonthlyAiSummaryPayload): MonthlyAiSummaryImportPayload {
+  return {
+    days: [],
+    month: payload.month,
+    schemaVersion: payload.schemaVersion
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

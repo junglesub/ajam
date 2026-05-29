@@ -6,7 +6,9 @@ import {
   buildMonthlyAiSummaryPrompt,
   buildMonthlyAiSummaryRevisionPrompt,
   getMonthlyAiSummaryPatches,
+  validateMonthlyAiSummaryBaseline,
   validateMonthlyAiSummaryImport,
+  type MonthlyAiSummaryImportPayload,
   type MonthlyAiSummaryPayload
 } from "./monthly-ai-summary.js";
 import type { TimesheetDayDraft } from "./timesheet.js";
@@ -119,10 +121,12 @@ describe("monthly AI summary export", () => {
     const revisionPrompt = buildMonthlyAiSummaryRevisionPrompt();
 
     assert.match(prompt, /monthly work report/);
+    assert.match(prompt, /Return a smaller patch JSON/);
     assert.match(prompt, /If the Korean content is vague/);
     assert.match(prompt, /If a WORK entry has empty content/);
     assert.match(prompt, /Implemented user login flow/);
     assert.match(prompt, /shortVersion must be shorter/);
+    assert.match(prompt, /Do not include content, project, hours/);
     assert.match(prompt, /Do not wrap the JSON in code fences/);
     assert.match(revisionPrompt, /Do not invent specific facts/);
     assert.match(revisionPrompt, /Do not include Markdown, comments, explanations, or code fences/);
@@ -130,21 +134,63 @@ describe("monthly AI summary export", () => {
 });
 
 describe("monthly AI summary import validation", () => {
-  it("allows only aiTranslation and shortVersion changes", () => {
+  it("allows baseline snapshots with only mutable English field drift", () => {
     const baseline = buildMonthlyAiSummaryExport({ days, month: "2026-05" });
-    const imported: MonthlyAiSummaryPayload = {
+    const current: MonthlyAiSummaryPayload = {
       ...baseline,
       days: baseline.days.map((day) =>
         day.dateKey === "2026-05-01"
           ? {
               ...day,
-              shortVersion: "Updated login UI.",
+              shortVersion: "Already changed elsewhere.",
               entries: day.entries.map((entry) =>
-                entry.kind === "WORK" ? { ...entry, aiTranslation: "Updated the login screen." } : entry
+                entry.kind === "WORK" ? { ...entry, aiTranslation: "Already translated elsewhere." } : entry
               )
             }
           : day
       )
+    };
+
+    const result = validateMonthlyAiSummaryBaseline({ baseline, current });
+
+    assert.deepEqual(result.errors, []);
+  });
+
+  it("rejects baseline snapshots with structural drift", () => {
+    const baseline = buildMonthlyAiSummaryExport({ days, month: "2026-05" });
+    const current: MonthlyAiSummaryPayload = {
+      ...baseline,
+      days: [
+        {
+          ...baseline.days[0]!,
+          entries: [
+            { ...baseline.days[0]!.entries[0]!, project: "Changed Project" },
+            baseline.days[0]!.entries[1]!
+          ]
+        },
+        baseline.days[1]!
+      ]
+    };
+
+    const result = validateMonthlyAiSummaryBaseline({ baseline, current });
+
+    assert.deepEqual(result.errors, [
+      "2026-05-01 entry work-1 changed immutable field project."
+    ]);
+  });
+
+  it("allows only aiTranslation and shortVersion changes", () => {
+    const baseline = buildMonthlyAiSummaryExport({ days, month: "2026-05" });
+    const imported: MonthlyAiSummaryImportPayload = {
+      schemaVersion: 1,
+      month: "2026-05",
+      days: [
+        {
+          dateKey: "2026-05-01",
+          shortVersion: "Updated login UI.",
+          entries: [{ id: "work-1", aiTranslation: "Updated the login screen." }]
+        }
+      ]
     };
 
     const result = validateMonthlyAiSummaryImport({ baseline, imported });
@@ -162,11 +208,16 @@ describe("monthly AI summary import validation", () => {
 
   it("does not emit shortVersion patches for days without work entries", () => {
     const baseline = buildMonthlyAiSummaryExport({ days, month: "2026-05" });
-    const imported: MonthlyAiSummaryPayload = {
-      ...baseline,
-      days: baseline.days.map((day) =>
-        day.dateKey === "2026-05-05" ? { ...day, shortVersion: "Holiday." } : day
-      )
+    const imported: MonthlyAiSummaryImportPayload = {
+      schemaVersion: 1,
+      month: "2026-05",
+      days: [
+        {
+          dateKey: "2026-05-05",
+          shortVersion: "Holiday.",
+          entries: []
+        }
+      ]
     };
 
     const patches = getMonthlyAiSummaryPatches({ baseline, imported });
@@ -176,15 +227,14 @@ describe("monthly AI summary import validation", () => {
 
   it("rejects payload-level and day-level structural changes", () => {
     const baseline = buildMonthlyAiSummaryExport({ days, month: "2026-05" });
-    const imported: MonthlyAiSummaryPayload = {
-      ...baseline,
+    const imported: MonthlyAiSummaryImportPayload = {
       month: "2026-06",
-      schemaVersion: 2 as MonthlyAiSummaryPayload["schemaVersion"],
+      schemaVersion: 2 as MonthlyAiSummaryImportPayload["schemaVersion"],
       days: [
         {
-          ...baseline.days[0]!,
           dateKey: "2026-05-02",
-          holidayName: "Changed"
+          shortVersion: "Unknown day.",
+          entries: []
         }
       ]
     };
@@ -194,79 +244,120 @@ describe("monthly AI summary import validation", () => {
     assert.deepEqual(result.errors, [
       "schemaVersion must be 1.",
       "month must be 2026-05.",
-      "days length changed.",
-      "2026-05-01 is missing.",
-      "2026-05-05 is missing."
+      "2026-05-02 is unknown."
     ]);
   });
 
-  it("rejects changed immutable fields", () => {
+  it("rejects duplicate days and unknown entries", () => {
     const baseline = buildMonthlyAiSummaryExport({ days, month: "2026-05" });
-    const imported: MonthlyAiSummaryPayload = {
-      ...baseline,
+    const imported: MonthlyAiSummaryImportPayload = {
+      schemaVersion: 1,
+      month: "2026-05",
       days: [
         {
-          ...baseline.days[0]!,
+          dateKey: "2026-05-01",
+          shortVersion: "Updated login UI.",
+          entries: [{ id: "unknown-entry", aiTranslation: "Updated the login screen." }]
+        },
+        {
+          dateKey: "2026-05-01",
+          shortVersion: "Updated login UI again.",
           entries: [
-            { ...baseline.days[0]!.entries[0]!, project: "Changed Project" },
-            baseline.days[0]!.entries[1]!
+            { id: "work-1", aiTranslation: "Updated the login screen." },
+            { id: "work-1", aiTranslation: "Duplicate." }
           ]
-        },
-        baseline.days[1]!
+        }
       ]
     };
 
     const result = validateMonthlyAiSummaryImport({ baseline, imported });
 
     assert.deepEqual(result.errors, [
-      "2026-05-01 entry work-1 changed immutable field project."
+      "2026-05-01 entry unknown-entry is unknown.",
+      "2026-05-01 is duplicated."
     ]);
   });
 
-  it("rejects missing entries and changed entry count", () => {
+  it("rejects duplicate entries", () => {
     const baseline = buildMonthlyAiSummaryExport({ days, month: "2026-05" });
-    const imported: MonthlyAiSummaryPayload = {
-      ...baseline,
+    const imported: MonthlyAiSummaryImportPayload = {
+      schemaVersion: 1,
+      month: "2026-05",
       days: [
         {
-          ...baseline.days[0]!,
-          entries: [baseline.days[0]!.entries[1]!]
-        },
-        baseline.days[1]!
+          dateKey: "2026-05-01",
+          shortVersion: "Updated login UI.",
+          entries: [
+            { id: "work-1", aiTranslation: "Updated the login screen." },
+            { id: "work-1", aiTranslation: "Duplicate." }
+          ]
+        }
       ]
     };
 
     const result = validateMonthlyAiSummaryImport({ baseline, imported });
 
     assert.deepEqual(result.errors, [
-      "2026-05-01 entries length changed.",
-      "2026-05-01 entry work-1 is missing."
+      "2026-05-01 entry work-1 is duplicated."
+    ]);
+  });
+
+  it("rejects unsupported fields in patch JSON", () => {
+    const baseline = buildMonthlyAiSummaryExport({ days, month: "2026-05" });
+    const imported = {
+      schemaVersion: 1,
+      month: "2026-05",
+      content: "must not be returned",
+      days: [
+        {
+          dateKey: "2026-05-01",
+          shortVersion: "Updated login UI.",
+          project: "must not be returned",
+          entries: [
+            {
+              id: "work-1",
+              aiTranslation: "Updated the login screen.",
+              content: "must not be returned"
+            }
+          ]
+        }
+      ]
+    } as unknown as MonthlyAiSummaryImportPayload;
+
+    const result = validateMonthlyAiSummaryImport({ baseline, imported });
+
+    assert.deepEqual(result.errors, [
+      "payload contains unsupported field content.",
+      "2026-05-01 contains unsupported field project.",
+      "2026-05-01 entry work-1 contains unsupported field content."
     ]);
   });
 
   it("rejects aiTranslation and summaries on non-work entries or days", () => {
     const baseline = buildMonthlyAiSummaryExport({ days, month: "2026-05" });
-    const imported: MonthlyAiSummaryPayload = {
-      ...baseline,
-      days: baseline.days.map((day) => {
-        if (day.dateKey === "2026-05-01") {
-          return {
-            ...day,
-            entries: day.entries.map((entry) =>
-              entry.kind === "VACATION" ? { ...entry, aiTranslation: "Vacation." } : entry
-            )
-          };
+    const imported: MonthlyAiSummaryImportPayload = {
+      schemaVersion: 1,
+      month: "2026-05",
+      days: [
+        {
+          dateKey: "2026-05-01",
+          shortVersion: "Updated login UI.",
+          entries: [{ id: "vacation-1", aiTranslation: "Vacation." }]
+        },
+        {
+          dateKey: "2026-05-05",
+          shortVersion: "Holiday.",
+          entries: [{ id: "holiday-1", aiTranslation: "Holiday." }]
         }
-
-        return { ...day, shortVersion: "Holiday." };
-      })
+      ]
     };
 
     const result = validateMonthlyAiSummaryImport({ baseline, imported });
 
     assert.deepEqual(result.errors, [
       "2026-05-01 entry vacation-1 cannot set aiTranslation for VACATION.",
-      "2026-05-05 cannot set shortVersion because it has no WORK entries."
+      "2026-05-05 cannot set shortVersion because it has no WORK entries.",
+      "2026-05-05 entry holiday-1 cannot set aiTranslation for HOLIDAY."
     ]);
   });
 });

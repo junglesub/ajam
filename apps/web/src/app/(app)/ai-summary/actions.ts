@@ -3,7 +3,9 @@
 import {
   getMonthlyAiSummaryPatches,
   buildMonthlyAiSummaryExport,
+  validateMonthlyAiSummaryBaseline,
   validateMonthlyAiSummaryImport,
+  type MonthlyAiSummaryImportPayload,
   type MonthlyAiSummaryPayload
 } from "@timesheet/domain";
 import {
@@ -145,14 +147,14 @@ export async function loadMonthlyAiSummaryAction(year: number, monthIndex: numbe
 
 export async function applyMonthlyAiSummaryAction(params: {
   baseline: MonthlyAiSummaryPayload;
-  imported: MonthlyAiSummaryPayload;
+  imported: MonthlyAiSummaryImportPayload;
   monthIndex: number;
   year: number;
 }): Promise<MonthlyAiSummaryApplyResult> {
   const user = await requireSession();
   const { days, month } = await loadMonthData({ monthIndex: params.monthIndex, userId: user.id, year: params.year });
   const currentPayload = buildMonthlyAiSummaryExport({ days, month });
-  const baselineValidation = validateMonthlyAiSummaryImport({ baseline: currentPayload, imported: params.baseline });
+  const baselineValidation = validateMonthlyAiSummaryBaseline({ baseline: params.baseline, current: currentPayload });
 
   if (baselineValidation.errors.length > 0) {
     throw new Error(baselineValidation.errors[0]);
