@@ -77,6 +77,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 
 - data.go.kr holiday loading failures do not break the whole timesheet page.
 - If holiday loading fails, the page still loads work, vacation, and project data and shows a warning asking the user to check the API key.
+- Month navigation uses an explicit month load state so slow data.go.kr responses keep showing `불러오는 중`, and full month-load failures show a separate error message instead of silently leaving stale month data on screen.
 - If vacation range save covers a month whose holiday load previously failed, that month is retried before deciding which dates are holidays.
 - In development only, admins can delete all cached data.go.kr holidays for debugging.
 
@@ -116,4 +117,4 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 ## Verification
 
 - Run `pnpm --filter @timesheet/web typecheck` after changes.
-- Check calendar, list, and editor behavior for missing dates, projectless saved work, multiple work entries, mixed work and vacation days, future vacation/holiday drafts, vacation range saves with holidays and existing records, connected vacation saves and deletes across holidays, month navigation selecting an in-month business day, previous-project auto-fill across month boundaries, saved non-holiday days with totals below or above `8h`, and holiday API warning behavior.
+- Check calendar, list, and editor behavior for missing dates, projectless saved work, multiple work entries, mixed work and vacation days, future vacation/holiday drafts, vacation range saves with holidays and existing records, connected vacation saves and deletes across holidays, month navigation selecting an in-month business day, month navigation loading/error feedback, previous-project auto-fill across month boundaries, saved non-holiday days with totals below or above `8h`, and holiday API warning behavior.

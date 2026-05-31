@@ -17,7 +17,7 @@ import {
   useSortable,
   verticalListSortingStrategy
 } from "@dnd-kit/sortable";
-import { useEffect, useMemo, useState, useTransition, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from "react";
 
 import {
   createEmptyDraft,
@@ -88,6 +88,7 @@ type ProjectAddState = "idle" | "saving" | "error";
 type SettingsSaveState = "idle" | "saving" | "saved" | "error";
 type HolidayResetState = "idle" | "saving" | "saved" | "error";
 type VacationRangeSaveState = "idle" | "saving" | "error";
+type MonthLoadState = "idle" | "loading" | "error";
 type PendingNavigation =
   | { kind: "date"; dateKey: string; entryClientId?: string }
   | { delta: number; kind: "month" }
@@ -605,7 +606,8 @@ export function TimesheetWorkspace({
   const [connectedVacationAction, setConnectedVacationAction] = useState<ConnectedVacationAction>("save");
   const [isConnectedVacationSaving, setIsConnectedVacationSaving] = useState(false);
   const [connectedVacationProgress, setConnectedVacationProgress] = useState({ completed: 0, total: 0 });
-  const [isMonthPending, startMonthTransition] = useTransition();
+  const [monthLoadState, setMonthLoadState] = useState<MonthLoadState>("idle");
+  const [monthLoadError, setMonthLoadError] = useState("");
 
   const calendarWeeks = useMemo(
     () => getBusinessCalendarWeeks(monthCursor.year, monthCursor.monthIndex),
@@ -685,50 +687,77 @@ export function TimesheetWorkspace({
     const monthKey = getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
 
     if (loadedMonthKeys.has(monthKey)) {
+      setMonthLoadState("idle");
+      setMonthLoadError("");
       return;
     }
 
-    startMonthTransition(async () => {
-      const monthData = await loadMonthAction(monthCursor.year, monthCursor.monthIndex);
+    let isActive = true;
 
-      const monthDrafts = buildDraftsFromMonthData(monthData);
+    async function loadMonth() {
+      setMonthLoadState("loading");
+      setMonthLoadError("");
 
-      setHolidayWarning(monthData.holidayWarning ?? "");
-      setHolidayWarningMonthKeys((current) => {
-        const next = new Set(current);
+      try {
+        const monthData = await loadMonthAction(monthCursor.year, monthCursor.monthIndex);
 
-        if (monthData.holidayWarning) {
-          next.add(monthKey);
-        } else {
-          next.delete(monthKey);
+        if (!isActive) {
+          return;
         }
 
-        return next;
-      });
-      setRecords((current) => ({
-        ...current,
-        ...monthDrafts
-      }));
-      setSavedRecords((current) => ({
-        ...current,
-        ...monthDrafts
-      }));
-      setSelectedEntryIdByDate((current) => ({
-        ...current,
-        ...Object.fromEntries(Object.values(monthDrafts).flatMap((day) => day.entries[0] ? [[day.dateKey, day.entries[0].clientId]] : []))
-      }));
-      setProjects((current) => mergeProjects(current, monthData.projects));
-      setSavedEntryDateKeys((current) => {
-        const next = new Set(current);
+        const monthDrafts = buildDraftsFromMonthData(monthData);
 
-        for (const entry of monthData.entries) {
-          next.add(entry.dateKey);
+        setHolidayWarning(monthData.holidayWarning ?? "");
+        setHolidayWarningMonthKeys((current) => {
+          const next = new Set(current);
+
+          if (monthData.holidayWarning) {
+            next.add(monthKey);
+          } else {
+            next.delete(monthKey);
+          }
+
+          return next;
+        });
+        setRecords((current) => ({
+          ...current,
+          ...monthDrafts
+        }));
+        setSavedRecords((current) => ({
+          ...current,
+          ...monthDrafts
+        }));
+        setSelectedEntryIdByDate((current) => ({
+          ...current,
+          ...Object.fromEntries(Object.values(monthDrafts).flatMap((day) => day.entries[0] ? [[day.dateKey, day.entries[0].clientId]] : []))
+        }));
+        setProjects((current) => mergeProjects(current, monthData.projects));
+        setSavedEntryDateKeys((current) => {
+          const next = new Set(current);
+
+          for (const entry of monthData.entries) {
+            next.add(entry.dateKey);
+          }
+
+          return next;
+        });
+        setLoadedMonthKeys((current) => new Set(current).add(monthKey));
+        setMonthLoadState("idle");
+      } catch (error) {
+        if (!isActive) {
+          return;
         }
 
-        return next;
-      });
-      setLoadedMonthKeys((current) => new Set(current).add(monthKey));
-    });
+        setMonthLoadState("error");
+        setMonthLoadError(error instanceof Error ? error.message : "월 데이터를 불러오지 못했습니다.");
+      }
+    }
+
+    void loadMonth();
+
+    return () => {
+      isActive = false;
+    };
   }, [loadMonthAction, loadedMonthKeys, monthCursor.monthIndex, monthCursor.year]);
 
   useEffect(() => {
@@ -1941,7 +1970,7 @@ export function TimesheetWorkspace({
               </Button>
               <div className="min-w-44 text-center">
                 <h2 className="text-lg font-bold text-slate-950">{getMonthLabel(monthCursor.year, monthCursor.monthIndex)}</h2>
-                {isMonthPending ? <p className="text-xs font-semibold text-slate-400">불러오는 중</p> : null}
+                {monthLoadState === "loading" ? <p className="text-xs font-semibold text-slate-400">불러오는 중</p> : null}
               </div>
               <Button className="h-11 w-11 shrink-0 p-0" onClick={() => moveMonth(1)} variant="ghost">
                 <ChevronRight aria-hidden="true" className="h-10 w-10 stroke-3" />
@@ -1979,6 +2008,12 @@ export function TimesheetWorkspace({
           {holidayWarning ? (
             <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
               공휴일 정보를 불러오지 못했습니다. 설정에서 API 키를 확인해주세요. {holidayWarning}
+            </div>
+          ) : null}
+
+          {monthLoadState === "error" ? (
+            <div className="border-b border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+              월 데이터를 불러오지 못했습니다. {monthLoadError}
             </div>
           ) : null}
 
