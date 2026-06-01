@@ -1,4 +1,5 @@
 import { getAppSetting, getManagedUser, listManagedUsers } from "@timesheet/db";
+import { toBrowserDateKey } from "@timesheet/domain";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
@@ -38,6 +39,7 @@ export default async function TimesheetPage() {
   }
 
   const today = new Date();
+  const initialTodayKey = toBrowserDateKey(today);
   const [initialMonthData, holidayApiKey, managedUsers] = await Promise.all([
     loadTimesheetMonthAction(today.getFullYear(), today.getMonth()),
     currentUser.role === "ADMIN" ? getAppSetting("data_go_kr_service_key") : Promise.resolve(null),
@@ -53,7 +55,10 @@ export default async function TimesheetPage() {
       findPreviousProjectAction={findPreviousProjectAction}
       initialHolidayApiKey={holidayApiKey ?? ""}
       initialManagedUsers={managedUsers}
+      initialMonthIndex={today.getMonth()}
       initialMonthData={initialMonthData}
+      initialTodayKey={initialTodayKey}
+      initialYear={today.getFullYear()}
       loadMonthAction={loadTimesheetMonthAction}
       resetAllHolidayCacheAction={resetAllHolidayCacheAction}
       resetHolidayCacheAction={resetHolidayCacheAction}

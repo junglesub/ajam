@@ -109,7 +109,10 @@ type TimesheetWorkspaceProps = {
   findPreviousProjectAction: (dateKey: string) => Promise<string>;
   initialHolidayApiKey: string;
   initialManagedUsers: ManagedUser[];
+  initialMonthIndex: number;
   initialMonthData: TimesheetMonthData;
+  initialTodayKey: string;
+  initialYear: number;
   loadMonthAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   resetAllHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   resetHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
@@ -523,7 +526,10 @@ export function TimesheetWorkspace({
   findPreviousProjectAction,
   initialHolidayApiKey,
   initialManagedUsers,
+  initialMonthIndex,
   initialMonthData,
+  initialTodayKey,
+  initialYear,
   loadMonthAction,
   resetAllHolidayCacheAction,
   resetHolidayCacheAction,
@@ -532,15 +538,11 @@ export function TimesheetWorkspace({
   testHolidayApiKeyAction,
   updateProfileAction
 }: TimesheetWorkspaceProps) {
-  const [todayKey] = useState(() => toBrowserDateKey(new Date()));
+  const [todayKey, setTodayKey] = useState(initialTodayKey);
   const [selectedDateKey, setSelectedDateKey] = useState(todayKey);
-  const [monthCursor, setMonthCursor] = useState(() => {
-    const today = new Date();
-
-    return {
-      monthIndex: today.getMonth(),
-      year: today.getFullYear()
-    };
+  const [monthCursor, setMonthCursor] = useState({
+    monthIndex: initialMonthIndex,
+    year: initialYear
   });
   const [viewMode, setViewMode] = useState<ViewMode>("calendar");
   const [currentUser, setCurrentUser] = useState(initialCurrentUser);
@@ -550,9 +552,7 @@ export function TimesheetWorkspace({
   const [selectedEntryIdByDate, setSelectedEntryIdByDate] = useState<Record<string, string>>(() => buildSelectedEntryIds(records));
   const [projects, setProjects] = useState(() => mergeProjects([], initialMonthData.projects));
   const [loadedMonthKeys, setLoadedMonthKeys] = useState(() => {
-    const today = new Date();
-
-    return new Set([getMonthCacheKey(today.getFullYear(), today.getMonth())]);
+    return new Set([getMonthCacheKey(initialYear, initialMonthIndex)]);
   });
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState("");
@@ -576,8 +576,7 @@ export function TimesheetWorkspace({
   const [holidayApiKeyTestMessage, setHolidayApiKeyTestMessage] = useState("");
   const [holidayWarning, setHolidayWarning] = useState(initialMonthData.holidayWarning ?? "");
   const [holidayWarningMonthKeys, setHolidayWarningMonthKeys] = useState(() => {
-    const today = new Date();
-    const initialMonthKey = getMonthCacheKey(today.getFullYear(), today.getMonth());
+    const initialMonthKey = getMonthCacheKey(initialYear, initialMonthIndex);
 
     return new Set(initialMonthData.holidayWarning ? [initialMonthKey] : []);
   });
@@ -608,6 +607,26 @@ export function TimesheetWorkspace({
   const [connectedVacationProgress, setConnectedVacationProgress] = useState({ completed: 0, total: 0 });
   const [monthLoadState, setMonthLoadState] = useState<MonthLoadState>("idle");
   const [monthLoadError, setMonthLoadError] = useState("");
+  const [isInitialMonthSyncing, setIsInitialMonthSyncing] = useState(true);
+
+  useEffect(() => {
+    const browserToday = new Date();
+    const browserTodayKey = toBrowserDateKey(browserToday);
+    const browserMonthIndex = browserToday.getMonth();
+    const browserYear = browserToday.getFullYear();
+
+    if (browserTodayKey === initialTodayKey && browserYear === initialYear && browserMonthIndex === initialMonthIndex) {
+      setIsInitialMonthSyncing(false);
+      return;
+    }
+
+    setTodayKey(browserTodayKey);
+    setSelectedDateKey((current) => current === initialTodayKey ? browserTodayKey : current);
+    setMonthCursor({
+      monthIndex: browserMonthIndex,
+      year: browserYear
+    });
+  }, [initialMonthIndex, initialTodayKey, initialYear]);
 
   const calendarWeeks = useMemo(
     () => getBusinessCalendarWeeks(monthCursor.year, monthCursor.monthIndex),
@@ -689,6 +708,7 @@ export function TimesheetWorkspace({
     if (loadedMonthKeys.has(monthKey)) {
       setMonthLoadState("idle");
       setMonthLoadError("");
+      setIsInitialMonthSyncing(false);
       return;
     }
 
@@ -743,6 +763,7 @@ export function TimesheetWorkspace({
         });
         setLoadedMonthKeys((current) => new Set(current).add(monthKey));
         setMonthLoadState("idle");
+        setIsInitialMonthSyncing(false);
       } catch (error) {
         if (!isActive) {
           return;
@@ -750,6 +771,7 @@ export function TimesheetWorkspace({
 
         setMonthLoadState("error");
         setMonthLoadError(error instanceof Error ? error.message : "월 데이터를 불러오지 못했습니다.");
+        setIsInitialMonthSyncing(false);
       }
     }
 
@@ -851,13 +873,13 @@ export function TimesheetWorkspace({
     resetEntryFeedback();
   }
 
-  function prepareDraftForDate(dateKey: string) {
+  function prepareDraftForDate(dateKey: string, currentTodayKey = todayKey) {
     if (records[dateKey]) {
       recommendPreviousProjectForDraft(dateKey, records[dateKey]);
       return;
     }
 
-    const draft = dateKey > todayKey ? createFutureDraftForDate(dateKey) : createDraftForDate(dateKey, records);
+    const draft = dateKey > currentTodayKey ? createFutureDraftForDate(dateKey) : createDraftForDate(dateKey, records);
 
     setRecords((current) => {
       if (current[dateKey]) {
@@ -914,10 +936,12 @@ export function TimesheetWorkspace({
 
     if (navigation.kind === "today") {
       const today = new Date();
+      const currentTodayKey = toBrowserDateKey(today);
 
-      removeSelectedAutoProjectDraft(todayKey);
-      setSelectedDateKey(todayKey);
-      prepareDraftForDate(todayKey);
+      setTodayKey(currentTodayKey);
+      removeSelectedAutoProjectDraft(currentTodayKey);
+      setSelectedDateKey(currentTodayKey);
+      prepareDraftForDate(currentTodayKey, currentTodayKey);
       setMonthCursor({
         monthIndex: today.getMonth(),
         year: today.getFullYear()
@@ -1956,6 +1980,20 @@ export function TimesheetWorkspace({
       setHolidayResetState("error");
       setHolidayResetError(error instanceof Error ? error.message : "공휴일 정보를 삭제하지 못했습니다.");
     }
+  }
+
+  if (isInitialMonthSyncing) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-50 px-6" role="status">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <div className="size-10 animate-spin rounded-full border-4 border-slate-200 border-t-slate-950" />
+          <div>
+            <p className="text-base font-bold text-slate-950">월간 업무 기록을 불러오는 중</p>
+            <p className="mt-1 text-sm font-medium text-slate-500">현재 날짜 기준으로 공휴일과 기록을 확인하고 있습니다.</p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

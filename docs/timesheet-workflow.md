@@ -75,6 +75,8 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 
 ## Holiday API
 
+- The initial server-rendered month is tracked separately from the browser's current month. If a UTC-hosted server preloads the previous month around the user's local midnight, the client switches to the browser-local current month and fetches that month instead of treating it as already loaded.
+- During that initial server/browser month sync, the app shows a full-screen loading state so the previous server-rendered month does not flash before the browser-local month is ready.
 - data.go.kr holiday loading failures do not break the whole timesheet page.
 - If holiday loading fails, the page still loads work, vacation, and project data and shows a warning asking the user to check the API key.
 - Month navigation uses an explicit month load state so slow data.go.kr responses keep showing `불러오는 중`, and full month-load failures show a separate error message instead of silently leaving stale month data on screen.
