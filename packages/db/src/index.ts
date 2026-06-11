@@ -1,6 +1,8 @@
 export { prisma } from "./client";
 export { databaseUrl } from "./database-url";
 export { hashPassword, verifyPassword } from "./password";
+export { ensureUserAiSettingSchema, getUserAiSetting, getUserGeminiApiKey, updateUserAiSetting } from "./ai-settings-store";
+export type { AiProvider, UserAiSetting, UserAiSettingUpdate } from "./ai-settings-store";
 export { createManagedUser, ensureApplicationSchema, getAppSetting, getManagedUser, listManagedUsers, setAppSetting, updateManagedUser } from "./settings-store";
 export type { ManagedUser, UserRole } from "./settings-store";
 export { ensureReminderSchema, listDailyTimesheetReminderTargets, markDailyTimesheetReminderSent } from "./reminder-store";

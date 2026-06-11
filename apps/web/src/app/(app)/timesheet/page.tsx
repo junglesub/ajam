@@ -1,4 +1,4 @@
-import { getAppSetting, getManagedUser, listManagedUsers } from "@timesheet/db";
+import { getAppSetting, getManagedUser, getUserAiSetting, listManagedUsers } from "@timesheet/db";
 import { toBrowserDateKey } from "@timesheet/domain";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
@@ -14,9 +14,12 @@ import {
   loadTimesheetMonthAction,
   resetAllHolidayCacheAction,
   resetHolidayCacheAction,
+  runTimesheetAiCleanupAction,
   saveHolidayApiKeyAction,
   saveTimesheetEntryAction,
   testHolidayApiKeyAction,
+  testGeminiApiKeyAction,
+  updateUserAiSettingAction,
   updateProfileAction
 } from "./actions";
 
@@ -40,10 +43,11 @@ export default async function TimesheetPage() {
 
   const today = new Date();
   const initialTodayKey = toBrowserDateKey(today);
-  const [initialMonthData, holidayApiKey, managedUsers] = await Promise.all([
+  const [initialMonthData, holidayApiKey, managedUsers, aiSetting] = await Promise.all([
     loadTimesheetMonthAction(today.getFullYear(), today.getMonth()),
     currentUser.role === "ADMIN" ? getAppSetting("data_go_kr_service_key") : Promise.resolve(null),
-    currentUser.role === "ADMIN" ? listManagedUsers() : Promise.resolve([])
+    currentUser.role === "ADMIN" ? listManagedUsers() : Promise.resolve([]),
+    getUserAiSetting(currentUser.id)
   ]);
 
   return (
@@ -62,9 +66,13 @@ export default async function TimesheetPage() {
       loadMonthAction={loadTimesheetMonthAction}
       resetAllHolidayCacheAction={resetAllHolidayCacheAction}
       resetHolidayCacheAction={resetHolidayCacheAction}
+      runAiCleanupAction={runTimesheetAiCleanupAction}
       saveEntryAction={saveTimesheetEntryAction}
       saveHolidayApiKeyAction={saveHolidayApiKeyAction}
+      initialAiSetting={aiSetting}
       testHolidayApiKeyAction={testHolidayApiKeyAction}
+      testGeminiApiKeyAction={testGeminiApiKeyAction}
+      updateAiSettingAction={updateUserAiSettingAction}
       updateProfileAction={updateProfileAction}
     />
   );

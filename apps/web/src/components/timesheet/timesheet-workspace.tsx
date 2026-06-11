@@ -82,7 +82,39 @@ type HolidayApiKeyTestResult = {
   ok: boolean;
 };
 
+type UserAiSetting = {
+  apiKeySaved: boolean;
+  backfillLimit: number;
+  backfillMissing: boolean;
+  contextDays: number;
+  enabled: boolean;
+  model: string;
+  provider: "GEMINI";
+};
+
+type UserAiSettingUpdate = {
+  apiKey?: string;
+  backfillLimit: number;
+  backfillMissing: boolean;
+  clearApiKey?: boolean;
+  contextDays: number;
+  enabled: boolean;
+  model: string;
+};
+
+type TimesheetAiCleanupResult = {
+  appliedDateKeys: string[];
+  days: TimesheetDayDraft[];
+  message: string;
+  skipped: boolean;
+};
+
+type GeminiApiKeyTestResult = {
+  ok: boolean;
+};
+
 type SaveState = "idle" | "saving" | "saved" | "error";
+type AiCleanupState = "idle" | "running" | "done" | "skipped" | "error";
 type DeleteState = "idle" | "deleting" | "error";
 type ProjectAddState = "idle" | "saving" | "error";
 type SettingsSaveState = "idle" | "saving" | "saved" | "error";
@@ -108,6 +140,7 @@ type TimesheetWorkspaceProps = {
   deleteEntryAction: (dateKey: string) => Promise<void>;
   findPreviousProjectAction: (dateKey: string) => Promise<string>;
   initialHolidayApiKey: string;
+  initialAiSetting: UserAiSetting;
   initialManagedUsers: ManagedUser[];
   initialMonthIndex: number;
   initialMonthData: TimesheetMonthData;
@@ -116,9 +149,12 @@ type TimesheetWorkspaceProps = {
   loadMonthAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   resetAllHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   resetHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
+  runAiCleanupAction: (dateKey: string) => Promise<TimesheetAiCleanupResult>;
   saveEntryAction: (entry: TimesheetDayDraft) => Promise<TimesheetDayDraft>;
   saveHolidayApiKeyAction: (serviceKey: string) => Promise<void>;
+  testGeminiApiKeyAction: (params: { apiKey?: string; model: string }) => Promise<GeminiApiKeyTestResult>;
   testHolidayApiKeyAction: (serviceKey: string, year: number, monthIndex: number) => Promise<HolidayApiKeyTestResult>;
+  updateAiSettingAction: (input: UserAiSettingUpdate) => Promise<UserAiSetting>;
   updateProfileAction: (params: { email?: string; password?: string; username: string }) => Promise<ManagedUser>;
 };
 
@@ -146,6 +182,14 @@ const kindOptions: Array<{ label: string; value: WorkRecordKind }> = [
   { label: "업무", value: "WORK" },
   { label: "휴가", value: "VACATION" },
   { label: "공휴일", value: "HOLIDAY" }
+];
+
+const aiModelPresets = [
+  { label: "빠름/저렴 - gemini-3.1-flash-lite", value: "gemini-3.1-flash-lite" },
+  { label: "균형 - gemini-3.5-flash", value: "gemini-3.5-flash" },
+  { label: "안정 대안 - gemini-2.5-flash", value: "gemini-2.5-flash" },
+  { label: "품질 우선 - gemini-2.5-pro", value: "gemini-2.5-pro" },
+  { label: "직접 입력", value: "__custom__" }
 ];
 
 function truncateContent(value: string): string {
@@ -524,6 +568,7 @@ export function TimesheetWorkspace({
   currentUser: initialCurrentUser,
   deleteEntryAction,
   findPreviousProjectAction,
+  initialAiSetting,
   initialHolidayApiKey,
   initialManagedUsers,
   initialMonthIndex,
@@ -533,9 +578,12 @@ export function TimesheetWorkspace({
   loadMonthAction,
   resetAllHolidayCacheAction,
   resetHolidayCacheAction,
+  runAiCleanupAction,
   saveEntryAction,
   saveHolidayApiKeyAction,
+  testGeminiApiKeyAction,
   testHolidayApiKeyAction,
+  updateAiSettingAction,
   updateProfileAction
 }: TimesheetWorkspaceProps) {
   const [todayKey, setTodayKey] = useState(initialTodayKey);
@@ -556,6 +604,8 @@ export function TimesheetWorkspace({
   });
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState("");
+  const [aiCleanupState, setAiCleanupState] = useState<AiCleanupState>("idle");
+  const [aiCleanupMessage, setAiCleanupMessage] = useState("");
   const [deleteState, setDeleteState] = useState<DeleteState>("idle");
   const [deleteError, setDeleteError] = useState("");
   const [isDirty, setIsDirty] = useState(false);
@@ -574,6 +624,19 @@ export function TimesheetWorkspace({
   const [holidayApiKeyError, setHolidayApiKeyError] = useState("");
   const [holidayApiKeyTestState, setHolidayApiKeyTestState] = useState<SettingsSaveState>("idle");
   const [holidayApiKeyTestMessage, setHolidayApiKeyTestMessage] = useState("");
+  const [aiSetting, setAiSetting] = useState(initialAiSetting);
+  const [aiEnabled, setAiEnabled] = useState(initialAiSetting.enabled);
+  const [aiApiKey, setAiApiKey] = useState("");
+  const [aiClearApiKey, setAiClearApiKey] = useState(false);
+  const [aiModel, setAiModel] = useState(initialAiSetting.model);
+  const [aiCustomModel, setAiCustomModel] = useState(aiModelPresets.some((preset) => preset.value === initialAiSetting.model) ? "" : initialAiSetting.model);
+  const [aiContextDays, setAiContextDays] = useState(initialAiSetting.contextDays);
+  const [aiBackfillMissing, setAiBackfillMissing] = useState(initialAiSetting.backfillMissing);
+  const [aiBackfillLimit, setAiBackfillLimit] = useState(initialAiSetting.backfillLimit);
+  const [aiSettingState, setAiSettingState] = useState<SettingsSaveState>("idle");
+  const [aiSettingMessage, setAiSettingMessage] = useState("");
+  const [aiTestState, setAiTestState] = useState<SettingsSaveState>("idle");
+  const [aiTestMessage, setAiTestMessage] = useState("");
   const [holidayWarning, setHolidayWarning] = useState(initialMonthData.holidayWarning ?? "");
   const [holidayWarningMonthKeys, setHolidayWarningMonthKeys] = useState(() => {
     const initialMonthKey = getMonthCacheKey(initialYear, initialMonthIndex);
@@ -1699,6 +1762,58 @@ export function TimesheetWorkspace({
     }
   }
 
+  function getSelectedAiModel(): string {
+    return aiModel === "__custom__" ? aiCustomModel.trim() || "gemini-3.1-flash-lite" : aiModel;
+  }
+
+  function mergeSavedDays(days: TimesheetDayDraft[]) {
+    if (days.length === 0) {
+      return;
+    }
+
+    const nextDays = days.map(withClientIds);
+
+    setRecords((current) => ({
+      ...current,
+      ...Object.fromEntries(nextDays.map((day) => [day.dateKey, day]))
+    }));
+    setSavedRecords((current) => ({
+      ...current,
+      ...Object.fromEntries(nextDays.map((day) => [day.dateKey, day]))
+    }));
+    setSavedEntryDateKeys((current) => {
+      const next = new Set(current);
+
+      for (const day of nextDays) {
+        next.add(day.dateKey);
+      }
+
+      return next;
+    });
+  }
+
+  async function runAiCleanup(dateKey: string) {
+    if (!aiSetting.enabled || !aiSetting.apiKeySaved) {
+      setAiCleanupState("skipped");
+      setAiCleanupMessage(!aiSetting.enabled ? "AI 자동 정리 꺼짐" : "Gemini API key 없음");
+      return;
+    }
+
+    setAiCleanupState("running");
+    setAiCleanupMessage("AI 정리 중");
+
+    try {
+      const result = await runAiCleanupAction(dateKey);
+
+      mergeSavedDays(result.days);
+      setAiCleanupState(result.skipped ? "skipped" : "done");
+      setAiCleanupMessage(result.message);
+    } catch (error) {
+      setAiCleanupState("error");
+      setAiCleanupMessage(error instanceof Error ? error.message : "AI 정리에 실패했습니다.");
+    }
+  }
+
   async function saveSelectedDraft(options: { skipConnectedVacation?: boolean } = {}) {
     if (selectedIsSingleVacation && !options.skipConnectedVacation) {
       try {
@@ -1743,6 +1858,7 @@ export function TimesheetWorkspace({
       }));
       setIsDirty(false);
       setSaveState("saved");
+      void runAiCleanup(savedEntry.dateKey);
     } catch {
       setSaveState("error");
       setSaveError("저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
@@ -1795,6 +1911,18 @@ export function TimesheetWorkspace({
     setHolidayApiKeyError("");
     setHolidayApiKeyTestState("idle");
     setHolidayApiKeyTestMessage("");
+    setAiEnabled(aiSetting.enabled);
+    setAiApiKey("");
+    setAiClearApiKey(false);
+    setAiModel(aiModelPresets.some((preset) => preset.value === aiSetting.model) ? aiSetting.model : "__custom__");
+    setAiCustomModel(aiModelPresets.some((preset) => preset.value === aiSetting.model) ? "" : aiSetting.model);
+    setAiContextDays(aiSetting.contextDays);
+    setAiBackfillMissing(aiSetting.backfillMissing);
+    setAiBackfillLimit(aiSetting.backfillLimit);
+    setAiSettingState("idle");
+    setAiSettingMessage("");
+    setAiTestState("idle");
+    setAiTestMessage("");
     setHolidayResetState("idle");
     setHolidayResetError("");
     setUserCreateState("idle");
@@ -1848,6 +1976,46 @@ export function TimesheetWorkspace({
     } catch (error) {
       setHolidayApiKeyTestState("error");
       setHolidayApiKeyTestMessage(error instanceof Error ? error.message : "API 키 테스트에 실패했습니다.");
+    }
+  }
+
+  async function saveAiSetting() {
+    setAiSettingState("saving");
+    setAiSettingMessage("");
+
+    try {
+      const updated = await updateAiSettingAction({
+        apiKey: aiApiKey || undefined,
+        backfillLimit: aiBackfillLimit,
+        backfillMissing: aiBackfillMissing,
+        clearApiKey: aiClearApiKey,
+        contextDays: aiContextDays,
+        enabled: aiEnabled,
+        model: getSelectedAiModel()
+      });
+
+      setAiSetting(updated);
+      setAiApiKey("");
+      setAiClearApiKey(false);
+      setAiSettingState("saved");
+      setAiSettingMessage("AI 자동 정리 설정을 저장했습니다.");
+    } catch (error) {
+      setAiSettingState("error");
+      setAiSettingMessage(error instanceof Error ? error.message : "AI 설정을 저장하지 못했습니다.");
+    }
+  }
+
+  async function testAiSetting() {
+    setAiTestState("saving");
+    setAiTestMessage("");
+
+    try {
+      await testGeminiApiKeyAction({ apiKey: aiApiKey || undefined, model: getSelectedAiModel() });
+      setAiTestState("saved");
+      setAiTestMessage("Gemini API key를 확인했습니다.");
+    } catch (error) {
+      setAiTestState("error");
+      setAiTestMessage(error instanceof Error ? error.message : "Gemini API key 테스트에 실패했습니다.");
     }
   }
 
@@ -2204,9 +2372,16 @@ export function TimesheetWorkspace({
                 ) : null}
               </div>
               <div className="flex items-center gap-3">
-                <p className={cn("text-sm font-medium", saveState === "error" || deleteState === "error" ? "text-red-600" : "text-slate-500")}>
-                  {deleteState === "error" ? deleteError : saveState === "saved" ? "저장됨" : saveState === "saving" ? "저장 중" : saveError}
-                </p>
+                <div className="text-right">
+                  <p className={cn("text-sm font-medium", saveState === "error" || deleteState === "error" ? "text-red-600" : "text-slate-500")}>
+                    {deleteState === "error" ? deleteError : saveState === "saved" ? "저장됨" : saveState === "saving" ? "저장 중" : saveError}
+                  </p>
+                  {aiCleanupState !== "idle" ? (
+                    <p className={cn("mt-0.5 text-xs font-semibold", aiCleanupState === "error" ? "text-red-600" : aiCleanupState === "running" ? "text-slate-700" : "text-emerald-700")}>
+                      {aiCleanupState === "running" ? "AI 정리 중" : aiCleanupMessage}
+                    </p>
+                  ) : null}
+                </div>
                 {selectedIsSingleVacation ? (
                   <Button className="h-10 px-4" disabled={saveState === "saving" || deleteState === "deleting" || vacationRangeState === "saving"} onClick={() => void openVacationRangeModal()} type="button" variant="secondary">
                     기간 설정
@@ -2254,6 +2429,135 @@ export function TimesheetWorkspace({
               <div className="mt-4 flex justify-end">
                 <Button disabled={profileState === "saving"} onClick={() => void saveProfile()} type="button">
                   {profileState === "saving" ? "저장 중" : "계정 저장"}
+                </Button>
+              </div>
+            </section>
+
+            <section className="rounded-md border border-slate-200 bg-white p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-950">AI 자동 정리</h3>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">저장 후 Gemini로 빈 영문 번역본과 짧은 버전을 채웁니다.</p>
+                </div>
+                <Badge tone={aiSetting.apiKeySaved ? "green" : "gray"}>{aiSetting.apiKeySaved ? "키 저장됨" : "키 없음"}</Badge>
+              </div>
+
+              <div className="mt-4 space-y-4">
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                  <input checked={aiEnabled} className="size-4 accent-slate-950" onChange={(event) => setAiEnabled(event.target.checked)} type="checkbox" />
+                  AI 자동 정리 사용
+                </label>
+
+                <Field label="Gemini API key">
+                  <Input
+                    autoComplete="off"
+                    onChange={(event) => {
+                      setAiApiKey(event.target.value);
+                      if (event.target.value) {
+                        setAiClearApiKey(false);
+                      }
+                    }}
+                    placeholder={aiSetting.apiKeySaved ? "새 key 입력 시 교체" : "Gemini API key"}
+                    type="password"
+                    value={aiApiKey}
+                  />
+                </Field>
+
+                {aiSetting.apiKeySaved ? (
+                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-600">
+                    <input checked={aiClearApiKey} className="size-4 accent-slate-950" disabled={Boolean(aiApiKey)} onChange={(event) => setAiClearApiKey(event.target.checked)} type="checkbox" />
+                    저장된 API key 삭제
+                  </label>
+                ) : null}
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="모델">
+                    <select
+                      className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                      onChange={(event) => setAiModel(event.target.value)}
+                      value={aiModel}
+                    >
+                      {aiModelPresets.map((preset) => (
+                        <option key={preset.value} value={preset.value}>
+                          {preset.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  {aiModel === "__custom__" ? (
+                    <Field label="직접 입력 모델명">
+                      <Input onChange={(event) => setAiCustomModel(event.target.value)} placeholder="gemini-..." value={aiCustomModel} />
+                    </Field>
+                  ) : (
+                    <Field label="참고할 이전 저장 WORK 날짜">
+                      <select
+                        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                        onChange={(event) => setAiContextDays(Number(event.target.value))}
+                        value={aiContextDays}
+                      >
+                        {[0, 3, 5, 10].map((value) => (
+                          <option key={value} value={value}>
+                            최근 {value}개
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  )}
+                </div>
+
+                {aiModel === "__custom__" ? (
+                  <Field label="참고할 이전 저장 WORK 날짜">
+                    <select
+                      className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                      onChange={(event) => setAiContextDays(Number(event.target.value))}
+                      value={aiContextDays}
+                    >
+                      {[0, 3, 5, 10].map((value) => (
+                        <option key={value} value={value}>
+                          최근 {value}개
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                ) : null}
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                    <input checked={aiBackfillMissing} className="size-4 accent-slate-950" onChange={(event) => setAiBackfillMissing(event.target.checked)} type="checkbox" />
+                    이전 빈 번역/요약 보정
+                  </label>
+                  <Field label="한 번에 보정할 이전 날짜">
+                    <select
+                      className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                      disabled={!aiBackfillMissing}
+                      onChange={(event) => setAiBackfillLimit(Number(event.target.value))}
+                      value={aiBackfillLimit}
+                    >
+                      {[1, 3, 5].map((value) => (
+                        <option key={value} value={value}>
+                          {value}일
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+
+                <p className="text-xs font-medium leading-5 text-slate-500">미기입, 작성 예정, draft, 휴가, 공휴일, 빈 내용 업무는 참고/보정 대상에서 제외됩니다. 기존 번역본과 요약은 덮어쓰지 않습니다.</p>
+              </div>
+
+              {(aiSettingState !== "idle" || aiTestMessage) ? (
+                <div className="mt-3 space-y-1">
+                  {aiSettingMessage ? <p className={cn("text-sm font-semibold", aiSettingState === "error" ? "text-red-600" : "text-emerald-700")}>{aiSettingMessage}</p> : null}
+                  {aiTestMessage ? <p className={cn("text-sm font-semibold", aiTestState === "error" ? "text-red-600" : "text-emerald-700")}>{aiTestMessage}</p> : null}
+                </div>
+              ) : null}
+
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                <Button disabled={aiTestState === "saving"} onClick={() => void testAiSetting()} type="button" variant="secondary">
+                  {aiTestState === "saving" ? "테스트 중" : "키 테스트"}
+                </Button>
+                <Button disabled={aiSettingState === "saving"} onClick={() => void saveAiSetting()} type="button">
+                  {aiSettingState === "saving" ? "저장 중" : "AI 설정 저장"}
                 </Button>
               </div>
             </section>

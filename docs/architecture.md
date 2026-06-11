@@ -38,7 +38,7 @@
 - `HolidayFetchLog`: `getRestDeInfo` 월별 조회 여부를 저장해 같은 월을 반복 fetch하지 않게 한다.
 - `Vacation`: 사용자별 휴가 날짜, 이름, 시간을 저장한다. 업무 기록을 휴가로 저장하면 같은 날짜의 휴가 레코드가 동기화된다.
 - `AppSetting`: 공공데이터포털 서비스 키 같은 앱 설정값을 저장한다.
-- `UserAiSetting` planned: 사용자별 Gemini API key, 모델, 자동 정리 여부, 참고할 이전 저장 WORK 날짜 수, 과거 미작성 AI 필드 보정 설정을 저장한다. API key는 앱 secret으로 암호화해 저장한다.
+- `UserAiSetting`: 사용자별 Gemini API key, 모델, 자동 정리 여부, 참고할 이전 저장 WORK 날짜 수, 과거 미작성 AI 필드 보정 설정을 저장한다. API key는 앱 secret으로 암호화해 저장한다.
 - `ReminderLog`: 사용자별 날짜와 리마인더 유형의 발송 기록을 저장해 n8n 재시도나 중복 실행 시 같은 리마인더가 반복 발송되지 않게 한다.
 
 ## Holiday Sync
@@ -63,7 +63,7 @@
 - `/timesheet` 서버 컴포넌트가 서버 기준 현재 월의 기록, 공휴일, 프로젝트, 휴가, 사용자/설정 데이터를 조회해 클라이언트 작업 공간에 전달하고, 클라이언트는 브라우저 기준 현재 월과 다르면 해당 월을 추가 조회한다.
 - 월 이동 시 클라이언트가 server action으로 해당 월 데이터를 추가 조회한다.
 - 오른쪽 패널에서 저장을 누르면 `saveTimesheetEntryAction`이 `TimesheetEntry`를 upsert한다.
-- planned save-time AI cleanup은 저장 성공 후 별도 server action으로 실행한다. 일반 저장 결과와 AI 결과는 분리하며, AI 실패는 저장 성공을 되돌리지 않는다.
+- save-time AI cleanup은 저장 성공 후 별도 server action으로 실행한다. 일반 저장 결과와 AI 결과는 분리하며, AI 실패는 저장 성공을 되돌리지 않는다.
 - 휴가 기록은 저장 시 `Vacation`에도 upsert하고, 업무/공휴일로 바꾸면 해당 날짜의 휴가 레코드는 삭제한다.
 - 새 업무 기록을 작성할 때 이전 업무일의 프로젝트가 자동으로 기입된다.
 - 저장하지 않은 상태에서 날짜/월을 이동하려 하면 앱 모달로 확인한다.
