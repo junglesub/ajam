@@ -605,6 +605,7 @@ export function TimesheetWorkspace({
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState("");
   const [aiCleanupState, setAiCleanupState] = useState<AiCleanupState>("idle");
+  const [aiCleanupDateKey, setAiCleanupDateKey] = useState("");
   const [aiCleanupMessage, setAiCleanupMessage] = useState("");
   const [deleteState, setDeleteState] = useState<DeleteState>("idle");
   const [deleteError, setDeleteError] = useState("");
@@ -1793,6 +1794,8 @@ export function TimesheetWorkspace({
   }
 
   async function runAiCleanup(dateKey: string) {
+    setAiCleanupDateKey(dateKey);
+
     if (!aiSetting.enabled || !aiSetting.apiKeySaved) {
       setAiCleanupState("skipped");
       setAiCleanupMessage(!aiSetting.enabled ? "AI 자동 정리 꺼짐" : "Gemini API key 없음");
@@ -2376,7 +2379,7 @@ export function TimesheetWorkspace({
                   <p className={cn("text-sm font-medium", saveState === "error" || deleteState === "error" ? "text-red-600" : "text-slate-500")}>
                     {deleteState === "error" ? deleteError : saveState === "saved" ? "저장됨" : saveState === "saving" ? "저장 중" : saveError}
                   </p>
-                  {aiCleanupState !== "idle" ? (
+                  {aiCleanupDateKey === selectedDateKey && aiCleanupState !== "idle" ? (
                     <p className={cn("mt-0.5 text-xs font-semibold", aiCleanupState === "error" ? "text-red-600" : aiCleanupState === "running" ? "text-slate-700" : "text-emerald-700")}>
                       {aiCleanupState === "running" ? "AI 정리 중" : aiCleanupMessage}
                     </p>
