@@ -17,7 +17,7 @@ The settings modal should add an `AI 자동 정리` section with these user-owne
 - `backfillMissing`: whether to also fill missing AI fields on previous saved workdays.
 - `backfillLimit`: maximum number of previous dates to backfill per save. Options: `1`, `3`, `5`; default `3`.
 
-Overwrite behavior is not user-configurable in the first version. The fixed policy is: fill only empty `aiTranslation` and empty day-level `shortVersion`.
+Overwrite behavior is not a persistent setting in the first version. The default policy is to fill only empty `aiTranslation` and empty day-level `shortVersion`; if saved Korean content changes while AI fields already exist, the user can confirm a one-time rewrite for the current date.
 
 ## Gemini Model Choices
 
@@ -34,13 +34,14 @@ The saved value is the model string. This lets the app support new Gemini models
 ## Save Flow
 
 1. User clicks `저장`.
-2. `saveTimesheetEntryAction` saves the day exactly as today.
-3. The UI immediately shows the saved state.
-4. If AI cleanup is enabled and the user has an API key, the client starts a separate AI server action without blocking the save.
-5. The UI shows `AI 정리 중` while the action runs.
-6. The AI action reloads authoritative server-side data, generates missing fields, persists only allowed fields, and returns changed dates.
-7. The client merges returned days into the visible month state.
-8. If AI fails, the saved work remains saved and the UI shows a small AI-only failure message.
+2. If the date already has AI fields and saved Korean content changed, the UI asks whether to save only or save and rewrite the current date's AI fields.
+3. `saveTimesheetEntryAction` saves the day exactly as today.
+4. The UI immediately shows the saved state.
+5. If AI cleanup is enabled and the user has an API key, the client starts a separate AI server action without blocking the save.
+6. The UI shows `AI 정리 중` while the action runs.
+7. The AI action reloads authoritative server-side data, generates missing fields, persists only allowed fields, and returns changed dates.
+8. The client merges returned days into the visible month state.
+9. If AI fails, the saved work remains saved and the UI shows a small AI-only failure message.
 
 This is a background-like UX, not a durable job queue. A later version can replace the client-triggered server action with a queue while preserving the same action boundary.
 
@@ -91,6 +92,8 @@ Backfill fills missing fields only:
 
 If a date has multiple work entries, the day summary should summarize the combined work for that date. If some entries already have translations, keep them unchanged and use them only as context.
 
+When the user confirms a rewrite after changing saved Korean content, the overwrite exception applies only to the current saved date. Previous-date backfill remains missing-field-only.
+
 ## Prompt Contract
 
 The AI request should send compact JSON:
@@ -106,7 +109,7 @@ The response should be strict JSON with only:
 - `entries[].id`
 - `entries[].aiTranslation`
 
-The server validates the response against the saved data before applying changes. Unknown dates, unknown entry IDs, vacation/holiday entries, unsupported fields, or non-empty field overwrites are rejected.
+The server validates the response against the saved data before applying changes. Unknown dates, unknown entry IDs, vacation/holiday entries, unsupported fields, or non-empty field overwrites are rejected unless the overwrite was explicitly requested for the current date.
 
 ## Error Handling
 
@@ -162,4 +165,4 @@ The editor save area should display AI status separately from save status:
 - No durable background queue in the first version.
 - No automatic creation of missing work records.
 - No AI processing for drafts, missing dates, future dates, vacation-only days, or holiday-only days.
-- No overwrite of user-written `aiTranslation` or `shortVersion` in the first version.
+- No persistent auto-overwrite setting for user-written `aiTranslation` or `shortVersion` in the first version.

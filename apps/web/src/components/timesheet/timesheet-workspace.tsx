@@ -109,6 +109,10 @@ type TimesheetAiCleanupResult = {
   skipped: boolean;
 };
 
+type AiCleanupOptions = {
+  overwriteCurrentDate?: boolean;
+};
+
 type GeminiApiKeyTestResult = {
   ok: boolean;
 };
@@ -149,7 +153,7 @@ type TimesheetWorkspaceProps = {
   loadMonthAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   resetAllHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   resetHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
-  runAiCleanupAction: (dateKey: string) => Promise<TimesheetAiCleanupResult>;
+  runAiCleanupAction: (dateKey: string, options?: AiCleanupOptions) => Promise<TimesheetAiCleanupResult>;
   saveEntryAction: (entry: TimesheetDayDraft) => Promise<TimesheetDayDraft>;
   saveHolidayApiKeyAction: (serviceKey: string) => Promise<void>;
   testGeminiApiKeyAction: (params: { apiKey?: string; model: string }) => Promise<GeminiApiKeyTestResult>;
@@ -515,6 +519,32 @@ function sanitizeDayForSave(day: TimesheetDayDraft): TimesheetDayDraft {
   };
 }
 
+function entryKey(entry: TimesheetEntryDraft): string {
+  return entry.id || entry.clientId;
+}
+
+function hasExistingAiFields(day: TimesheetDayDraft): boolean {
+  return Boolean(day.shortVersion.trim() || day.entries.some((entry) => entry.kind === "WORK" && entry.aiTranslation.trim()));
+}
+
+function hasWorkContentChange(savedDay: TimesheetDayDraft | undefined, currentDay: TimesheetDayDraft): boolean {
+  if (!savedDay) {
+    return false;
+  }
+
+  const savedWorkEntries = new Map(savedDay.entries.filter((entry) => entry.kind === "WORK").map((entry) => [entryKey(entry), entry]));
+
+  return currentDay.entries.some((entry) => {
+    if (entry.kind !== "WORK") {
+      return false;
+    }
+
+    const savedEntry = savedWorkEntries.get(entryKey(entry));
+
+    return !savedEntry || savedEntry.content.trim() !== entry.content.trim();
+  });
+}
+
 function statusText(row: TimesheetRow): string {
   if (row.hasVacation && row.entries.every((entry) => entry.kind === "VACATION")) {
     return row.vacationName || "휴가";
@@ -669,6 +699,7 @@ export function TimesheetWorkspace({
   const [connectedVacationAction, setConnectedVacationAction] = useState<ConnectedVacationAction>("save");
   const [isConnectedVacationSaving, setIsConnectedVacationSaving] = useState(false);
   const [connectedVacationProgress, setConnectedVacationProgress] = useState({ completed: 0, total: 0 });
+  const [aiRewritePromptDateKey, setAiRewritePromptDateKey] = useState("");
   const [monthLoadState, setMonthLoadState] = useState<MonthLoadState>("idle");
   const [monthLoadError, setMonthLoadError] = useState("");
   const [isInitialMonthSyncing, setIsInitialMonthSyncing] = useState(true);
@@ -1793,7 +1824,22 @@ export function TimesheetWorkspace({
     });
   }
 
-  async function runAiCleanup(dateKey: string) {
+  function shouldPromptForAiRewrite(day: TimesheetDayDraft): boolean {
+    const savedDay = savedRecords[day.dateKey];
+
+    if (!savedDay) {
+      return false;
+    }
+
+    return (
+      aiSetting.enabled &&
+      aiSetting.apiKeySaved &&
+      hasExistingAiFields(savedDay) &&
+      hasWorkContentChange(savedDay, day)
+    );
+  }
+
+  async function runAiCleanup(dateKey: string, options?: AiCleanupOptions) {
     setAiCleanupDateKey(dateKey);
 
     if (!aiSetting.enabled || !aiSetting.apiKeySaved) {
@@ -1806,7 +1852,7 @@ export function TimesheetWorkspace({
     setAiCleanupMessage("AI 정리 중");
 
     try {
-      const result = await runAiCleanupAction(dateKey);
+      const result = await runAiCleanupAction(dateKey, options);
 
       mergeSavedDays(result.days);
       setAiCleanupState(result.skipped ? "skipped" : "done");
@@ -1817,7 +1863,7 @@ export function TimesheetWorkspace({
     }
   }
 
-  async function saveSelectedDraft(options: { skipConnectedVacation?: boolean } = {}) {
+  async function saveSelectedDraft(options: { overwriteAiAfterSave?: boolean; skipAiRewritePrompt?: boolean; skipConnectedVacation?: boolean } = {}) {
     if (selectedIsSingleVacation && !options.skipConnectedVacation) {
       try {
         const prompt = await findConnectedVacationPrompt();
@@ -1836,6 +1882,12 @@ export function TimesheetWorkspace({
     }
 
     const entry = sanitizeDayForSave(selectedDay);
+
+    if (!options.skipAiRewritePrompt && shouldPromptForAiRewrite(entry)) {
+      setAiRewritePromptDateKey(entry.dateKey);
+      return;
+    }
+
     const selectedIndexBeforeSave = selectedDay.entries.findIndex((dayEntry) => dayEntry.clientId === selectedEntryId);
 
     setSaveState("saving");
@@ -1861,7 +1913,7 @@ export function TimesheetWorkspace({
       }));
       setIsDirty(false);
       setSaveState("saved");
-      void runAiCleanup(savedEntry.dateKey);
+      void runAiCleanup(savedEntry.dateKey, options.overwriteAiAfterSave ? { overwriteCurrentDate: true } : undefined);
     } catch {
       setSaveState("error");
       setSaveError("저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
@@ -2794,6 +2846,30 @@ export function TimesheetWorkspace({
               </Button>
               <Button disabled={isConnectedVacationSaving} onClick={() => void saveConnectedVacationPrompt()} type="button">
                 {isConnectedVacationSaving ? "저장 중" : "함께 저장"}
+              </Button>
+            </div>
+          </div>
+        </ModalShell>
+      ) : null}
+
+      {aiRewritePromptDateKey ? (
+        <ModalShell onClose={() => setAiRewritePromptDateKey("")} title="AI 번역/요약 업데이트">
+          <div className="space-y-4">
+            <p className="text-sm leading-6 text-slate-600">
+              {formatKoreanDate(aiRewritePromptDateKey)}의 내용이 변경되었고 기존 영문 번역본 또는 짧은 버전이 있습니다. 저장 후 AI가 현재 날짜의 번역본과 요약을 새 내용 기준으로 다시 작성할까요?
+            </p>
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600">
+              이전 날짜 보정은 기존처럼 비어 있는 AI 필드만 채우고, 덮어쓰기는 현재 날짜에만 적용됩니다.
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <Button onClick={() => setAiRewritePromptDateKey("")} type="button" variant="secondary">
+                취소
+              </Button>
+              <Button onClick={() => { setAiRewritePromptDateKey(""); void saveSelectedDraft({ skipAiRewritePrompt: true }); }} type="button" variant="secondary">
+                저장만
+              </Button>
+              <Button onClick={() => { setAiRewritePromptDateKey(""); void saveSelectedDraft({ overwriteAiAfterSave: true, skipAiRewritePrompt: true }); }} type="button">
+                AI도 업데이트
               </Button>
             </div>
           </div>

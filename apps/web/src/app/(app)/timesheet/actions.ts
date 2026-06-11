@@ -209,15 +209,20 @@ type AiCleanupResponse = {
   }>;
 };
 
+type AiCleanupOptions = {
+  overwriteCurrentDate?: boolean;
+};
+
 function selectAiCleanupTargets(params: {
   currentDateKey: string;
   days: StoredTimesheetDraft[];
+  overwriteCurrentDate: boolean;
   setting: UserAiSetting;
 }): AiCleanupTargetDay[] {
   const currentDay = params.days.find((day) => day.dateKey === params.currentDateKey);
   const targets: AiCleanupTargetDay[] = [];
 
-  if (currentDay && needsAiCleanup(currentDay)) {
+  if (currentDay && (needsAiCleanup(currentDay) || (params.overwriteCurrentDate && hasSavedWorkContent(currentDay)))) {
     targets.push(currentDay);
   }
 
@@ -276,6 +281,7 @@ async function requestGeminiAiCleanup(params: {
   apiKey: string;
   contextDays: StoredTimesheetDraft[];
   model: string;
+  overwriteDateKey?: string;
   targetDays: AiCleanupTargetDay[];
 }): Promise<AiCleanupResponse> {
   const text = await requestGeminiText({
@@ -336,21 +342,27 @@ async function requestGeminiText(params: { apiKey: string; model: string; prompt
 
 function buildAiCleanupPrompt(params: {
   contextDays: StoredTimesheetDraft[];
+  overwriteDateKey?: string;
   targetDays: AiCleanupTargetDay[];
 }) {
+  const overwriteInstruction = params.overwriteDateKey
+    ? `For target date ${params.overwriteDateKey}, rewrite all returned WORK entry aiTranslation values and the day shortVersion even if existing values are present. Use existing English only as reference context, not as a locked value.`
+    : "There is no overwrite target in this request.";
+
   return `You help prepare concise English work-report text from Korean timesheet records.
 
 Return ONLY valid JSON. Do not include Markdown, comments, explanations, or code fences.
 
 Rules:
 1. Translate only saved WORK entries with Korean content.
-2. Fill only fields that are empty in the target JSON.
-3. Do not overwrite existing aiTranslation or shortVersion values.
+2. Fill only fields that are empty in the target JSON, except for the explicit overwrite target.
+3. Do not overwrite existing aiTranslation or shortVersion values for non-overwrite targets.
 4. Do not invent work that is not in the Korean content or project name.
 5. Keep English concise, professional, and suitable for a monthly report.
 6. Exclude vacation, holiday, missing, future, and draft-only dates.
 7. Use context examples only for style and terminology.
-8. Return only this shape:
+8. ${overwriteInstruction}
+9. Return only this shape:
 {
   "days": [
     {
@@ -421,6 +433,7 @@ function isAiCleanupResponse(value: unknown): value is AiCleanupResponse {
 }
 
 function buildAiCleanupPatches(params: {
+  overwriteDateKey?: string;
   payload: AiCleanupResponse;
   targetDays: AiCleanupTargetDay[];
 }) {
@@ -433,6 +446,7 @@ function buildAiCleanupPatches(params: {
       return [];
     }
 
+    const canOverwriteDay = targetDay.dateKey === params.overwriteDateKey;
     const workEntriesById = new Map(
       targetDay.entries
         .filter((entry) => entry.kind === "WORK" && entry.content.trim())
@@ -440,14 +454,26 @@ function buildAiCleanupPatches(params: {
     );
     const entries = day.entries.flatMap((entry) => {
       const targetEntry = workEntriesById.get(entry.id);
+      const nextTranslation = entry.aiTranslation.trim();
 
-      if (!targetEntry || targetEntry.aiTranslation.trim() || !entry.aiTranslation.trim()) {
+      if (!targetEntry || !nextTranslation) {
         return [];
       }
 
-      return [{ id: entry.id, aiTranslation: entry.aiTranslation.trim() }];
+      if (!canOverwriteDay && targetEntry.aiTranslation.trim()) {
+        return [];
+      }
+
+      if (targetEntry.aiTranslation === nextTranslation) {
+        return [];
+      }
+
+      return [{ id: entry.id, aiTranslation: nextTranslation }];
     });
-    const shortVersion = targetDay.shortVersion.trim() ? targetDay.shortVersion : day.shortVersion.trim();
+    const nextShortVersion = day.shortVersion.trim();
+    const shortVersion = canOverwriteDay
+      ? nextShortVersion || targetDay.shortVersion
+      : targetDay.shortVersion.trim() ? targetDay.shortVersion : nextShortVersion;
 
     if (entries.length === 0 && shortVersion === targetDay.shortVersion) {
       return [];
@@ -503,7 +529,7 @@ export async function saveTimesheetEntryAction(day: StoredTimesheetDraft) {
   return saveTimesheetDay({ day, userId: user.id });
 }
 
-export async function runTimesheetAiCleanupAction(dateKey: string): Promise<TimesheetAiCleanupResult> {
+export async function runTimesheetAiCleanupAction(dateKey: string, options: AiCleanupOptions = {}): Promise<TimesheetAiCleanupResult> {
   const user = await requireSession();
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
@@ -526,7 +552,8 @@ export async function runTimesheetAiCleanupAction(dateKey: string): Promise<Time
   const monthIndex = Number(dateKey.slice(5, 7)) - 1;
   const range = getMonthRange(year, monthIndex);
   const days = await listTimesheetEntries({ ...range, userId: user.id });
-  const targetDays = selectAiCleanupTargets({ currentDateKey: dateKey, days, setting });
+  const overwriteDateKey = options.overwriteCurrentDate ? dateKey : undefined;
+  const targetDays = selectAiCleanupTargets({ currentDateKey: dateKey, days, overwriteCurrentDate: Boolean(overwriteDateKey), setting });
 
   if (targetDays.length === 0) {
     return {
@@ -538,8 +565,12 @@ export async function runTimesheetAiCleanupAction(dateKey: string): Promise<Time
   }
 
   const contextDays = selectAiCleanupContext({ currentDateKey: dateKey, days, excludeDateKeys: new Set(targetDays.map((day) => day.dateKey)), limit: setting.contextDays });
-  const payload = await requestGeminiAiCleanup({ apiKey, contextDays, model: setting.model, targetDays });
-  const patches = buildAiCleanupPatches({ payload, targetDays });
+  const payload = overwriteDateKey
+    ? await requestGeminiAiCleanup({ apiKey, contextDays, model: setting.model, overwriteDateKey, targetDays })
+    : await requestGeminiAiCleanup({ apiKey, contextDays, model: setting.model, targetDays });
+  const patches = overwriteDateKey
+    ? buildAiCleanupPatches({ overwriteDateKey, payload, targetDays })
+    : buildAiCleanupPatches({ payload, targetDays });
 
   if (patches.length === 0) {
     return {
