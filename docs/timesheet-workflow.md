@@ -73,6 +73,18 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - A revision prompt lets the user rerun the LLM with extra style instructions while preserving the same JSON rules.
 - The AI summary tab also shows a manual submission list for work entries. Date, Korean content, AI translation, and day summary each have their own copy control, and each control copies only that field's raw value.
 
+## Save-Time AI Cleanup
+
+- A planned Gemini-based cleanup flow saves the timesheet day first, then runs AI as a separate background-like action.
+- Each user configures their own Gemini API key, model, context-day count, and previous-date backfill limits.
+- Model presets should include `gemini-3.1-flash-lite`, `gemini-3.5-flash`, `gemini-2.5-flash`, `gemini-2.5-pro`, and custom model entry.
+- AI cleanup fills only empty work-entry `aiTranslation` and empty day-level `shortVersion`; it does not overwrite existing user-written values.
+- AI cleanup targets only saved `WORK` records with non-empty Korean content.
+- `작성 예정`, `미기입`, unsaved drafts, future dates, vacation-only days, holiday-only days, vacation entries, holiday entries, and empty-content work entries are excluded from both context examples and update targets.
+- Previous saved workdays can be sent as style/context examples, defaulting to the latest 5 workdays.
+- Previous saved workdays with missing AI fields can be backfilled only when the user enables it, defaulting to at most 3 previous dates per save.
+- AI failure must not roll back or mark the normal timesheet save as failed.
+
 ## Holiday API
 
 - The initial server-rendered month is tracked separately from the browser's current month. If a UTC-hosted server preloads the previous month around the user's local midnight, the client switches to the browser-local current month and fetches that month instead of treating it as already loaded.

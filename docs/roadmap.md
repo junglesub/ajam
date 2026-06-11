@@ -42,6 +42,10 @@ Status: Done.
 - 업무 entry별 `aiTranslation` 및 날짜별 `shortVersion` 일괄 적용
 - 추가 수정 요청 프롬프트로 결과 재생성 지원
 - 사용자 수정본 보존
+- 사용자별 Gemini API key와 모델 설정
+- 저장 후 백그라운드처럼 실행되는 AI 번역/요약 자동 정리
+- 저장된 업무 기록만 AI 대상으로 삼고 `작성 예정`, `미기입`, draft, 휴가, 공휴일은 제외
+- 이전 저장 업무일을 문체/맥락 샘플로 사용하고, 빈 AI 필드가 있는 과거 업무일을 제한적으로 보정
 
 ## Phase 5 - Jamis Extension
 
