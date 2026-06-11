@@ -76,12 +76,13 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 ## Save-Time AI Cleanup
 
 - A planned Gemini-based cleanup flow saves the timesheet day first, then runs AI as a separate background-like action.
-- Each user configures their own Gemini API key, model, context-day count, and previous-date backfill limits.
+- Each user configures their own Gemini API key, model, previous saved WORK date context count, and previous-date backfill limits.
 - Model presets should include `gemini-3.1-flash-lite`, `gemini-3.5-flash`, `gemini-2.5-flash`, `gemini-2.5-pro`, and custom model entry.
 - AI cleanup fills only empty work-entry `aiTranslation` and empty day-level `shortVersion`; it does not overwrite existing user-written values.
 - AI cleanup targets only saved `WORK` records with non-empty Korean content.
 - `작성 예정`, `미기입`, unsaved drafts, future dates, vacation-only days, holiday-only days, vacation entries, holiday entries, and empty-content work entries are excluded from both context examples and update targets.
-- Previous saved workdays can be sent as style/context examples, defaulting to the latest 5 workdays.
+- Previous saved WORK dates can be sent as style/context examples, defaulting to the latest 5 eligible WORK dates.
+- The context count is not calendar days: vacation days, holidays, missing dates, draft-only dates, and saved work entries with empty Korean content do not consume the count.
 - Previous saved workdays with missing AI fields can be backfilled only when the user enables it, defaulting to at most 3 previous dates per save.
 - AI failure must not roll back or mark the normal timesheet save as failed.
 

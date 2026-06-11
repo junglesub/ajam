@@ -38,7 +38,7 @@
 - `HolidayFetchLog`: `getRestDeInfo` 월별 조회 여부를 저장해 같은 월을 반복 fetch하지 않게 한다.
 - `Vacation`: 사용자별 휴가 날짜, 이름, 시간을 저장한다. 업무 기록을 휴가로 저장하면 같은 날짜의 휴가 레코드가 동기화된다.
 - `AppSetting`: 공공데이터포털 서비스 키 같은 앱 설정값을 저장한다.
-- `UserAiSetting` planned: 사용자별 Gemini API key, 모델, 자동 정리 여부, 참고 업무일 수, 과거 미작성 AI 필드 보정 설정을 저장한다. API key는 앱 secret으로 암호화해 저장한다.
+- `UserAiSetting` planned: 사용자별 Gemini API key, 모델, 자동 정리 여부, 참고할 이전 저장 WORK 날짜 수, 과거 미작성 AI 필드 보정 설정을 저장한다. API key는 앱 secret으로 암호화해 저장한다.
 - `ReminderLog`: 사용자별 날짜와 리마인더 유형의 발송 기록을 저장해 n8n 재시도나 중복 실행 시 같은 리마인더가 반복 발송되지 않게 한다.
 
 ## Holiday Sync

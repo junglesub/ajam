@@ -13,7 +13,7 @@ The settings modal should add an `AI 자동 정리` section with these user-owne
 - `enabled`: master switch for AI cleanup.
 - `geminiApiKey`: user-entered Gemini API key. Store encrypted and never show the raw value after save.
 - `model`: Gemini model string.
-- `contextDays`: number of previous saved workdays to send as style/context examples. Options: `0`, `3`, `5`, `10`; default `5`.
+- `contextDays`: number of previous saved WORK dates to send as style/context examples. Options: `0`, `3`, `5`, `10`; default `5`.
 - `backfillMissing`: whether to also fill missing AI fields on previous saved workdays.
 - `backfillLimit`: maximum number of previous dates to backfill per save. Options: `1`, `3`, `5`; default `3`.
 
@@ -62,7 +62,7 @@ Included as context examples:
 - previous saved `WORK` entries
 - entries with non-empty Korean `content`
 - preferably entries with existing `aiTranslation` or day-level `shortVersion`
-- no more than `contextDays` previous workdays
+- no more than `contextDays` previous saved WORK dates
 
 Excluded from both update targets and context examples:
 
@@ -75,6 +75,8 @@ Excluded from both update targets and context examples:
 - holiday entries
 - vacation entries
 - work entries with empty Korean content
+
+`contextDays` counts eligible saved WORK dates, not calendar days. Vacation days, holidays, weekends with no saved work, missing dates, and draft-only dates do not consume the count. If one eligible date has multiple WORK entries, it still counts as one context date and sends those eligible WORK entries together.
 
 AI must never invent missing work records. It only translates and summarizes saved user input.
 
