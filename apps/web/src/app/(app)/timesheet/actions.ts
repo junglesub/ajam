@@ -213,6 +213,14 @@ type AiCleanupOptions = {
   overwriteCurrentDate?: boolean;
 };
 
+type AiCleanupPatch = {
+  dateKey: string;
+  entries: Array<{ aiTranslation: string; id: string }>;
+  shortVersion: string;
+};
+
+type AiNoChangeReason = "blank-ai-response" | "none" | "protected-existing" | "same-as-existing" | "unknown-response";
+
 function selectAiCleanupTargets(params: {
   currentDateKey: string;
   days: StoredTimesheetDraft[];
@@ -379,22 +387,26 @@ Rules:
 }
 
 Context examples:
-${JSON.stringify(params.contextDays.map(toAiCleanupPromptDay), null, 2)}
+${JSON.stringify(params.contextDays.map((day) => toAiCleanupPromptDay(day)), null, 2)}
 
 Targets:
-${JSON.stringify(params.targetDays.map(toAiCleanupPromptDay), null, 2)}`;
+${JSON.stringify(params.targetDays.map((day) => toAiCleanupPromptDay(day, { overwriteDateKey: params.overwriteDateKey })), null, 2)}`;
 }
 
-function toAiCleanupPromptDay(day: StoredTimesheetDraft) {
+function toAiCleanupPromptDay(day: StoredTimesheetDraft, options: { overwriteDateKey?: string } = {}) {
+  const shouldRewrite = day.dateKey === options.overwriteDateKey;
+
   return {
     dateKey: day.dateKey,
-    shortVersion: day.shortVersion,
+    previousShortVersion: shouldRewrite ? day.shortVersion : undefined,
+    shortVersion: shouldRewrite ? "" : day.shortVersion,
     entries: day.entries
       .filter((entry) => entry.kind === "WORK" && entry.content.trim())
       .map((entry) => ({
-        aiTranslation: entry.aiTranslation,
+        aiTranslation: shouldRewrite ? "" : entry.aiTranslation,
         content: entry.content,
         id: entry.id || entry.clientId,
+        previousAiTranslation: shouldRewrite ? entry.aiTranslation : undefined,
         project: entry.project
       }))
   };
@@ -438,12 +450,20 @@ function buildAiCleanupPatches(params: {
   targetDays: AiCleanupTargetDay[];
 }) {
   const targetDaysByDate = new Map(params.targetDays.map((day) => [day.dateKey, day]));
+  const skipped = {
+    blankAiResponse: 0,
+    protectedExisting: 0,
+    sameAsExisting: 0,
+    unknownResponse: 0
+  };
+  const patches: AiCleanupPatch[] = [];
 
-  return params.payload.days.flatMap((day) => {
+  for (const day of params.payload.days) {
     const targetDay = targetDaysByDate.get(day.dateKey);
 
     if (!targetDay) {
-      return [];
+      skipped.unknownResponse += 1;
+      continue;
     }
 
     const canOverwriteDay = targetDay.dateKey === params.overwriteDateKey;
@@ -456,15 +476,23 @@ function buildAiCleanupPatches(params: {
       const targetEntry = workEntriesById.get(entry.id);
       const nextTranslation = entry.aiTranslation.trim();
 
-      if (!targetEntry || !nextTranslation) {
+      if (!targetEntry) {
+        skipped.unknownResponse += 1;
+        return [];
+      }
+
+      if (!nextTranslation) {
+        skipped.blankAiResponse += 1;
         return [];
       }
 
       if (!canOverwriteDay && targetEntry.aiTranslation.trim()) {
+        skipped.protectedExisting += 1;
         return [];
       }
 
       if (targetEntry.aiTranslation === nextTranslation) {
+        skipped.sameAsExisting += 1;
         return [];
       }
 
@@ -475,18 +503,74 @@ function buildAiCleanupPatches(params: {
       ? nextShortVersion || targetDay.shortVersion
       : targetDay.shortVersion.trim() ? targetDay.shortVersion : nextShortVersion;
 
-    if (entries.length === 0 && shortVersion === targetDay.shortVersion) {
-      return [];
+    if (!nextShortVersion && !targetDay.shortVersion.trim()) {
+      skipped.blankAiResponse += 1;
+    } else if (!canOverwriteDay && targetDay.shortVersion.trim() && nextShortVersion) {
+      skipped.protectedExisting += 1;
+    } else if (targetDay.shortVersion === shortVersion) {
+      skipped.sameAsExisting += 1;
     }
 
-    return [
-      {
-        dateKey: targetDay.dateKey,
-        entries,
-        shortVersion
-      }
-    ];
-  });
+    if (entries.length === 0 && shortVersion === targetDay.shortVersion) {
+      continue;
+    }
+
+    patches.push({
+      dateKey: targetDay.dateKey,
+      entries,
+      shortVersion
+    });
+  }
+
+  return {
+    patches,
+    reason: getAiNoChangeReason(skipped)
+  };
+}
+
+function getAiNoChangeReason(skipped: {
+  blankAiResponse: number;
+  protectedExisting: number;
+  sameAsExisting: number;
+  unknownResponse: number;
+}): AiNoChangeReason {
+  if (skipped.protectedExisting > 0) {
+    return "protected-existing";
+  }
+
+  if (skipped.sameAsExisting > 0) {
+    return "same-as-existing";
+  }
+
+  if (skipped.blankAiResponse > 0) {
+    return "blank-ai-response";
+  }
+
+  if (skipped.unknownResponse > 0) {
+    return "unknown-response";
+  }
+
+  return "none";
+}
+
+function getAiNoChangeMessage(reason: AiNoChangeReason): string {
+  if (reason === "protected-existing") {
+    return "사유 1: 기존 AI 번역본/짧은 버전이 이미 있고 덮어쓰기 요청이 아니어서 업데이트하지 않았습니다. 내용 수정 후에는 'AI도 업데이트'를 선택해 주세요.";
+  }
+
+  if (reason === "same-as-existing") {
+    return "사유 2: AI가 기존 번역/요약과 같은 내용을 반환해서 업데이트할 차이가 없습니다.";
+  }
+
+  if (reason === "blank-ai-response") {
+    return "사유 3: AI가 빈 번역/요약을 반환해서 업데이트하지 않았습니다. 내용을 조금 더 구체적으로 적고 다시 저장해 주세요.";
+  }
+
+  if (reason === "unknown-response") {
+    return "AI 응답에 알 수 없는 날짜나 항목이 포함되어 업데이트하지 않았습니다.";
+  }
+
+  return "AI가 적용 가능한 변경사항을 반환하지 않았습니다.";
 }
 
 export async function loadTimesheetMonthAction(year: number, monthIndex: number): Promise<TimesheetMonthData> {
@@ -554,12 +638,15 @@ export async function runTimesheetAiCleanupAction(dateKey: string, options: AiCl
   const days = await listTimesheetEntries({ ...range, userId: user.id });
   const overwriteDateKey = options.overwriteCurrentDate ? dateKey : undefined;
   const targetDays = selectAiCleanupTargets({ currentDateKey: dateKey, days, overwriteCurrentDate: Boolean(overwriteDateKey), setting });
+  const currentDay = days.find((day) => day.dateKey === dateKey);
 
   if (targetDays.length === 0) {
     return {
       appliedDateKeys: [],
       days: [],
-      message: "AI로 채울 빈 번역/요약이 없습니다.",
+      message: currentDay && hasSavedWorkContent(currentDay) && !needsAiCleanup(currentDay) && !overwriteDateKey
+        ? getAiNoChangeMessage("protected-existing")
+        : "AI로 채울 빈 번역/요약이 없습니다.",
       skipped: true
     };
   }
@@ -568,15 +655,16 @@ export async function runTimesheetAiCleanupAction(dateKey: string, options: AiCl
   const payload = overwriteDateKey
     ? await requestGeminiAiCleanup({ apiKey, contextDays, model: setting.model, overwriteDateKey, targetDays })
     : await requestGeminiAiCleanup({ apiKey, contextDays, model: setting.model, targetDays });
-  const patches = overwriteDateKey
+  const patchResult = overwriteDateKey
     ? buildAiCleanupPatches({ overwriteDateKey, payload, targetDays })
     : buildAiCleanupPatches({ payload, targetDays });
+  const patches = patchResult.patches;
 
   if (patches.length === 0) {
     return {
       appliedDateKeys: [],
       days: [],
-      message: "AI가 적용 가능한 변경사항을 반환하지 않았습니다.",
+      message: getAiNoChangeMessage(patchResult.reason),
       skipped: true
     };
   }

@@ -8,7 +8,7 @@ The first implementation supports Gemini only, uses each user's own API key, and
 
 ## User Settings
 
-The settings modal should add an `AI 자동 정리` section with these user-owned settings:
+The settings modal should group user-owned controls under `내 설정`. `AI 자동 정리` belongs there because the API key and cleanup preferences are owned by each user, not by the site.
 
 - `enabled`: master switch for AI cleanup.
 - `geminiApiKey`: user-entered Gemini API key. Store encrypted and never show the raw value after save.
@@ -142,8 +142,11 @@ API keys must be encrypted at rest using an app-level secret. The UI should only
 
 ## UI Notes
 
-The settings modal should keep the section compact:
+The settings modal should keep `내 설정` and `사이트 설정` visually distinct. General users see only `내 설정`; admins also see `사이트 설정`.
 
+`내 설정` contains:
+
+- account information
 - AI automatic cleanup toggle
 - Gemini API key password field
 - API key test button
@@ -152,12 +155,21 @@ The settings modal should keep the section compact:
 - previous missing-field backfill toggle
 - backfill limit selector
 
+`사이트 설정` is admin-only and contains:
+
+- holiday API key
+- holiday cache reset controls
+- user management
+
 The editor save area should display AI status separately from save status:
 
 - `AI 정리 중`
 - `AI 정리 완료`
 - `이전 N일 보정됨`
 - `AI 실패: API key 또는 네트워크 확인 필요`
+- no-change reason 1: existing AI fields were protected because overwrite was not requested
+- no-change reason 2: AI returned the same translation or summary already saved
+- no-change reason 3: AI returned blank translation or summary values
 
 ## Non-Goals
 

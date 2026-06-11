@@ -2463,45 +2463,48 @@ export function TimesheetWorkspace({
             <section className="rounded-md border border-slate-200 bg-slate-50 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-bold text-slate-950">유저 설정</h3>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">아이디, 이메일, 비밀번호를 변경합니다.</p>
+                  <h3 className="text-sm font-bold text-slate-950">내 설정</h3>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">계정 정보와 개인 AI 자동 정리를 관리합니다.</p>
                 </div>
                 <Badge tone={isAdmin ? "green" : "gray"}>{isAdmin ? "관리자" : "일반"}</Badge>
               </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <Field label="아이디">
-                  <Input onChange={(event) => setProfileUsername(event.target.value)} value={profileUsername} />
-                </Field>
-                <Field label="이메일">
-                  <Input autoComplete="email" onChange={(event) => setProfileEmail(event.target.value)} placeholder="reminder@example.com" type="email" value={profileEmail} />
-                </Field>
-                <Field label="새 비밀번호">
-                  <Input autoComplete="new-password" onChange={(event) => setProfilePassword(event.target.value)} placeholder="변경 시에만 입력" type="password" value={profilePassword} />
-                </Field>
-              </div>
-              {profileState === "saved" ? <p className="mt-3 text-sm font-semibold text-emerald-700">계정 정보를 저장했습니다.</p> : null}
-              {profileState === "error" ? <p className="mt-3 text-sm font-semibold text-red-600">{profileError}</p> : null}
-              <div className="mt-4 flex justify-end">
-                <Button disabled={profileState === "saving"} onClick={() => void saveProfile()} type="button">
-                  {profileState === "saving" ? "저장 중" : "계정 저장"}
-                </Button>
-              </div>
-            </section>
 
-            <section className="rounded-md border border-slate-200 bg-white p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-950">AI 자동 정리</h3>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">저장 후 Gemini로 빈 영문 번역본과 짧은 버전을 채웁니다.</p>
+              <div className="mt-4 rounded-md border border-slate-200 bg-white p-4">
+                <h4 className="text-sm font-bold text-slate-950">계정 정보</h4>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <Field label="아이디">
+                    <Input onChange={(event) => setProfileUsername(event.target.value)} value={profileUsername} />
+                  </Field>
+                  <Field label="이메일">
+                    <Input autoComplete="email" onChange={(event) => setProfileEmail(event.target.value)} placeholder="reminder@example.com" type="email" value={profileEmail} />
+                  </Field>
+                  <Field label="새 비밀번호">
+                    <Input autoComplete="new-password" onChange={(event) => setProfilePassword(event.target.value)} placeholder="변경 시에만 입력" type="password" value={profilePassword} />
+                  </Field>
                 </div>
-                <Badge tone={aiSetting.apiKeySaved ? "green" : "gray"}>{aiSetting.apiKeySaved ? "키 저장됨" : "키 없음"}</Badge>
+                {profileState === "saved" ? <p className="mt-3 text-sm font-semibold text-emerald-700">계정 정보를 저장했습니다.</p> : null}
+                {profileState === "error" ? <p className="mt-3 text-sm font-semibold text-red-600">{profileError}</p> : null}
+                <div className="mt-4 flex justify-end">
+                  <Button disabled={profileState === "saving"} onClick={() => void saveProfile()} type="button">
+                    {profileState === "saving" ? "저장 중" : "계정 저장"}
+                  </Button>
+                </div>
               </div>
 
-              <div className="mt-4 space-y-4">
-                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                  <input checked={aiEnabled} className="size-4 accent-slate-950" onChange={(event) => setAiEnabled(event.target.checked)} type="checkbox" />
-                  AI 자동 정리 사용
-                </label>
+              <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50/50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-950">개인 AI 자동 정리</h4>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">내 Gemini API key로 저장 후 빈 영문 번역본과 짧은 버전을 채웁니다.</p>
+                  </div>
+                  <Badge tone={aiSetting.apiKeySaved ? "green" : "gray"}>{aiSetting.apiKeySaved ? "개인 key 저장됨" : "개인 key 없음"}</Badge>
+                </div>
+
+                <div className="mt-4 space-y-4">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                    <input checked={aiEnabled} className="size-4 accent-slate-950" onChange={(event) => setAiEnabled(event.target.checked)} type="checkbox" />
+                    AI 자동 정리 사용
+                  </label>
 
                 <Field label="Gemini API key">
                   <Input
@@ -2597,118 +2600,127 @@ export function TimesheetWorkspace({
                   </Field>
                 </div>
 
-                <p className="text-xs font-medium leading-5 text-slate-500">미기입, 작성 예정, draft, 휴가, 공휴일, 빈 내용 업무는 참고/보정 대상에서 제외됩니다. 기존 번역본과 요약은 덮어쓰지 않습니다.</p>
-              </div>
-
-              {(aiSettingState !== "idle" || aiTestMessage) ? (
-                <div className="mt-3 space-y-1">
-                  {aiSettingMessage ? <p className={cn("text-sm font-semibold", aiSettingState === "error" ? "text-red-600" : "text-emerald-700")}>{aiSettingMessage}</p> : null}
-                  {aiTestMessage ? <p className={cn("text-sm font-semibold", aiTestState === "error" ? "text-red-600" : "text-emerald-700")}>{aiTestMessage}</p> : null}
+                  <p className="text-xs font-medium leading-5 text-slate-500">미기입, 작성 예정, draft, 휴가, 공휴일, 빈 내용 업무는 참고/보정 대상에서 제외됩니다. 기존 번역본과 요약은 덮어쓰지 않습니다.</p>
                 </div>
-              ) : null}
 
-              <div className="mt-4 flex flex-wrap justify-end gap-2">
-                <Button disabled={aiTestState === "saving"} onClick={() => void testAiSetting()} type="button" variant="secondary">
-                  {aiTestState === "saving" ? "테스트 중" : "키 테스트"}
-                </Button>
-                <Button disabled={aiSettingState === "saving"} onClick={() => void saveAiSetting()} type="button">
-                  {aiSettingState === "saving" ? "저장 중" : "AI 설정 저장"}
-                </Button>
+                {(aiSettingState !== "idle" || aiTestMessage) ? (
+                  <div className="mt-3 space-y-1">
+                    {aiSettingMessage ? <p className={cn("text-sm font-semibold", aiSettingState === "error" ? "text-red-600" : "text-emerald-700")}>{aiSettingMessage}</p> : null}
+                    {aiTestMessage ? <p className={cn("text-sm font-semibold", aiTestState === "error" ? "text-red-600" : "text-emerald-700")}>{aiTestMessage}</p> : null}
+                  </div>
+                ) : null}
+
+                <div className="mt-4 flex flex-wrap justify-end gap-2">
+                  <Button disabled={aiTestState === "saving"} onClick={() => void testAiSetting()} type="button" variant="secondary">
+                    {aiTestState === "saving" ? "테스트 중" : "키 테스트"}
+                  </Button>
+                  <Button disabled={aiSettingState === "saving"} onClick={() => void saveAiSetting()} type="button">
+                    {aiSettingState === "saving" ? "저장 중" : "AI 설정 저장"}
+                  </Button>
+                </div>
               </div>
             </section>
 
             {isAdmin ? (
               <section className="rounded-md border border-slate-200 bg-white p-4">
-                <h3 className="text-sm font-bold text-slate-950">공휴일 API</h3>
-                <p className="mt-1 text-sm leading-6 text-slate-600">data.go.kr 서비스 키를 저장하고 현재 월 기준으로 테스트합니다.</p>
-                <div className="mt-4">
-                  <Field label="공공데이터포털 서비스 키">
-                    <Input onChange={(event) => setHolidayApiKey(event.target.value)} placeholder="서비스 키" type="password" value={holidayApiKey} />
-                  </Field>
-                </div>
-                {(holidayApiKeyState === "saved" || holidayApiKeyState === "error" || holidayApiKeyTestMessage) ? (
-                  <div className="mt-3 space-y-1">
-                    {holidayApiKeyState === "saved" ? <p className="text-sm font-semibold text-emerald-700">API 키를 저장했습니다.</p> : null}
-                    {holidayApiKeyState === "error" ? <p className="text-sm font-semibold text-red-600">{holidayApiKeyError}</p> : null}
-                    {holidayApiKeyTestMessage ? (
-                      <p className={cn("text-sm font-semibold", holidayApiKeyTestState === "error" ? "text-red-600" : "text-emerald-700")}>{holidayApiKeyTestMessage}</p>
-                    ) : null}
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-950">사이트 설정</h3>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">관리자만 공휴일, 캐시, 사용자 설정을 변경할 수 있습니다.</p>
                   </div>
-                ) : null}
-                <div className="mt-4 flex flex-wrap justify-end gap-2">
-                  <Button disabled={holidayApiKeyTestState === "saving"} onClick={() => void testHolidayApiKey()} type="button" variant="secondary">
-                    {holidayApiKeyTestState === "saving" ? "테스트 중" : "키 테스트"}
-                  </Button>
-                  <Button disabled={holidayApiKeyState === "saving"} onClick={() => void saveHolidayApiKey()} type="button">
-                    {holidayApiKeyState === "saving" ? "저장 중" : "키 저장"}
-                  </Button>
+                  <Badge tone="green">관리자 전용</Badge>
                 </div>
-              </section>
-            ) : null}
 
-            {isAdmin ? (
-              <section className="rounded-md border border-slate-200 bg-white p-4">
-                <h3 className="text-sm font-bold text-slate-950">공휴일 캐시</h3>
-                <p className="mt-1 text-sm leading-6 text-slate-600">현재 표시 중인 월의 공휴일 캐시를 삭제하고 다시 조회합니다.</p>
-                {holidayResetState === "saved" ? <p className="mt-3 text-sm font-semibold text-emerald-700">공휴일 정보를 다시 불러왔습니다.</p> : null}
-                {holidayResetState === "error" ? <p className="mt-3 text-sm font-semibold text-red-600">{holidayResetError}</p> : null}
-                <div className="mt-4 flex flex-wrap justify-end gap-2">
-                  {isDevelopment ? (
-                    <Button disabled={holidayResetState === "saving"} onClick={() => void resetAllHolidays()} type="button" variant="secondary">
-                      <Trash2 aria-hidden="true" className="size-4" />
-                      모든 API 공휴일 삭제
-                    </Button>
-                  ) : null}
-                  <Button disabled={holidayResetState === "saving"} onClick={() => void resetCurrentMonthHolidays()} type="button" variant="secondary">
-                    <RotateCcw aria-hidden="true" className="size-4" />
-                    {holidayResetState === "saving" ? "다시 불러오는 중" : "현재 월 공휴일 리셋"}
-                  </Button>
-                </div>
-              </section>
-            ) : null}
-
-            {isAdmin ? (
-              <section className="rounded-md border border-slate-200 bg-white p-4">
-                <h3 className="text-sm font-bold text-slate-950">사용자 관리</h3>
-                <div className="mt-3 divide-y divide-slate-100 rounded-md border border-slate-200 bg-slate-50">
-                  {managedUsers.map((user) => (
-                    <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm" key={user.id}>
-                      <div className="min-w-0">
-                        <span className="block truncate font-semibold text-slate-950">{user.username}</span>
-                        <span className="block truncate text-xs font-medium text-slate-500">{user.email || "이메일 없음"}</span>
-                      </div>
-                      <Badge tone={user.role === "ADMIN" ? "green" : "gray"}>{user.role === "ADMIN" ? "관리자" : "일반"}</Badge>
+                <div className="mt-4 space-y-4">
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+                    <h4 className="text-sm font-bold text-slate-950">공휴일 API</h4>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">data.go.kr 서비스 키를 저장하고 현재 월 기준으로 테스트합니다.</p>
+                    <div className="mt-4">
+                      <Field label="공공데이터포털 서비스 키">
+                        <Input onChange={(event) => setHolidayApiKey(event.target.value)} placeholder="서비스 키" type="password" value={holidayApiKey} />
+                      </Field>
                     </div>
-                  ))}
-                </div>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <Field label="아이디">
-                    <Input onChange={(event) => setNewUserUsername(event.target.value)} value={newUserUsername} />
-                  </Field>
-                  <Field label="이메일">
-                    <Input autoComplete="email" onChange={(event) => setNewUserEmail(event.target.value)} placeholder="reminder@example.com" type="email" value={newUserEmail} />
-                  </Field>
-                  <Field label="비밀번호">
-                    <Input autoComplete="new-password" onChange={(event) => setNewUserPassword(event.target.value)} type="password" value={newUserPassword} />
-                  </Field>
-                  <Field label="권한">
-                    <select
-                      className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                      onChange={(event) => setNewUserRole(event.target.value === "ADMIN" ? "ADMIN" : "USER")}
-                      value={newUserRole}
-                    >
-                      <option value="USER">일반</option>
-                      <option value="ADMIN">관리자</option>
-                    </select>
-                  </Field>
-                </div>
-                {userCreateState === "saved" ? <p className="mt-3 text-sm font-semibold text-emerald-700">사용자를 추가했습니다.</p> : null}
-                {userCreateState === "error" ? <p className="mt-3 text-sm font-semibold text-red-600">{userCreateError}</p> : null}
-                <div className="mt-4 flex justify-end">
-                  <Button disabled={userCreateState === "saving"} onClick={() => void createUser()} type="button">
-                    <Plus aria-hidden="true" className="size-4" />
-                    {userCreateState === "saving" ? "추가 중" : "사용자 추가"}
-                  </Button>
+                    {(holidayApiKeyState === "saved" || holidayApiKeyState === "error" || holidayApiKeyTestMessage) ? (
+                      <div className="mt-3 space-y-1">
+                        {holidayApiKeyState === "saved" ? <p className="text-sm font-semibold text-emerald-700">API 키를 저장했습니다.</p> : null}
+                        {holidayApiKeyState === "error" ? <p className="text-sm font-semibold text-red-600">{holidayApiKeyError}</p> : null}
+                        {holidayApiKeyTestMessage ? (
+                          <p className={cn("text-sm font-semibold", holidayApiKeyTestState === "error" ? "text-red-600" : "text-emerald-700")}>{holidayApiKeyTestMessage}</p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <div className="mt-4 flex flex-wrap justify-end gap-2">
+                      <Button disabled={holidayApiKeyTestState === "saving"} onClick={() => void testHolidayApiKey()} type="button" variant="secondary">
+                        {holidayApiKeyTestState === "saving" ? "테스트 중" : "키 테스트"}
+                      </Button>
+                      <Button disabled={holidayApiKeyState === "saving"} onClick={() => void saveHolidayApiKey()} type="button">
+                        {holidayApiKeyState === "saving" ? "저장 중" : "키 저장"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+                    <h4 className="text-sm font-bold text-slate-950">공휴일 캐시</h4>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">현재 표시 중인 월의 공휴일 캐시를 삭제하고 다시 조회합니다.</p>
+                    {holidayResetState === "saved" ? <p className="mt-3 text-sm font-semibold text-emerald-700">공휴일 정보를 다시 불러왔습니다.</p> : null}
+                    {holidayResetState === "error" ? <p className="mt-3 text-sm font-semibold text-red-600">{holidayResetError}</p> : null}
+                    <div className="mt-4 flex flex-wrap justify-end gap-2">
+                      {isDevelopment ? (
+                        <Button disabled={holidayResetState === "saving"} onClick={() => void resetAllHolidays()} type="button" variant="secondary">
+                          <Trash2 aria-hidden="true" className="size-4" />
+                          모든 API 공휴일 삭제
+                        </Button>
+                      ) : null}
+                      <Button disabled={holidayResetState === "saving"} onClick={() => void resetCurrentMonthHolidays()} type="button" variant="secondary">
+                        <RotateCcw aria-hidden="true" className="size-4" />
+                        {holidayResetState === "saving" ? "다시 불러오는 중" : "현재 월 공휴일 리셋"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+                    <h4 className="text-sm font-bold text-slate-950">사용자 관리</h4>
+                    <div className="mt-3 divide-y divide-slate-100 rounded-md border border-slate-200 bg-white">
+                      {managedUsers.map((user) => (
+                        <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm" key={user.id}>
+                          <div className="min-w-0">
+                            <span className="block truncate font-semibold text-slate-950">{user.username}</span>
+                            <span className="block truncate text-xs font-medium text-slate-500">{user.email || "이메일 없음"}</span>
+                          </div>
+                          <Badge tone={user.role === "ADMIN" ? "green" : "gray"}>{user.role === "ADMIN" ? "관리자" : "일반"}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <Field label="아이디">
+                        <Input onChange={(event) => setNewUserUsername(event.target.value)} value={newUserUsername} />
+                      </Field>
+                      <Field label="이메일">
+                        <Input autoComplete="email" onChange={(event) => setNewUserEmail(event.target.value)} placeholder="reminder@example.com" type="email" value={newUserEmail} />
+                      </Field>
+                      <Field label="비밀번호">
+                        <Input autoComplete="new-password" onChange={(event) => setNewUserPassword(event.target.value)} type="password" value={newUserPassword} />
+                      </Field>
+                      <Field label="권한">
+                        <select
+                          className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                          onChange={(event) => setNewUserRole(event.target.value === "ADMIN" ? "ADMIN" : "USER")}
+                          value={newUserRole}
+                        >
+                          <option value="USER">일반</option>
+                          <option value="ADMIN">관리자</option>
+                        </select>
+                      </Field>
+                    </div>
+                    {userCreateState === "saved" ? <p className="mt-3 text-sm font-semibold text-emerald-700">사용자를 추가했습니다.</p> : null}
+                    {userCreateState === "error" ? <p className="mt-3 text-sm font-semibold text-red-600">{userCreateError}</p> : null}
+                    <div className="mt-4 flex justify-end">
+                      <Button disabled={userCreateState === "saving"} onClick={() => void createUser()} type="button">
+                        <Plus aria-hidden="true" className="size-4" />
+                        {userCreateState === "saving" ? "추가 중" : "사용자 추가"}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </section>
             ) : null}

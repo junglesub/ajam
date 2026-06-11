@@ -77,10 +77,12 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 
 - The Gemini-based cleanup flow saves the timesheet day first, then runs AI as a separate background-like action.
 - Each user configures their own Gemini API key, model, previous saved WORK date context count, and previous-date backfill limits.
+- AI settings are shown under `내 설정` because the Gemini API key and cleanup preferences are user-owned, not site-wide server settings.
 - Model presets should include `gemini-3.1-flash-lite`, `gemini-3.5-flash`, `gemini-2.5-flash`, `gemini-2.5-pro`, and custom model entry.
 - AI cleanup fills only empty work-entry `aiTranslation` and empty day-level `shortVersion`; it does not overwrite existing user-written values.
 - If a saved WORK date already has `aiTranslation` or `shortVersion` and the user changes Korean content, saving asks whether AI should rewrite the current date's translation and summary.
 - When the user confirms that rewrite, only the current date may overwrite existing AI fields; previous-date backfill still fills empty fields only.
+- If Gemini responds but no patch can be applied, the UI reports the precise no-change reason: protected existing fields without overwrite, same text as the existing AI fields, or blank AI output.
 - AI cleanup targets only saved `WORK` records with non-empty Korean content.
 - `작성 예정`, `미기입`, unsaved drafts, future dates, vacation-only days, holiday-only days, vacation entries, holiday entries, and empty-content work entries are excluded from both context examples and update targets.
 - Previous saved WORK dates can be sent as style/context examples, defaulting to the latest 5 eligible WORK dates.
@@ -90,6 +92,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 
 ## Holiday API
 
+- Site settings are visible only to admins and contain shared settings such as the holiday API key, holiday cache controls, and user management.
 - The initial server-rendered month is tracked separately from the browser's current month. If a UTC-hosted server preloads the previous month around the user's local midnight, the client switches to the browser-local current month and fetches that month instead of treating it as already loaded.
 - During that initial server/browser month sync, the app shows a full-screen loading state so the previous server-rendered month does not flash before the browser-local month is ready.
 - data.go.kr holiday loading failures do not break the whole timesheet page.
