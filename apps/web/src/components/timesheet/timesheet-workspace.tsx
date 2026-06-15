@@ -664,6 +664,7 @@ export function TimesheetWorkspace({
   const [savedEntryDateKeys, setSavedEntryDateKeys] = useState(() => new Set(initialMonthData.entries.map((entry) => entry.dateKey)));
   const [selectedEntryIdByDate, setSelectedEntryIdByDate] = useState<Record<string, string>>(() => buildSelectedEntryIds(records));
   const [editingNotionEntryClientId, setEditingNotionEntryClientId] = useState<string | null>(null);
+  const [includeDoneNotionCandidates, setIncludeDoneNotionCandidates] = useState(false);
   const notionCandidates = useNotionCardCandidates({ loadNotionCardCandidatesAction, refreshNotionCardCandidatesAction });
   const [projects, setProjects] = useState(() => mergeProjects([], initialMonthData.projects));
   const [loadedMonthKeys, setLoadedMonthKeys] = useState(() => {
@@ -941,6 +942,22 @@ export function TimesheetWorkspace({
     if (message) {
       setNotionSyncError(message);
     }
+  }
+
+  function getEditingNotionLinkedPageIds(): string[] {
+    if (!editingNotionEntryClientId) {
+      return [];
+    }
+
+    return selectedDay.entries.find((entry) => (entry.clientId || entry.id) === editingNotionEntryClientId)?.notionCards.map((link) => link.notionPageId) ?? [];
+  }
+
+  function refreshNotionCandidatesForEditing(includeDone = includeDoneNotionCandidates) {
+    notionCandidates.refreshCandidates({
+      dateKey: selectedDateKey,
+      includeDone,
+      linkedPageIds: getEditingNotionLinkedPageIds()
+    });
   }
 
   async function fillPreviousProjectFromDatabase(dateKey: string, clientId: string) {
@@ -2573,6 +2590,7 @@ export function TimesheetWorkspace({
                       setEditingNotionEntryClientId(selectedEntry.clientId || selectedEntry.id);
                       notionCandidates.loadCandidates({
                         dateKey: selectedDateKey,
+                        includeDone: includeDoneNotionCandidates,
                         linkedPageIds: selectedEntry.notionCards.map((link) => link.notionPageId)
                       });
                     }}
@@ -3096,21 +3114,15 @@ export function TimesheetWorkspace({
       <NotionCardPickerModal
         candidates={notionCandidates.candidatesByDate[selectedDateKey] ?? []}
         error={notionCandidates.error}
+        includeDone={includeDoneNotionCandidates}
         isLoading={notionCandidates.isPending}
-        linkedPageIds={
-          editingNotionEntryClientId
-            ? selectedDay.entries.find((entry) => (entry.clientId || entry.id) === editingNotionEntryClientId)?.notionCards.map((link) => link.notionPageId) ?? []
-            : []
-        }
+        linkedPageIds={getEditingNotionLinkedPageIds()}
         onClose={() => setEditingNotionEntryClientId(null)}
-        onRefresh={() =>
-          notionCandidates.refreshCandidates({
-            dateKey: selectedDateKey,
-            linkedPageIds: editingNotionEntryClientId
-              ? selectedDay.entries.find((entry) => (entry.clientId || entry.id) === editingNotionEntryClientId)?.notionCards.map((link) => link.notionPageId) ?? []
-              : []
-          })
-        }
+        onIncludeDoneChange={(includeDone) => {
+          setIncludeDoneNotionCandidates(includeDone);
+          refreshNotionCandidatesForEditing(includeDone);
+        }}
+        onRefresh={() => refreshNotionCandidatesForEditing()}
         onToggleCard={(notionPageId) => {
           if (editingNotionEntryClientId) {
             toggleNotionCardForEntry(editingNotionEntryClientId, notionPageId);

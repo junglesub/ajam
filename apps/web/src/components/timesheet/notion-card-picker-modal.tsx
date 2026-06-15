@@ -10,9 +10,11 @@ import type { NotionCardCandidate, NotionCardCandidateSyncMeta } from "./use-not
 type NotionCardPickerModalProps = {
   candidates: NotionCardCandidate[];
   error: string;
+  includeDone: boolean;
   isLoading?: boolean;
   linkedPageIds: string[];
   onClose: () => void;
+  onIncludeDoneChange: (includeDone: boolean) => void;
   onRefresh: () => void;
   onToggleCard: (notionPageId: string) => void;
   open: boolean;
@@ -22,9 +24,11 @@ type NotionCardPickerModalProps = {
 export function NotionCardPickerModal({
   candidates,
   error,
+  includeDone,
   isLoading = false,
   linkedPageIds,
   onClose,
+  onIncludeDoneChange,
   onRefresh,
   onToggleCard,
   open,
@@ -73,6 +77,16 @@ export function NotionCardPickerModal({
         </div>
 
         {error ? <p className="mt-3 text-sm font-semibold text-red-600">{error}</p> : null}
+
+        <label className="mt-4 flex w-fit cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-slate-300 hover:bg-white">
+          <input
+            checked={includeDone}
+            className="size-4 accent-slate-950"
+            onChange={(event) => onIncludeDoneChange(event.target.checked)}
+            type="checkbox"
+          />
+          완료 카드 포함
+        </label>
 
         <div className="mt-4 max-h-[420px] divide-y divide-slate-100 overflow-y-auto border-y border-slate-100">
           {candidates.length === 0 && isLoading ? (

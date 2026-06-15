@@ -105,7 +105,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - The internal Notion daily maintenance API lets n8n refresh open-card cache data and update mapped fields for active cards at midnight, especially the available-hours value for cards without an end date. It does not need to update the last-worked-date field because that value changes only when aJam work-entry mappings are saved or deleted.
 - If the `열린 카드 동기화` control syncs cards and writable mapped fields exist, the Notion card screen asks whether to update those synced card fields.
 - Skipping or failing the `열린 카드 동기화` field update is non-blocking: aJam keeps the card cache sync result.
-- Done cards are excluded from default candidate search, but already-linked cards remain visible when the entry is edited.
+- Done cards are excluded from default candidate search, but already-linked cards remain visible when the entry is edited. The picker has a `완료 카드 포함` toggle for backfilling older work entries that need completed cards.
 - Candidate sync tries Notion first and falls back to cached cards so Notion API errors do not block normal timesheet writing.
 - Period-based estimates use mapped open cards as the denominator and exclude holidays and vacations.
 - When a saved work date has no explicit work hours for the estimate, the default fallback remains `8h = 1 day`.

@@ -33,6 +33,7 @@ export type NotionCardCandidatesResult = {
 
 export type LoadNotionCardCandidatesInput = {
   dateKey: string;
+  includeDone?: boolean;
   linkedPageIds?: string[];
 };
 

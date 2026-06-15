@@ -91,6 +91,7 @@ export type LoadNotionCardCandidatesInput =
   | string
   | {
       dateKey: string;
+      includeDone?: boolean;
       linkedPageIds?: string[];
     };
 
@@ -793,6 +794,7 @@ async function syncNotionWorkHoursAfterTimesheetSave(params: {
 export async function loadNotionCardCandidatesAction(input: LoadNotionCardCandidatesInput): Promise<NotionCardCandidatesResult> {
   const user = await requireSession();
   const { dateKey, linkedPageIds } = normalizeNotionCandidateInput(input);
+  const includeDone = getNotionCandidateIncludeDone(input);
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
     throw new Error("날짜 형식이 올바르지 않습니다.");
@@ -802,7 +804,7 @@ export async function loadNotionCardCandidatesAction(input: LoadNotionCardCandid
     getDateNotionSyncRun({ dateKey, status: "success", userId: user.id }),
     getUserNotionConnection(user.id)
   ]);
-  const doneStatusValues = connection?.doneStatusValues ?? [];
+  const doneStatusValues = includeDone ? [] : connection?.doneStatusValues ?? [];
 
   if (latestSuccess) {
     const [candidates, latestRun] = await Promise.all([
@@ -827,6 +829,7 @@ export async function loadNotionCardCandidatesAction(input: LoadNotionCardCandid
 export async function refreshNotionCardCandidatesAction(input: LoadNotionCardCandidatesInput): Promise<NotionCardCandidatesResult> {
   const user = await requireSession();
   const { dateKey, linkedPageIds } = normalizeNotionCandidateInput(input);
+  const includeDone = getNotionCandidateIncludeDone(input);
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
     throw new Error("날짜 형식이 올바르지 않습니다.");
@@ -836,7 +839,7 @@ export async function refreshNotionCardCandidatesAction(input: LoadNotionCardCan
 
   return syncNotionCardCandidatesForDate({
     dateKey,
-    doneStatusValues: connection?.doneStatusValues ?? [],
+    doneStatusValues: includeDone ? [] : connection?.doneStatusValues ?? [],
     linkedPageIds,
     userId: user.id
   });
@@ -942,6 +945,10 @@ function normalizeNotionCandidateInput(input: LoadNotionCardCandidatesInput): {
     dateKey: input.dateKey,
     linkedPageIds: [...new Set((input.linkedPageIds ?? []).map((pageId) => pageId.trim()).filter(Boolean))]
   };
+}
+
+function getNotionCandidateIncludeDone(input: LoadNotionCardCandidatesInput): boolean {
+  return typeof input === "string" ? false : Boolean(input.includeDone);
 }
 
 function getDateNotionSyncRun(params: {
