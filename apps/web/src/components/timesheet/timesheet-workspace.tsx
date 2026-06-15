@@ -17,7 +17,7 @@ import {
   useSortable,
   verticalListSortingStrategy
 } from "@dnd-kit/sortable";
-import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 
 import {
   allocateNotionCardHours,
@@ -742,6 +742,7 @@ export function TimesheetWorkspace({
   const [monthLoadState, setMonthLoadState] = useState<MonthLoadState>("idle");
   const [monthLoadError, setMonthLoadError] = useState("");
   const [isInitialMonthSyncing, setIsInitialMonthSyncing] = useState(true);
+  const previousNotionCardRecommendationKeys = useRef(new Set<string>());
 
   useEffect(() => {
     const browserToday = new Date();
@@ -930,6 +931,25 @@ export function TimesheetWorkspace({
 
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [isDirty]);
+
+  useEffect(() => {
+    if (savedEntryDateKeys.has(selectedDateKey)) {
+      return;
+    }
+
+    const entry = records[selectedDateKey]?.entries[0];
+
+    if (entry?.kind === "WORK" && entry.notionCards.length === 0) {
+      const recommendationKey = `${selectedDateKey}:${entry.clientId}`;
+
+      if (previousNotionCardRecommendationKeys.current.has(recommendationKey)) {
+        return;
+      }
+
+      previousNotionCardRecommendationKeys.current.add(recommendationKey);
+      void fillPreviousNotionCardsFromDatabase(selectedDateKey, entry.clientId);
+    }
+  }, [records, savedEntryDateKeys, selectedDateKey]);
 
   function resetEntryFeedback() {
     setSaveState("idle");
