@@ -221,6 +221,28 @@ describe("Notion work entry allocations", () => {
 
     assert.throws(() => allocateNotionCardHours({ entryHours: 3, links }), /allocated hours/);
   });
+
+  it("normalizes manual allocation precision before storing", () => {
+    const links: WorkEntryNotionCardLink[] = [
+      {
+        allocatedHours: 4.001,
+        allocationMode: "manual",
+        notionPageId: "card-a",
+        source: "manual"
+      },
+      {
+        allocatedHours: 3.999,
+        allocationMode: "manual",
+        notionPageId: "card-b",
+        source: "manual"
+      }
+    ];
+
+    assert.deepEqual(allocateNotionCardHours({ entryHours: 8.001, links }), [
+      { ...links[0], allocatedHours: 4 },
+      { ...links[1], allocatedHours: 4 }
+    ]);
+  });
 });
 
 describe("Notion date normalization", () => {

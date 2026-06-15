@@ -79,11 +79,7 @@ export async function runNotionDailyMaintenance(params: {
         usersUpdated += 1;
       }
 
-      if (syncResult.skippedReason) {
-        usersSkipped += 1;
-      }
-
-      if (syncResult.errors.length > 0) {
+      if (syncResult.skippedReason || syncResult.errors.length > 0) {
         usersSkipped += 1;
       }
 

@@ -29,6 +29,8 @@ export type NotionWorkHoursSyncResult = {
   updated: number;
 };
 
+type NotionWorkHoursSkipReason = NonNullable<NotionWorkHoursSyncResult["skippedReason"]>;
+
 export async function syncNotionWorkHoursForPages(params: {
   includeLastWorkedDate?: boolean;
   notionPageIds: string[];
@@ -46,11 +48,11 @@ export async function syncNotionWorkHoursForPages(params: {
   ]);
 
   if (!connection) {
-    return { errors: [], failed: 0, skippedReason: "missing_connection", updated: 0 };
+    return buildSkippedResult({ notionPageIds, skippedReason: "missing_connection" });
   }
 
   if (!token) {
-    return { errors: [], failed: 0, skippedReason: "missing_token", updated: 0 };
+    return buildSkippedResult({ notionPageIds, skippedReason: "missing_token" });
   }
 
   const ajamLastUpdatePropertyKey = isMappedNotionPropertyType(connection.ajamLastUpdateProperty, "date")
@@ -88,11 +90,11 @@ export async function syncNotionWorkHoursForPages(params: {
   });
 
   if (properties.length === 0) {
-    return { errors: [], failed: 0, skippedReason: "missing_number_properties", updated: 0 };
+    return buildSkippedResult({ notionPageIds, skippedReason: "missing_number_properties" });
   }
 
   if (validProperties.length === 0) {
-    return { errors: [], failed: 0, skippedReason: "invalid_number_properties", updated: 0 };
+    return buildSkippedResult({ notionPageIds, skippedReason: "invalid_number_properties" });
   }
 
   const shouldSyncAvailableHours = validProperties.some((property) => property.kind === "availableHours");
@@ -171,6 +173,39 @@ export async function syncNotionWorkHoursForPages(params: {
   }
 
   return { errors, failed: errors.length, updated };
+}
+
+function buildSkippedResult(params: {
+  notionPageIds: string[];
+  skippedReason: NotionWorkHoursSkipReason;
+}): NotionWorkHoursSyncResult {
+  const message = mapSkippedReason(params.skippedReason);
+
+  return {
+    errors: params.notionPageIds.map((notionPageId) => ({
+      message,
+      notionPageId
+    })),
+    failed: params.notionPageIds.length,
+    skippedReason: params.skippedReason,
+    updated: 0
+  };
+}
+
+function mapSkippedReason(reason: NotionWorkHoursSkipReason): string {
+  if (reason === "missing_connection") {
+    return "Notion 연결 설정이 없어 필드 업데이트를 건너뛰었습니다.";
+  }
+
+  if (reason === "missing_token") {
+    return "Notion token이 없어 필드 업데이트를 건너뛰었습니다.";
+  }
+
+  if (reason === "missing_number_properties") {
+    return "업데이트할 Notion 숫자/날짜 필드 매핑이 없어 필드 업데이트를 건너뛰었습니다.";
+  }
+
+  return "Notion 필드 매핑 타입이 올바르지 않아 필드 업데이트를 건너뛰었습니다.";
 }
 
 async function buildAvailableHoursByPage(params: {

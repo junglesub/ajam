@@ -131,7 +131,7 @@ function normalizeEntry(entry: StoredTimesheetEntry, sortOrder: number): StoredT
   const isWork = kind === "WORK";
   const isVacation = kind === "VACATION";
   const isHoliday = kind === "HOLIDAY";
-  const hours = Number.isFinite(entry.hours) ? entry.hours : 0;
+  const hours = normalizeHours(entry.hours);
   const notionCards = isWork
     ? allocateNotionCardHours({
         entryHours: hours,
@@ -152,6 +152,14 @@ function normalizeEntry(entry: StoredTimesheetEntry, sortOrder: number): StoredT
     sortOrder,
     vacationName: isVacation ? entry.vacationName.trim() : ""
   };
+}
+
+function normalizeHours(value: number): number {
+  if (!Number.isFinite(value) || value < 0) {
+    return 0;
+  }
+
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 function normalizeNotionCards(links: TimesheetEntryNotionCardDraft[] | undefined): TimesheetEntryNotionCardDraft[] {

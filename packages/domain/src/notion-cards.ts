@@ -236,24 +236,27 @@ export function allocateNotionCardHours({
   }
 
   const hasManualAllocation = links.some((link) => link.allocationMode === "manual");
+  const entryHourCents = toHourCents(entryHours);
 
   if (hasManualAllocation) {
-    const allocatedTotal = links.reduce((total, link) => total + link.allocatedHours, 0);
+    const allocatedTotalCents = links.reduce((total, link) => total + toHourCents(link.allocatedHours), 0);
 
-    if (roundToTwoDecimals(allocatedTotal) !== roundToTwoDecimals(entryHours)) {
+    if (allocatedTotalCents !== entryHourCents) {
       throw new Error("Notion card allocated hours must equal the work entry hours.");
     }
 
-    return links;
+    return links.map((link) => ({
+      ...link,
+      allocatedHours: toHoursFromCents(toHourCents(link.allocatedHours))
+    }));
   }
 
-  const totalCents = Math.round(roundToTwoDecimals(entryHours) * 100);
-  const baseCents = Math.floor(totalCents / links.length);
-  const remainderCents = totalCents - baseCents * links.length;
+  const baseCents = Math.floor(entryHourCents / links.length);
+  const remainderCents = entryHourCents - baseCents * links.length;
 
   return links.map((link, index) => ({
     ...link,
-    allocatedHours: (baseCents + (index < remainderCents ? 1 : 0)) / 100
+    allocatedHours: toHoursFromCents(baseCents + (index < remainderCents ? 1 : 0))
   }));
 }
 
@@ -356,4 +359,12 @@ function parseDateKey(dateKey: string): Date {
 
 function roundToTwoDecimals(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function toHourCents(value: number): number {
+  return Math.round(roundToTwoDecimals(value) * 100);
+}
+
+function toHoursFromCents(value: number): number {
+  return value / 100;
 }

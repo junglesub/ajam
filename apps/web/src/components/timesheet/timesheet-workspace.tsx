@@ -2587,10 +2587,11 @@ export function TimesheetWorkspace({
                     disabled={isFutureWork}
                     entry={selectedEntry}
                     onOpenPicker={() => {
+                      setIncludeDoneNotionCandidates(false);
                       setEditingNotionEntryClientId(selectedEntry.clientId || selectedEntry.id);
                       notionCandidates.loadCandidates({
                         dateKey: selectedDateKey,
-                        includeDone: includeDoneNotionCandidates,
+                        includeDone: false,
                         linkedPageIds: selectedEntry.notionCards.map((link) => link.notionPageId)
                       });
                     }}
@@ -3117,7 +3118,10 @@ export function TimesheetWorkspace({
         includeDone={includeDoneNotionCandidates}
         isLoading={notionCandidates.isPending}
         linkedPageIds={getEditingNotionLinkedPageIds()}
-        onClose={() => setEditingNotionEntryClientId(null)}
+        onClose={() => {
+          setEditingNotionEntryClientId(null);
+          setIncludeDoneNotionCandidates(false);
+        }}
         onIncludeDoneChange={(includeDone) => {
           setIncludeDoneNotionCandidates(includeDone);
           refreshNotionCandidatesForEditing(includeDone);
