@@ -25,6 +25,30 @@
 - 사용자 이메일은 `User.email`에 저장하고, 이메일이 없는 사용자는 리마인더 대상에서 제외한다.
 - 발송 중복 방지는 `ReminderLog`에 사용자/날짜/유형별 발송 기록을 남기는 방식으로 처리한다.
 
+## 2026-06-15
+
+- Notion 카드 연동은 사용자별 internal integration token 직접 입력으로 시작하고, 나중에 OAuth를 추가할 수 있게 `authType` 기반 연결 모델을 둔다.
+- Notion 데이터는 전체 복제하지 않고 화면에 필요한 날짜/월 범위의 카드 스냅샷만 aJam DB에 캐시한다.
+- Notion 연동은 1차에서 읽기 전용으로 유지하며, Notion API 실패가 업무 기록 저장을 막지 않게 한다.
+- Notion 카드는 하루 전체가 아니라 `WORK` entry별로 여러 개 연결할 수 있게 한다.
+- 동기화된 Notion 카드는 후보일 뿐이며, 업무 기록에 매핑된 카드만 시간/기간 분석에 참여한다.
+- 카드별 업무기록 시간은 기본 균등 배분하고 사용자가 필요하면 수동 배분할 수 있게 한다.
+- 완료 카드 분석은 기간 기반 추정과 업무기록 연결 시간을 함께 보여주며, 일수 표시는 `8h = 1일` 환산값으로만 사용한다.
+- Notion 시작일이 없는 카드는 후보와 기간 기반 추정에서 제외하고, 완료 상태지만 완료일이 없는 카드는 추정 불가로 표시한다.
+- 월 분석 동기화가 실패하면 마지막 캐시 기준 추정임을 표시해 캐시 불완전성을 드러낸다.
+- 수동 카드 시간 배분 합계는 해당 `WORK` entry의 시간과 일치해야 저장할 수 있다.
+- Notion API는 `2026-03-11` data source API를 기준으로 하고, UI 입력값은 database/data source URL 또는 ID를 허용하되 내부 query 대상은 `dataSourceId`로 저장한다.
+- Notion 필드 매핑은 property name만 저장하지 않고 property `id`, `name`, `type`을 함께 저장한다.
+- 날짜 매핑은 별도 시작/완료 date property와 단일 date range property를 모두 지원한다.
+- scope별 동기화 상태와 오류를 위해 `NotionSyncRun` 모델을 1차 MVP에 포함한다.
+- 완료 상태인데 완료일이 없는 카드는 다른 카드의 기간 기반 추정 분모에서 제외한다.
+- 업무 entry 시간이 바뀌면 자동 배분은 재계산하고, 수동 배분은 합계 검증을 다시 통과해야 한다.
+- database 입력값이 여러 data source를 가리키면 사용자가 data source를 선택해야 하며, 직접 data source ID를 입력하면 schema 조회로 검증한다.
+- 카드 캐시의 raw Notion properties는 매핑된 속성과 진단용 metadata만 저장한다.
+- done status 값 변경도 `analysisConfigVersion` 증가 조건에 포함한다.
+- Notion query pagination이 중간에 멈추면 sync run을 partial로 기록하고 완전한 synced-month estimate로 표시하지 않는다.
+- scoped query에서 보이지 않았다는 이유만으로 카드 캐시를 전역 stale 처리하지 않는다.
+
 ## Pending
 
 - AI 번역/요약을 OpenAI API로 처리할 때의 모델, 프롬프트, 비용 제어 정책

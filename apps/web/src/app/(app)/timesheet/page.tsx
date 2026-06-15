@@ -10,8 +10,11 @@ import {
   addProjectAction,
   createUserAction,
   deleteTimesheetEntryAction,
+  findPreviousOpenNotionCardsAction,
   findPreviousProjectAction,
+  loadNotionCardCandidatesAction,
   loadTimesheetMonthAction,
+  refreshNotionCardCandidatesAction,
   resetAllHolidayCacheAction,
   resetHolidayCacheAction,
   runTimesheetAiCleanupAction,
@@ -56,6 +59,7 @@ export default async function TimesheetPage() {
       createUserAction={createUserAction}
       currentUser={currentUser}
       deleteEntryAction={deleteTimesheetEntryAction}
+      findPreviousNotionCardsAction={findPreviousOpenNotionCardsAction}
       findPreviousProjectAction={findPreviousProjectAction}
       initialHolidayApiKey={holidayApiKey ?? ""}
       initialManagedUsers={managedUsers}
@@ -64,6 +68,8 @@ export default async function TimesheetPage() {
       initialTodayKey={initialTodayKey}
       initialYear={today.getFullYear()}
       loadMonthAction={loadTimesheetMonthAction}
+      loadNotionCardCandidatesAction={loadNotionCardCandidatesAction}
+      refreshNotionCardCandidatesAction={refreshNotionCardCandidatesAction}
       resetAllHolidayCacheAction={resetAllHolidayCacheAction}
       resetHolidayCacheAction={resetHolidayCacheAction}
       runAiCleanupAction={runTimesheetAiCleanupAction}

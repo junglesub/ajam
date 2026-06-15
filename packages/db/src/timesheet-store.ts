@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 
+import type { TimesheetEntryNotionCardDraft } from "@timesheet/domain";
+
 import { prisma } from "./client";
+import { ensureNotionSchema } from "./notion-store";
 import { ensureApplicationSchema, getAppSetting } from "./settings-store";
 
 export type StoredTimesheetEntry = {
@@ -11,6 +14,7 @@ export type StoredTimesheetEntry = {
   hours: number;
   id: string;
   kind: "WORK" | "VACATION" | "HOLIDAY";
+  notionCards: TimesheetEntryNotionCardDraft[];
   project: string;
   sortOrder: number;
   vacationName: string;
@@ -36,9 +40,19 @@ export type VacationRecord = {
   name: string;
 };
 
-type TimesheetEntryRow = StoredTimesheetEntry & {
+type TimesheetEntryRow = {
+  aiTranslation: string;
+  clientId: string;
+  content: string;
   dateKey: string;
+  holidayName: string;
+  hours: number;
+  id: string;
+  kind: "WORK" | "VACATION" | "HOLIDAY";
+  project: string;
+  sortOrder: number;
   userId: string;
+  vacationName: string;
 };
 
 type TimesheetDayRow = {
@@ -74,6 +88,10 @@ type ProjectSummaryRow = {
   latestDateKey: string | null;
   name: string;
   totalHours: number | null;
+};
+
+type WorkEntryNotionCardRow = TimesheetEntryNotionCardDraft & {
+  timesheetEntryId: string;
 };
 
 type TimesheetTransaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
@@ -122,10 +140,27 @@ function normalizeEntry(entry: StoredTimesheetEntry, sortOrder: number): StoredT
     hours: Number.isFinite(entry.hours) ? entry.hours : 0,
     id: entry.id.trim(),
     kind,
+    notionCards: isWork ? normalizeNotionCards(entry.notionCards) : [],
     project: isWork ? entry.project.trim() : "",
     sortOrder,
     vacationName: isVacation ? entry.vacationName.trim() : ""
   };
+}
+
+function normalizeNotionCards(links: TimesheetEntryNotionCardDraft[] | undefined): TimesheetEntryNotionCardDraft[] {
+  return (links ?? [])
+    .map((link): TimesheetEntryNotionCardDraft => ({
+      allocatedHours: Number.isFinite(link.allocatedHours) ? link.allocatedHours : 0,
+      allocationMode: link.allocationMode === "manual" ? "manual" : "auto",
+      category: link.category?.trim() ?? "",
+      endDate: link.endDate?.trim() ?? "",
+      notionPageId: link.notionPageId.trim(),
+      source: link.source === "previous_business_day_default" ? "previous_business_day_default" : "manual",
+      startDate: link.startDate?.trim() ?? "",
+      status: link.status?.trim() ?? "",
+      title: link.title?.trim() ?? ""
+    }))
+    .filter((link) => link.notionPageId);
 }
 
 function normalizeDay(day: StoredTimesheetDay): StoredTimesheetDay {
@@ -162,6 +197,9 @@ export async function ensureTimesheetSchema() {
   if (schemaReady) {
     return;
   }
+
+  await ensureApplicationSchema();
+  await ensureNotionSchema();
 
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "TimesheetEntry" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -244,6 +282,77 @@ export async function ensureTimesheetSchema() {
   schemaReady = true;
 }
 
+async function listEntryNotionCards(params: {
+  entryIds: string[];
+  userId: string;
+}): Promise<Map<string, TimesheetEntryNotionCardDraft[]>> {
+  if (params.entryIds.length === 0) {
+    return new Map();
+  }
+
+  const entryIdPlaceholders = params.entryIds.map(() => "?").join(", ");
+  const rows = await prisma.$queryRawUnsafe<WorkEntryNotionCardRow[]>(
+    `SELECT link."timesheetEntryId", link."notionPageId", link."allocatedHours", link."allocationMode", link."source",
+            coalesce(cache."title", '') AS "title", coalesce(cache."status", '') AS "status", coalesce(cache."category", '') AS "category",
+            coalesce(cache."startDate", '') AS "startDate", coalesce(cache."endDate", '') AS "endDate"
+     FROM "WorkEntryNotionCard" link
+     LEFT JOIN "NotionCardCache" cache ON cache."userId" = link."userId" AND cache."notionPageId" = link."notionPageId"
+     WHERE link."userId" = ? AND link."timesheetEntryId" IN (${entryIdPlaceholders})
+     ORDER BY link."createdAt" ASC`,
+    params.userId,
+    ...params.entryIds
+  );
+
+  return mapNotionCardLinks(rows);
+}
+
+async function listEntryNotionCardsInTransaction(params: {
+  entryIds: string[];
+  transaction: TimesheetTransaction;
+  userId: string;
+}): Promise<Map<string, TimesheetEntryNotionCardDraft[]>> {
+  if (params.entryIds.length === 0) {
+    return new Map();
+  }
+
+  const entryIdPlaceholders = params.entryIds.map(() => "?").join(", ");
+  const rows = await params.transaction.$queryRawUnsafe<WorkEntryNotionCardRow[]>(
+    `SELECT link."timesheetEntryId", link."notionPageId", link."allocatedHours", link."allocationMode", link."source",
+            coalesce(cache."title", '') AS "title", coalesce(cache."status", '') AS "status", coalesce(cache."category", '') AS "category",
+            coalesce(cache."startDate", '') AS "startDate", coalesce(cache."endDate", '') AS "endDate"
+     FROM "WorkEntryNotionCard" link
+     LEFT JOIN "NotionCardCache" cache ON cache."userId" = link."userId" AND cache."notionPageId" = link."notionPageId"
+     WHERE link."userId" = ? AND link."timesheetEntryId" IN (${entryIdPlaceholders})
+     ORDER BY link."createdAt" ASC`,
+    params.userId,
+    ...params.entryIds
+  );
+
+  return mapNotionCardLinks(rows);
+}
+
+function mapNotionCardLinks(rows: WorkEntryNotionCardRow[]): Map<string, TimesheetEntryNotionCardDraft[]> {
+  const linksByEntryId = new Map<string, TimesheetEntryNotionCardDraft[]>();
+
+  for (const row of rows) {
+    const links = linksByEntryId.get(row.timesheetEntryId) ?? [];
+    links.push({
+      allocatedHours: row.allocatedHours,
+      allocationMode: row.allocationMode === "manual" ? "manual" : "auto",
+      category: row.category,
+      endDate: row.endDate,
+      notionPageId: row.notionPageId,
+      source: row.source === "previous_business_day_default" ? "previous_business_day_default" : "manual",
+      startDate: row.startDate,
+      status: row.status,
+      title: row.title
+    });
+    linksByEntryId.set(row.timesheetEntryId, links);
+  }
+
+  return linksByEntryId;
+}
+
 export async function listTimesheetEntries(params: { endDateKey: string; startDateKey: string; userId: string }) {
   await ensureTimesheetSchema();
 
@@ -267,6 +376,10 @@ export async function listTimesheetEntries(params: { endDateKey: string; startDa
       params.endDateKey
     )
   ]);
+  const notionCardsByEntryId = await listEntryNotionCards({
+    entryIds: entries.map((entry) => entry.id),
+    userId: params.userId
+  });
   const days = new Map<string, StoredTimesheetDay>();
 
   for (const day of dayRows) {
@@ -293,6 +406,7 @@ export async function listTimesheetEntries(params: { endDateKey: string; startDa
       id: entry.id,
       clientId: entry.id,
       kind: entry.kind,
+      notionCards: notionCardsByEntryId.get(entry.id) ?? [],
       project: entry.kind === "WORK" ? entry.project : "",
       sortOrder: entry.sortOrder,
       vacationName: entry.kind === "VACATION" ? entry.vacationName : ""
@@ -317,6 +431,39 @@ export async function findLatestWorkProjectBefore(params: { beforeDateKey: strin
   );
 
   return rows[0]?.name ?? "";
+}
+
+export async function findLatestWorkNotionCardsBefore(params: {
+  beforeDateKey: string;
+  userId: string;
+}): Promise<TimesheetEntryNotionCardDraft[]> {
+  await ensureTimesheetSchema();
+
+  const rows = await prisma.$queryRawUnsafe<WorkEntryNotionCardRow[]>(
+    `WITH latest_entry AS (
+       SELECT entry."id"
+       FROM "TimesheetEntry" entry
+       INNER JOIN "WorkEntryNotionCard" link ON link."userId" = entry."userId" AND link."timesheetEntryId" = entry."id"
+       WHERE entry."userId" = ? AND entry."dateKey" < ? AND entry."kind" = 'WORK'
+       GROUP BY entry."id", entry."dateKey", entry."sortOrder", entry."createdAt"
+       ORDER BY entry."dateKey" DESC, entry."sortOrder" ASC, entry."createdAt" DESC
+       LIMIT 1
+     )
+     SELECT link."timesheetEntryId", link."notionPageId", link."allocatedHours", link."allocationMode", link."source",
+            coalesce(cache."title", '') AS "title", coalesce(cache."status", '') AS "status", coalesce(cache."category", '') AS "category",
+            coalesce(cache."startDate", '') AS "startDate", coalesce(cache."endDate", '') AS "endDate"
+     FROM "WorkEntryNotionCard" link
+     INNER JOIN latest_entry ON latest_entry."id" = link."timesheetEntryId"
+     LEFT JOIN "NotionCardCache" cache ON cache."userId" = link."userId" AND cache."notionPageId" = link."notionPageId"
+     WHERE link."userId" = ?
+     ORDER BY link."createdAt" ASC`,
+    params.userId,
+    params.beforeDateKey,
+    params.userId
+  );
+  const entryId = rows[0]?.timesheetEntryId;
+
+  return entryId ? mapNotionCardLinks(rows).get(entryId) ?? [] : [];
 }
 
 async function getDataGoKrServiceKey(): Promise<string | null> {
@@ -615,6 +762,11 @@ async function listTimesheetDaysInTransaction(params: {
       ...dateKeys
     )
   ]);
+  const notionCardsByEntryId = await listEntryNotionCardsInTransaction({
+    entryIds: entries.map((entry) => entry.id),
+    transaction: params.transaction,
+    userId: params.userId
+  });
   const days = new Map<string, StoredTimesheetDay>();
 
   for (const day of dayRows) {
@@ -641,6 +793,7 @@ async function listTimesheetDaysInTransaction(params: {
       id: entry.id,
       clientId: entry.id,
       kind: entry.kind,
+      notionCards: notionCardsByEntryId.get(entry.id) ?? [],
       project: entry.kind === "WORK" ? entry.project : "",
       sortOrder: entry.sortOrder,
       vacationName: entry.kind === "VACATION" ? entry.vacationName : ""
@@ -669,13 +822,16 @@ async function saveTimesheetDayInTransaction(params: {
     params.day.dateKey,
     params.day.shortVersion
   );
+  await params.transaction.$executeRawUnsafe(`DELETE FROM "WorkEntryNotionCard" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.day.dateKey);
   await params.transaction.$executeRawUnsafe(`DELETE FROM "TimesheetEntry" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.day.dateKey);
 
   for (const entry of params.day.entries) {
+    const entryId = entry.id || randomUUID();
+
     await params.transaction.$executeRawUnsafe(
       `INSERT INTO "TimesheetEntry" ("id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "shortVersion", "sortOrder", "vacationName", "holidayName", "createdAt", "updatedAt")
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-      entry.id || randomUUID(),
+      entryId,
       params.userId,
       params.day.dateKey,
       entry.kind,
@@ -687,6 +843,21 @@ async function saveTimesheetDayInTransaction(params: {
       entry.vacationName,
       entry.holidayName
     );
+
+    for (const link of entry.notionCards) {
+      await params.transaction.$executeRawUnsafe(
+        `INSERT INTO "WorkEntryNotionCard" ("id", "userId", "timesheetEntryId", "dateKey", "notionPageId", "allocatedHours", "allocationMode", "source", "createdAt", "updatedAt")
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        randomUUID(),
+        params.userId,
+        entryId,
+        params.day.dateKey,
+        link.notionPageId,
+        link.allocatedHours,
+        link.allocationMode,
+        link.source
+      );
+    }
   }
 
   const vacationEntries = params.day.entries.filter((entry) => entry.kind === "VACATION");
@@ -714,6 +885,7 @@ async function saveTimesheetDayInTransaction(params: {
 export async function deleteTimesheetEntry(params: { dateKey: string; userId: string }) {
   await ensureTimesheetSchema();
 
+  await prisma.$executeRawUnsafe(`DELETE FROM "WorkEntryNotionCard" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);
   await prisma.$executeRawUnsafe(`DELETE FROM "TimesheetEntry" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);
   await prisma.$executeRawUnsafe(`DELETE FROM "TimesheetDay" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);
   await prisma.$executeRawUnsafe(`DELETE FROM "Vacation" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);

@@ -53,3 +53,16 @@ Status: Done.
 - 웹 앱에서 월별 내보내기 API 제공
 - Jamis 입력 화면 자동 매핑
 - 사용자가 제출 전 검수하는 단계 추가
+
+## Phase 6 - Notion Card Sync And Analysis
+
+- 사용자별 Notion internal integration token 연결
+- 사용자별 Notion database와 필드 매핑 설정
+- Notion 카드 스냅샷 캐시 저장
+- 업무 entry별 Notion 카드 다중 연결
+- 이전 업무일 카드 기본 선택
+- 완료 카드의 기간 기반 추정 시간과 업무기록 연결 시간 분석
+- 카테고리별 필터와 요약
+- 이후 OAuth와 webhook 동기화로 확장 가능한 연결 모델 유지
+
+Status: Planned. See `docs/superpowers/specs/2026-06-15-notion-card-sync-design.md`.

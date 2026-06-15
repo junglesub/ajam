@@ -5,18 +5,26 @@ import {
   applyTimesheetAiSummaryPatches,
   createManagedUser,
   deleteTimesheetEntry,
+  findLatestWorkNotionCardsBefore,
   findLatestWorkProjectBefore,
+  getLatestNotionSyncRun,
   getUserAiSetting,
   getUserGeminiApiKey,
+  getUserNotionConnection,
   getManagedUser,
+  listCachedNotionCards,
   listHolidays,
   listProjects,
   listTimesheetEntries,
   listVacations,
   resetHolidayCache,
   setAppSetting,
+  syncNotionCardsForDate,
+  syncNotionWorkHoursForPages,
   updateManagedUser,
   updateUserAiSetting,
+  type NotionCardCacheRecord,
+  type NotionSyncRunRecord,
   type UserAiSetting,
   type UserAiSettingUpdate,
   saveTimesheetDay,
@@ -25,6 +33,7 @@ import {
   type StoredTimesheetEntry,
   type UserRole
 } from "@timesheet/db";
+import { filterOpenNotionCardCandidates, type TimesheetEntryNotionCardDraft } from "@timesheet/domain";
 import { redirect } from "next/navigation";
 
 import { createSession, destroySession, getSession } from "@/server/session";
@@ -49,8 +58,32 @@ export type TimesheetAiCleanupResult = {
   skipped: boolean;
 };
 
+export type TimesheetDeleteResult = {
+  notionSyncError: string;
+};
+
+export type TimesheetSaveResult = {
+  day: StoredTimesheetDraft;
+  notionSyncError: string;
+};
+
 export type GeminiApiKeyTestResult = {
   ok: boolean;
+};
+
+export type NotionCardCandidateSyncMeta = {
+  cardsFetched: number;
+  errorMessage: string;
+  lastAttemptedAt: string;
+  lastFetchedAt: string;
+  partial: boolean;
+  source: "cache" | "notion";
+  status: "success" | "failed" | "";
+};
+
+export type NotionCardCandidatesResult = {
+  candidates: NotionCardCacheRecord[];
+  sync: NotionCardCandidateSyncMeta;
 };
 
 function toDateKey(year: number, monthIndex: number, day: number): string {
@@ -117,6 +150,7 @@ function mergeLegacyVacations(entries: StoredTimesheetDraft[], vacations: Array<
       hours: vacation.hours,
       id: "",
       kind: "VACATION",
+      notionCards: [],
       project: "",
       sortOrder: day.entries.length,
       vacationName: vacation.name
@@ -597,7 +631,7 @@ export async function loadTimesheetMonthAction(year: number, monthIndex: number)
   };
 }
 
-export async function saveTimesheetEntryAction(day: StoredTimesheetDraft) {
+export async function saveTimesheetEntryAction(day: StoredTimesheetDraft): Promise<TimesheetSaveResult> {
   const user = await requireSession();
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day.dateKey)) {
@@ -610,7 +644,16 @@ export async function saveTimesheetEntryAction(day: StoredTimesheetDraft) {
     }
   }
 
-  return saveTimesheetDay({ day, userId: user.id });
+  const previousDay = await listTimesheetEntries({ endDateKey: day.dateKey, startDateKey: day.dateKey, userId: user.id });
+  const affectedNotionPageIds = collectNotionPageIds([...previousDay, day]);
+  const savedDay = await saveTimesheetDay({ day, userId: user.id });
+
+  const notionSyncError = await syncNotionWorkHoursAfterTimesheetSave({ notionPageIds: affectedNotionPageIds, userId: user.id });
+
+  return {
+    day: savedDay,
+    notionSyncError
+  };
 }
 
 export async function runTimesheetAiCleanupAction(dateKey: string, options: AiCleanupOptions = {}): Promise<TimesheetAiCleanupResult> {
@@ -689,14 +732,151 @@ export async function runTimesheetAiCleanupAction(dateKey: string, options: AiCl
   };
 }
 
-export async function deleteTimesheetEntryAction(dateKey: string) {
+export async function deleteTimesheetEntryAction(dateKey: string): Promise<TimesheetDeleteResult> {
   const user = await requireSession();
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
     throw new Error("날짜 형식이 올바르지 않습니다.");
   }
 
+  const previousDay = await listTimesheetEntries({ endDateKey: dateKey, startDateKey: dateKey, userId: user.id });
+  const affectedNotionPageIds = collectNotionPageIds(previousDay);
+
   await deleteTimesheetEntry({ dateKey, userId: user.id });
+  const notionSyncError = await syncNotionWorkHoursAfterTimesheetSave({ notionPageIds: affectedNotionPageIds, userId: user.id });
+
+  return {
+    notionSyncError
+  };
+}
+
+function collectNotionPageIds(days: StoredTimesheetDraft[]): string[] {
+  return [
+    ...new Set(
+      days.flatMap((day) =>
+        day.entries.flatMap((entry) => entry.notionCards.map((link) => link.notionPageId.trim()).filter(Boolean))
+      )
+    )
+  ];
+}
+
+async function syncNotionWorkHoursAfterTimesheetSave(params: {
+  notionPageIds: string[];
+  userId: string;
+}): Promise<string> {
+  if (params.notionPageIds.length === 0) {
+    return "";
+  }
+
+  try {
+    await syncNotionWorkHoursForPages(params);
+    return "";
+  } catch (error) {
+    console.warn("Failed to sync Notion work hours after timesheet save.", error);
+    return error instanceof Error ? error.message : "Notion 필드 업데이트에 실패했습니다.";
+  }
+}
+
+export async function loadNotionCardCandidatesAction(dateKey: string): Promise<NotionCardCandidatesResult> {
+  const user = await requireSession();
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    throw new Error("날짜 형식이 올바르지 않습니다.");
+  }
+
+  const latestSuccess = await getDateNotionSyncRun({ dateKey, status: "success", userId: user.id });
+
+  if (latestSuccess) {
+    const [candidates, latestRun] = await Promise.all([
+      listCachedNotionCards({ endDateKey: dateKey, startDateKey: dateKey, userId: user.id }),
+      getDateNotionSyncRun({ dateKey, userId: user.id })
+    ]);
+
+    return buildNotionCardCandidatesResult({
+      candidates,
+      latestRun,
+      latestSuccess,
+      source: "cache"
+    });
+  }
+
+  return syncNotionCardCandidatesForDate({ dateKey, userId: user.id });
+}
+
+export async function refreshNotionCardCandidatesAction(dateKey: string): Promise<NotionCardCandidatesResult> {
+  const user = await requireSession();
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    throw new Error("날짜 형식이 올바르지 않습니다.");
+  }
+
+  return syncNotionCardCandidatesForDate({ dateKey, userId: user.id });
+}
+
+async function syncNotionCardCandidatesForDate(params: {
+  dateKey: string;
+  userId: string;
+}): Promise<NotionCardCandidatesResult> {
+  try {
+    const candidates = await syncNotionCardsForDate(params);
+    const latestSuccess = await getDateNotionSyncRun({ dateKey: params.dateKey, status: "success", userId: params.userId });
+
+    return buildNotionCardCandidatesResult({
+      candidates,
+      latestRun: latestSuccess,
+      latestSuccess,
+      source: "notion"
+    });
+  } catch (error) {
+    const [candidates, latestRun, latestSuccess] = await Promise.all([
+      listCachedNotionCards({ endDateKey: params.dateKey, startDateKey: params.dateKey, userId: params.userId }),
+      getDateNotionSyncRun({ dateKey: params.dateKey, userId: params.userId }),
+      getDateNotionSyncRun({ dateKey: params.dateKey, status: "success", userId: params.userId })
+    ]);
+
+    return buildNotionCardCandidatesResult({
+      candidates,
+      errorMessage: error instanceof Error ? error.message : "Notion 카드 후보를 동기화하지 못했습니다.",
+      latestRun,
+      latestSuccess,
+      source: "cache"
+    });
+  }
+}
+
+function getDateNotionSyncRun(params: {
+  dateKey: string;
+  status?: "success" | "failed";
+  userId: string;
+}): Promise<NotionSyncRunRecord | null> {
+  return getLatestNotionSyncRun({
+    scopeEndDate: params.dateKey,
+    scopeStartDate: params.dateKey,
+    scopeType: "date",
+    status: params.status,
+    userId: params.userId
+  });
+}
+
+function buildNotionCardCandidatesResult(params: {
+  candidates: NotionCardCacheRecord[];
+  errorMessage?: string;
+  latestRun: NotionSyncRunRecord | null;
+  latestSuccess: NotionSyncRunRecord | null;
+  source: "cache" | "notion";
+}): NotionCardCandidatesResult {
+  return {
+    candidates: params.candidates,
+    sync: {
+      cardsFetched: params.latestSuccess?.cardsFetched ?? 0,
+      errorMessage: params.errorMessage ?? "",
+      lastAttemptedAt: params.latestRun?.finishedAt ?? "",
+      lastFetchedAt: params.latestSuccess?.finishedAt ?? "",
+      partial: params.latestSuccess?.partial ?? false,
+      source: params.source,
+      status: params.latestRun?.status ?? ""
+    }
+  };
 }
 
 export async function findPreviousProjectAction(dateKey: string): Promise<string> {
@@ -707,6 +887,46 @@ export async function findPreviousProjectAction(dateKey: string): Promise<string
   }
 
   return findLatestWorkProjectBefore({ beforeDateKey: dateKey, userId: user.id });
+}
+
+export async function findPreviousOpenNotionCardsAction(dateKey: string): Promise<TimesheetEntryNotionCardDraft[]> {
+  const user = await requireSession();
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    throw new Error("날짜 형식이 올바르지 않습니다.");
+  }
+
+  const [connection, previousCards] = await Promise.all([
+    getUserNotionConnection(user.id),
+    findLatestWorkNotionCardsBefore({ beforeDateKey: dateKey, userId: user.id })
+  ]);
+  const openPageIds = new Set(
+    filterOpenNotionCardCandidates({
+      cards: previousCards.map((card) => ({
+        archived: false,
+        category: card.category ?? "",
+        endDate: card.endDate ?? "",
+        lastEditedTime: "",
+        notionPageId: card.notionPageId,
+        stale: false,
+        startDate: card.startDate ?? "",
+        status: card.status ?? "",
+        title: card.title ?? "",
+        url: ""
+      })),
+      dateKey,
+      doneStatusValues: connection?.doneStatusValues ?? []
+    }).map((card) => card.notionPageId)
+  );
+
+  return previousCards
+    .filter((card) => openPageIds.has(card.notionPageId))
+    .map((card) => ({
+      ...card,
+      allocatedHours: 0,
+      allocationMode: "auto",
+      source: "previous_business_day_default"
+    }));
 }
 
 export async function addProjectAction(name: string) {

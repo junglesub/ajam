@@ -9,6 +9,23 @@ export {
 } from "./date";
 export type { CalendarCell, CalendarWeek, DateKey } from "./date";
 export {
+  allocateNotionCardHours,
+  buildNotionCardAvailableHours,
+  buildNotionCategorySummary,
+  buildNotionCardEstimate,
+  filterOpenNotionCardCandidates,
+  normalizeNotionDateToDateKey,
+  shouldWarnAboutFallbackHours
+} from "./notion-cards";
+export type {
+  NotionCardAvailableHours,
+  NotionCardEstimate,
+  NotionCardSnapshot,
+  NotionCardSummaryInput,
+  NotionCategorySummary,
+  WorkEntryNotionCardLink
+} from "./notion-cards";
+export {
   buildMonthlyAiSummaryExport,
   buildMonthlyAiSummaryPrompt,
   buildMonthlyAiSummaryRevisionPrompt,
@@ -30,4 +47,9 @@ export type {
 export { resolveStatus, statusLabel, statusTone } from "./status";
 export type { TimesheetStatus, WorkRecordKind } from "./status";
 export { createEmptyDraft, createEmptyEntryDraft, getDisplayContent } from "./timesheet";
-export type { TimesheetDayDraft, TimesheetEntryDraft, TimesheetRow } from "./timesheet";
+export type {
+  TimesheetDayDraft,
+  TimesheetEntryDraft,
+  TimesheetEntryNotionCardDraft,
+  TimesheetRow
+} from "./timesheet";

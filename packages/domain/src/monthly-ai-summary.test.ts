@@ -27,6 +27,7 @@ const days: TimesheetDayDraft[] = [
         hours: 4,
         id: "work-1",
         kind: "WORK",
+        notionCards: [],
         project: "aJam",
         sortOrder: 0,
         vacationName: ""
@@ -39,6 +40,7 @@ const days: TimesheetDayDraft[] = [
         hours: 4,
         id: "vacation-1",
         kind: "VACATION",
+        notionCards: [],
         project: "must be cleared",
         sortOrder: 1,
         vacationName: "반차"
@@ -58,6 +60,7 @@ const days: TimesheetDayDraft[] = [
         hours: 0,
         id: "holiday-1",
         kind: "HOLIDAY",
+        notionCards: [],
         project: "must be cleared",
         sortOrder: 0,
         vacationName: "must be cleared"

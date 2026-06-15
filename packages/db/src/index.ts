@@ -3,9 +3,40 @@ export { databaseUrl } from "./database-url";
 export { hashPassword, verifyPassword } from "./password";
 export { ensureUserAiSettingSchema, getUserAiSetting, getUserGeminiApiKey, updateUserAiSetting } from "./ai-settings-store";
 export type { AiProvider, UserAiSetting, UserAiSettingUpdate } from "./ai-settings-store";
+export { retrieveNotionDataSourceSchema, syncNotionCardsForDate } from "./notion-sync";
+export type { NotionDataSourceSchema } from "./notion-sync";
+export { runNotionDailyMaintenance } from "./notion-daily-maintenance";
+export type { NotionDailyMaintenanceResult, NotionDailyMaintenanceUserResult } from "./notion-daily-maintenance";
+export { syncNotionWorkHoursForPages } from "./notion-work-hours-sync";
+export type { NotionWorkHoursSyncResult } from "./notion-work-hours-sync";
 export { createManagedUser, ensureApplicationSchema, getAppSetting, getManagedUser, listManagedUsers, setAppSetting, updateManagedUser } from "./settings-store";
 export type { ManagedUser, UserRole } from "./settings-store";
 export { ensureReminderSchema, listDailyTimesheetReminderTargets, markDailyTimesheetReminderSent } from "./reminder-store";
 export type { DailyTimesheetReminderResult, DailyTimesheetReminderTarget } from "./reminder-store";
-export { addProject, applyTimesheetAiSummaryPatches, deleteTimesheetEntry, ensureTimesheetSchema, findLatestWorkProjectBefore, listHolidays, listProjectSummaries, listProjects, listTimesheetEntries, listVacations, renameProject, resetHolidayCache, saveTimesheetDay, saveTimesheetDays, upsertTimesheetEntry } from "./timesheet-store";
+export {
+  ensureNotionSchema,
+  countLinkedNotionWorkDaysByPage,
+  getLatestNotionSyncRun,
+  getLatestLinkedNotionWorkDateByPage,
+  getUserNotionAccessToken,
+  getUserNotionConnection,
+  listCachedNotionCards,
+  listCachedNotionCardsByPageIds,
+  recordNotionSyncRun,
+  replaceEntryNotionCards,
+  sumLinkedNotionHoursByPage,
+  upsertNotionCardCache,
+  upsertUserNotionConnection
+} from "./notion-store";
+export type {
+  DateMappingMode,
+  NotionAuthType,
+  NotionCardCacheRecord,
+  NotionPropertyDescriptor,
+  NotionSyncRunRecord,
+  NotionSyncRunStatus,
+  NotionSyncScopeType,
+  UserNotionConnection
+} from "./notion-store";
+export { addProject, applyTimesheetAiSummaryPatches, deleteTimesheetEntry, ensureTimesheetSchema, findLatestWorkNotionCardsBefore, findLatestWorkProjectBefore, listHolidays, listProjectSummaries, listProjects, listTimesheetEntries, listVacations, renameProject, resetHolidayCache, saveTimesheetDay, saveTimesheetDays, upsertTimesheetEntry } from "./timesheet-store";
 export type { HolidayRecord, ProjectSummary, StoredTimesheetDay, StoredTimesheetDraft, StoredTimesheetEntry, VacationRecord } from "./timesheet-store";

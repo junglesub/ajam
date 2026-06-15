@@ -13,6 +13,35 @@ function getStringParameter(executeFunctions: IExecuteFunctions, name: string, i
   return executeFunctions.getNodeParameter(name, itemIndex, "") as string;
 }
 
+function buildNotionMaintenanceAlert(response: IDataObject): IDataObject | null {
+  const errors = Array.isArray(response.errors) ? response.errors : [];
+
+  if (errors.length === 0) {
+    return null;
+  }
+
+  const dateKey = String(response.dateKey ?? "");
+  const lines = errors.map((error) => {
+    const item = error as IDataObject;
+    const username = String(item.username ?? item.userId ?? "unknown");
+    const message = String(item.message ?? "Unknown error");
+
+    return `- ${username}: ${message}`;
+  });
+
+  return {
+    dateKey,
+    errorCount: errors.length,
+    errors,
+    message: [
+      `${dateKey || "aJam"} Notion daily maintenance failed for ${errors.length} user${errors.length === 1 ? "" : "s"}.`,
+      "",
+      ...lines
+    ].join("\n"),
+    subject: `[aJam] Notion daily maintenance failed${dateKey ? ` (${dateKey})` : ""}`
+  };
+}
+
 export class Ajam implements INodeType {
   description: INodeTypeDescription = {
     displayName: "aJam",
@@ -26,7 +55,8 @@ export class Ajam implements INodeType {
       name: "aJam"
     },
     inputs: [NodeConnectionTypes.Main],
-    outputs: [NodeConnectionTypes.Main],
+    outputNames: ["Summary", "Alerts"],
+    outputs: [NodeConnectionTypes.Main, NodeConnectionTypes.Main],
     credentials: [
       {
         name: "ajamApi",
@@ -43,6 +73,10 @@ export class Ajam implements INodeType {
           {
             name: "Daily Reminder",
             value: "dailyReminder"
+          },
+          {
+            name: "Notion",
+            value: "notion"
           }
         ],
         required: true,
@@ -70,6 +104,27 @@ export class Ajam implements INodeType {
             description: "Record that a reminder email was sent",
             name: "Mark Reminder Sent",
             value: "markReminderSent"
+          }
+        ],
+        required: true,
+        type: "options"
+      },
+      {
+        default: "runDailyMaintenance",
+        displayName: "Operation",
+        displayOptions: {
+          show: {
+            resource: ["notion"]
+          }
+        },
+        name: "operation",
+        noDataExpression: true,
+        options: [
+          {
+            action: "Run daily Notion maintenance",
+            description: "Sync today's open Notion cards and update mapped Notion fields for active cards",
+            name: "Run Daily Maintenance",
+            value: "runDailyMaintenance"
           }
         ],
         required: true,
@@ -142,16 +197,24 @@ export class Ajam implements INodeType {
     const inputItems = this.getInputData();
     const items = inputItems.length > 0 ? inputItems : [{ json: {} }];
     const returnData: INodeExecutionData[] = [];
+    const alertData: INodeExecutionData[] = [];
     const credentials = (await this.getCredentials("ajamApi")) as AjamCredentials;
     const baseUrl = normalizeBaseUrl(credentials.baseUrl);
-    const url = `${baseUrl}/api/internal/reminders/daily-timesheet`;
 
     for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+      const resource = this.getNodeParameter("resource", itemIndex) as string;
       const operation = this.getNodeParameter("operation", itemIndex) as string;
       const dateKey = getStringParameter(this, "dateKey", itemIndex).trim();
       const body: IDataObject = {};
+      const url = resource === "notion"
+        ? `${baseUrl}/api/internal/notion/daily-maintenance`
+        : `${baseUrl}/api/internal/reminders/daily-timesheet`;
 
-      if (operation === "markReminderSent") {
+      if (resource === "notion") {
+        if (dateKey) {
+          body.dateKey = dateKey;
+        }
+      } else if (operation === "markReminderSent") {
         body.action = "mark-sent";
         body.dateKey = dateKey;
         body.email = getStringParameter(this, "email", itemIndex).trim();
@@ -193,6 +256,19 @@ export class Ajam implements INodeType {
         continue;
       }
 
+      if (resource === "notion") {
+        const alert = buildNotionMaintenanceAlert(response);
+
+        if (alert) {
+          alertData.push({
+            json: alert,
+            pairedItem: {
+              item: itemIndex
+            }
+          });
+        }
+      }
+
       returnData.push({
         json: response,
         pairedItem: {
@@ -201,6 +277,6 @@ export class Ajam implements INodeType {
       });
     }
 
-    return [returnData];
+    return [returnData, alertData];
   }
 }

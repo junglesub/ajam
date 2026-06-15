@@ -87,6 +87,9 @@ importers:
       '@prisma/client':
         specifier: ^7.4.0
         version: 7.8.0(prisma@7.8.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(better-sqlite3@12.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@5.9.3))(typescript@5.9.3)
+      '@timesheet/domain':
+        specifier: workspace:*
+        version: link:../domain
       better-sqlite3:
         specifier: ^12.4.1
         version: 12.9.0

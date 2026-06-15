@@ -1,5 +1,17 @@
 import type { TimesheetStatus, WorkRecordKind } from "./status";
 
+export type TimesheetEntryNotionCardDraft = {
+  allocatedHours: number;
+  allocationMode: "auto" | "manual";
+  category?: string;
+  endDate?: string;
+  notionPageId: string;
+  source: "manual" | "previous_business_day_default";
+  startDate?: string;
+  status?: string;
+  title?: string;
+};
+
 export type TimesheetEntryDraft = {
   aiTranslation: string;
   clientId: string;
@@ -9,6 +21,7 @@ export type TimesheetEntryDraft = {
   hoursTouched?: boolean;
   id: string;
   kind: WorkRecordKind;
+  notionCards: TimesheetEntryNotionCardDraft[];
   project: string;
   sortOrder: number;
   vacationName: string;
@@ -26,6 +39,7 @@ export type TimesheetRow = TimesheetDayDraft & {
   content: string;
   entryCount: number;
   hasVacation: boolean;
+  hasUnlinkedNotionWork: boolean;
   hours: number;
   kind: WorkRecordKind;
   previewContent: string;
@@ -45,6 +59,7 @@ export function createEmptyEntryDraft(sortOrder = 0): TimesheetEntryDraft {
     hoursTouched: false,
     id: "",
     kind: "WORK",
+    notionCards: [],
     project: "",
     sortOrder,
     vacationName: ""

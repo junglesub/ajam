@@ -1,7 +1,8 @@
-import { createCipheriv, createDecipheriv, randomBytes, randomUUID, scryptSync } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import { prisma } from "./client";
-import { ensureApplicationSchema, getAppSetting, setAppSetting } from "./settings-store";
+import { decryptSecret, encryptSecret } from "./secret-store";
+import { ensureApplicationSchema } from "./settings-store";
 
 export type AiProvider = "GEMINI";
 
@@ -112,7 +113,7 @@ export async function getUserGeminiApiKey(userId: string): Promise<string> {
   );
   const encrypted = rows[0]?.apiKeyEncrypted ?? "";
 
-  return encrypted ? await decryptSecret(encrypted) : "";
+  return encrypted ? await decryptSecret(encrypted, "user-ai-setting") : "";
 }
 
 export async function updateUserAiSetting(userId: string, input: UserAiSettingUpdate): Promise<UserAiSetting> {
@@ -126,7 +127,11 @@ export async function updateUserAiSetting(userId: string, input: UserAiSettingUp
     userId
   );
   const apiKey = input.apiKey?.trim();
-  const apiKeyEncrypted = input.clearApiKey ? "" : apiKey ? await encryptSecret(apiKey) : existingRows[0]?.apiKeyEncrypted ?? "";
+  const apiKeyEncrypted = input.clearApiKey
+    ? ""
+    : apiKey
+      ? await encryptSecret(apiKey, "user-ai-setting")
+      : existingRows[0]?.apiKeyEncrypted ?? "";
   const model = normalizeModel(input.model);
   const contextDays = normalizeOption(input.contextDays, [0, 3, 5, 10], defaultAiSetting.contextDays);
   const backfillLimit = normalizeOption(input.backfillLimit, [1, 3, 5], defaultAiSetting.backfillLimit);
@@ -161,51 +166,4 @@ function normalizeModel(model: string): string {
 
 function normalizeOption(value: number, allowed: number[], fallback: number): number {
   return allowed.includes(value) ? value : fallback;
-}
-
-async function getEncryptionSecret(): Promise<string> {
-  const envSecret = process.env.AJAM_AI_SECRET?.trim();
-
-  if (envSecret) {
-    return envSecret;
-  }
-
-  const storedSecret = (await getAppSetting("ai_encryption_secret"))?.trim();
-
-  if (storedSecret) {
-    return storedSecret;
-  }
-
-  const generatedSecret = randomBytes(32).toString("base64url");
-  await setAppSetting("ai_encryption_secret", generatedSecret);
-
-  return generatedSecret;
-}
-
-async function getEncryptionKey(): Promise<Buffer> {
-  const secret = await getEncryptionSecret();
-
-  return scryptSync(secret, "ajam-user-ai-setting", 32);
-}
-
-async function encryptSecret(value: string): Promise<string> {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", await getEncryptionKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-
-  return `v1:${iv.toString("base64url")}:${tag.toString("base64url")}:${encrypted.toString("base64url")}`;
-}
-
-async function decryptSecret(value: string): Promise<string> {
-  const [version, ivValue, tagValue, encryptedValue] = value.split(":");
-
-  if (version !== "v1" || !ivValue || !tagValue || !encryptedValue) {
-    return "";
-  }
-
-  const decipher = createDecipheriv("aes-256-gcm", await getEncryptionKey(), Buffer.from(ivValue, "base64url"));
-  decipher.setAuthTag(Buffer.from(tagValue, "base64url"));
-
-  return Buffer.concat([decipher.update(Buffer.from(encryptedValue, "base64url")), decipher.final()]).toString("utf8");
 }

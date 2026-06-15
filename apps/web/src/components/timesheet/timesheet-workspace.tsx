@@ -36,10 +36,12 @@ import {
   type TimesheetStatus,
   type TimesheetDayDraft,
   type TimesheetEntryDraft,
+  type TimesheetEntryNotionCardDraft,
   type WorkRecordKind
 } from "@timesheet/domain";
 import { Badge, Button, Input, Label, SegmentedControl, Textarea, cn } from "@timesheet/ui";
 import {
+  AlertTriangle,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -57,6 +59,10 @@ import {
   TimerReset,
   type LucideIcon
 } from "lucide-react";
+
+import { NotionCardLinkSection } from "./notion-card-link-section";
+import { NotionCardPickerModal } from "./notion-card-picker-modal";
+import { useNotionCardCandidates, type NotionCardCandidate, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
 
 type ViewMode = "calendar" | "list";
 
@@ -109,6 +115,15 @@ type TimesheetAiCleanupResult = {
   skipped: boolean;
 };
 
+type TimesheetDeleteResult = {
+  notionSyncError: string;
+};
+
+type TimesheetSaveResult = {
+  day: TimesheetDayDraft;
+  notionSyncError: string;
+};
+
 type AiCleanupOptions = {
   overwriteCurrentDate?: boolean;
 };
@@ -141,7 +156,8 @@ type TimesheetWorkspaceProps = {
   addProjectAction: (name: string) => Promise<string>;
   createUserAction: (params: { email?: string; password: string; role: UserRole; username: string }) => Promise<ManagedUser>;
   currentUser: ManagedUser;
-  deleteEntryAction: (dateKey: string) => Promise<void>;
+  deleteEntryAction: (dateKey: string) => Promise<TimesheetDeleteResult>;
+  findPreviousNotionCardsAction: (dateKey: string) => Promise<TimesheetEntryNotionCardDraft[]>;
   findPreviousProjectAction: (dateKey: string) => Promise<string>;
   initialHolidayApiKey: string;
   initialAiSetting: UserAiSetting;
@@ -151,10 +167,12 @@ type TimesheetWorkspaceProps = {
   initialTodayKey: string;
   initialYear: number;
   loadMonthAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
+  loadNotionCardCandidatesAction: (dateKey: string) => Promise<NotionCardCandidatesResult>;
+  refreshNotionCardCandidatesAction: (dateKey: string) => Promise<NotionCardCandidatesResult>;
   resetAllHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   resetHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   runAiCleanupAction: (dateKey: string, options?: AiCleanupOptions) => Promise<TimesheetAiCleanupResult>;
-  saveEntryAction: (entry: TimesheetDayDraft) => Promise<TimesheetDayDraft>;
+  saveEntryAction: (entry: TimesheetDayDraft) => Promise<TimesheetSaveResult>;
   saveHolidayApiKeyAction: (serviceKey: string) => Promise<void>;
   testGeminiApiKeyAction: (params: { apiKey?: string; model: string }) => Promise<GeminiApiKeyTestResult>;
   testHolidayApiKeyAction: (serviceKey: string, year: number, monthIndex: number) => Promise<HolidayApiKeyTestResult>;
@@ -379,6 +397,21 @@ function findPreviousProject(dateKey: string, records: Record<string, TimesheetD
   return previousRecord?.entry.project ?? "";
 }
 
+function allocateDefaultNotionCards(cards: TimesheetEntryNotionCardDraft[], entryHours: number): TimesheetEntryNotionCardDraft[] {
+  if (cards.length === 0) {
+    return [];
+  }
+
+  const allocatedHours = Number((entryHours / cards.length).toFixed(2));
+
+  return cards.map((card) => ({
+    ...card,
+    allocatedHours,
+    allocationMode: "auto",
+    source: "previous_business_day_default"
+  }));
+}
+
 function createEntryForDate(dateKey: string, records: Record<string, TimesheetDayDraft>, kind: WorkRecordKind = "WORK"): TimesheetEntryDraft {
   const entry = createEmptyEntryDraft(0);
 
@@ -452,12 +485,14 @@ function rowFromDraft(dateKey: string, todayKey: string, draft: TimesheetDayDraf
   const hasVacation = row.entries.some((entry) => entry.kind === "VACATION");
   const hasHoliday = Boolean(firstHoliday || row.holidayName);
   const isVacationOnly = hasVacation && !firstWork && !hasHoliday;
+  const hasUnlinkedNotionWork = isSaved && row.entries.some((entry) => entry.kind === "WORK" && entry.notionCards.length === 0);
 
   return {
     ...row,
     aiTranslation: firstWork?.aiTranslation ?? "",
     content: firstWork?.content ?? "",
     entryCount: row.entries.length,
+    hasUnlinkedNotionWork,
     hasVacation,
     hours: row.entries.reduce((sum, entry) => sum + entry.hours, 0),
     kind: firstWork?.kind ?? (hasHoliday ? "HOLIDAY" : hasVacation ? "VACATION" : "WORK"),
@@ -597,6 +632,7 @@ export function TimesheetWorkspace({
   createUserAction,
   currentUser: initialCurrentUser,
   deleteEntryAction,
+  findPreviousNotionCardsAction,
   findPreviousProjectAction,
   initialAiSetting,
   initialHolidayApiKey,
@@ -606,6 +642,8 @@ export function TimesheetWorkspace({
   initialTodayKey,
   initialYear,
   loadMonthAction,
+  loadNotionCardCandidatesAction,
+  refreshNotionCardCandidatesAction,
   resetAllHolidayCacheAction,
   resetHolidayCacheAction,
   runAiCleanupAction,
@@ -628,12 +666,15 @@ export function TimesheetWorkspace({
   const [savedRecords, setSavedRecords] = useState<Record<string, TimesheetDayDraft>>(() => buildDraftsFromMonthData(initialMonthData));
   const [savedEntryDateKeys, setSavedEntryDateKeys] = useState(() => new Set(initialMonthData.entries.map((entry) => entry.dateKey)));
   const [selectedEntryIdByDate, setSelectedEntryIdByDate] = useState<Record<string, string>>(() => buildSelectedEntryIds(records));
+  const [editingNotionEntryClientId, setEditingNotionEntryClientId] = useState<string | null>(null);
+  const notionCandidates = useNotionCardCandidates({ loadNotionCardCandidatesAction, refreshNotionCardCandidatesAction });
   const [projects, setProjects] = useState(() => mergeProjects([], initialMonthData.projects));
   const [loadedMonthKeys, setLoadedMonthKeys] = useState(() => {
     return new Set([getMonthCacheKey(initialYear, initialMonthIndex)]);
   });
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState("");
+  const [notionSyncError, setNotionSyncError] = useState("");
   const [aiCleanupState, setAiCleanupState] = useState<AiCleanupState>("idle");
   const [aiCleanupDateKey, setAiCleanupDateKey] = useState("");
   const [aiCleanupMessage, setAiCleanupMessage] = useState("");
@@ -899,6 +940,12 @@ export function TimesheetWorkspace({
     setDeleteError("");
   }
 
+  function showNotionSyncError(message: string) {
+    if (message) {
+      setNotionSyncError(message);
+    }
+  }
+
   async function fillPreviousProjectFromDatabase(dateKey: string, clientId: string) {
     try {
       const project = (await findPreviousProjectAction(dateKey)).trim();
@@ -939,6 +986,45 @@ export function TimesheetWorkspace({
     }
   }
 
+  async function fillPreviousNotionCardsFromDatabase(dateKey: string, clientId: string) {
+    try {
+      const cards = await findPreviousNotionCardsAction(dateKey);
+
+      if (cards.length === 0) {
+        return;
+      }
+
+      setRecords((current) => {
+        const day = current[dateKey];
+
+        if (!day) {
+          return current;
+        }
+
+        const entries = day.entries.map((entry) => {
+          if (entry.clientId !== clientId || entry.kind !== "WORK" || entry.notionCards.length > 0) {
+            return entry;
+          }
+
+          return {
+            ...entry,
+            notionCards: allocateDefaultNotionCards(cards, entry.hours)
+          };
+        });
+
+        return {
+          ...current,
+          [dateKey]: {
+            ...day,
+            entries
+          }
+        };
+      });
+    } catch {
+      // Auto-fill is a convenience path; leave the draft editable if lookup fails.
+    }
+  }
+
   function recommendPreviousProjectForDraft(dateKey: string, day: TimesheetDayDraft | undefined) {
     if (savedEntryDateKeys.has(dateKey)) {
       return;
@@ -948,6 +1034,18 @@ export function TimesheetWorkspace({
 
     if (entry?.kind === "WORK" && !entry.project.trim()) {
       void fillPreviousProjectFromDatabase(dateKey, entry.clientId);
+    }
+  }
+
+  function recommendPreviousNotionCardsForDraft(dateKey: string, day: TimesheetDayDraft | undefined) {
+    if (savedEntryDateKeys.has(dateKey)) {
+      return;
+    }
+
+    const entry = day?.entries[0];
+
+    if (entry?.kind === "WORK" && entry.notionCards.length === 0) {
+      void fillPreviousNotionCardsFromDatabase(dateKey, entry.clientId);
     }
   }
 
@@ -971,6 +1069,7 @@ export function TimesheetWorkspace({
   function prepareDraftForDate(dateKey: string, currentTodayKey = todayKey) {
     if (records[dateKey]) {
       recommendPreviousProjectForDraft(dateKey, records[dateKey]);
+      recommendPreviousNotionCardsForDraft(dateKey, records[dateKey]);
       return;
     }
 
@@ -979,6 +1078,7 @@ export function TimesheetWorkspace({
     setRecords((current) => {
       if (current[dateKey]) {
         recommendPreviousProjectForDraft(dateKey, current[dateKey]);
+        recommendPreviousNotionCardsForDraft(dateKey, current[dateKey]);
         return current;
       }
 
@@ -994,6 +1094,7 @@ export function TimesheetWorkspace({
     });
 
     recommendPreviousProjectForDraft(dateKey, draft);
+    recommendPreviousNotionCardsForDraft(dateKey, draft);
   }
 
   function removeSelectedAutoProjectDraft(nextSelectedDateKey?: string) {
@@ -1220,7 +1321,10 @@ export function TimesheetWorkspace({
     const total = dateKeys.length;
 
     for (const dateKey of dateKeys) {
-      const savedDay = withClientIds(await saveEntryAction(sanitizeDayForSave(createVacationDay(dateKey, vacationName || "휴가", hours))));
+      const saveResult = await saveEntryAction(sanitizeDayForSave(createVacationDay(dateKey, vacationName || "휴가", hours)));
+      const savedDay = withClientIds(saveResult.day);
+
+      showNotionSyncError(saveResult.notionSyncError);
       savedDays.push(savedDay);
       onProgress?.(savedDays.length, total);
 
@@ -1251,6 +1355,10 @@ export function TimesheetWorkspace({
 
     if (draft.entries[0]?.kind === "WORK" && !draft.entries[0].project.trim()) {
       void fillPreviousProjectFromDatabase(selectedDateKey, draft.entries[0].clientId);
+    }
+
+    if (draft.entries[0]?.kind === "WORK" && draft.entries[0].notionCards.length === 0) {
+      void fillPreviousNotionCardsFromDatabase(selectedDateKey, draft.entries[0].clientId);
     }
 
     return draft;
@@ -1290,6 +1398,54 @@ export function TimesheetWorkspace({
       const previous = current[selectedDateKey] ?? createDraftForSelectedDate(current);
       const selectedId = getSelectedEntryIdForDay(selectedDateKey, previous);
       const entries = previous.entries.map((entry) => entry.clientId === selectedId ? { ...entry, ...patch, hoursTouched: patch.hours !== undefined ? true : entry.hoursTouched } : entry);
+
+      return {
+        ...current,
+        [selectedDateKey]: {
+          ...previous,
+          entries
+        }
+      };
+    });
+  }
+
+  function toggleNotionCardForEntry(entryClientId: string, notionPageId: string) {
+    resetEntryFeedback();
+    setIsDirty(true);
+    const selectedCandidates = notionCandidates.candidatesByDate[selectedDateKey] ?? [];
+
+    setRecords((current) => {
+      const previous = current[selectedDateKey] ?? createDraftForSelectedDate(current);
+      const entries = previous.entries.map((entry) => {
+        if ((entry.clientId || entry.id) !== entryClientId || entry.kind !== "WORK") {
+          return entry;
+        }
+
+        const exists = entry.notionCards.some((link) => link.notionPageId === notionPageId);
+        const candidate = selectedCandidates.find((card) => card.notionPageId === notionPageId);
+        const nextLinks = exists
+          ? entry.notionCards.filter((link) => link.notionPageId !== notionPageId)
+          : [
+              ...entry.notionCards,
+              {
+                allocatedHours: 0,
+                allocationMode: "auto" as const,
+                category: candidate?.category ?? "",
+                endDate: candidate?.endDate ?? "",
+                notionPageId,
+                source: "manual" as const,
+                startDate: candidate?.startDate ?? "",
+                status: candidate?.status ?? "",
+                title: candidate?.title ?? ""
+              }
+            ];
+        const allocatedHours = nextLinks.length > 0 ? Number((entry.hours / nextLinks.length).toFixed(2)) : 0;
+
+        return {
+          ...entry,
+          notionCards: nextLinks.map((link) => (link.allocationMode === "auto" ? { ...link, allocatedHours } : link))
+        };
+      });
 
       return {
         ...current,
@@ -1597,7 +1753,9 @@ export function TimesheetWorkspace({
       let completed = 0;
 
       for (const dateKey of targetDateKeys) {
-        await deleteEntryAction(dateKey);
+        const deleteResult = await deleteEntryAction(dateKey);
+
+        showNotionSyncError(deleteResult.notionSyncError);
         completed += 1;
         setConnectedVacationProgress({ completed, total: targetDateKeys.length });
       }
@@ -1637,6 +1795,10 @@ export function TimesheetWorkspace({
       project: kind === "WORK" ? selectedEntry.project || findPreviousProject(selectedDateKey, records) : "",
       vacationName: kind === "VACATION" ? selectedEntry.vacationName : ""
     });
+
+    if (kind === "WORK" && selectedEntry.notionCards.length === 0) {
+      void fillPreviousNotionCardsFromDatabase(selectedDateKey, selectedEntry.clientId);
+    }
   }
 
   function addEntry(kind: WorkRecordKind) {
@@ -1650,6 +1812,10 @@ export function TimesheetWorkspace({
         ...createEntryForDate(selectedDateKey, current, nextKind),
         sortOrder: previous.entries.length
       };
+
+      if (entry.kind === "WORK") {
+        void fillPreviousNotionCardsFromDatabase(selectedDateKey, entry.clientId);
+      }
 
       setSelectedEntryIdByDate((selected) => ({
         ...selected,
@@ -1896,8 +2062,10 @@ export function TimesheetWorkspace({
     setDeleteError("");
 
     try {
-      const savedEntry = withClientIds(await saveEntryAction(entry));
+      const saveResult = await saveEntryAction(entry);
+      const savedEntry = withClientIds(saveResult.day);
 
+      showNotionSyncError(saveResult.notionSyncError);
       setRecords((current) => ({
         ...current,
         [savedEntry.dateKey]: savedEntry
@@ -1946,7 +2114,9 @@ export function TimesheetWorkspace({
     setDeleteError("");
 
     try {
-      await deleteEntryAction(selectedDateKey);
+      const deleteResult = await deleteEntryAction(selectedDateKey);
+
+      showNotionSyncError(deleteResult.notionSyncError);
       removeDeletedDates([selectedDateKey]);
       setIsDirty(false);
       resetEntryFeedback();
@@ -2397,6 +2567,17 @@ export function TimesheetWorkspace({
                     <Textarea disabled={isFutureWork} onChange={(event) => updateSelectedEntry({ content: event.target.value })} placeholder="오늘 진행한 일을 간단히 적어주세요." rows={5} value={selectedEntry.content} />
                   </Field>
 
+                  <NotionCardLinkSection
+                    candidates={notionCandidates.candidatesByDate[selectedDateKey] ?? []}
+                    disabled={isFutureWork}
+                    entry={selectedEntry}
+                    onOpenPicker={() => {
+                      setEditingNotionEntryClientId(selectedEntry.clientId || selectedEntry.id);
+                      notionCandidates.loadCandidates(selectedDateKey);
+                    }}
+                    onRemoveCard={(notionPageId) => toggleNotionCardForEntry(selectedEntry.clientId || selectedEntry.id, notionPageId)}
+                  />
+
                   <Field label="영문 번역본">
                     <Textarea disabled={isFutureWork} onChange={(event) => updateSelectedEntry({ aiTranslation: event.target.value })} placeholder="오늘 진행한 일을 영어로 간단히 적어주세요." rows={4} value={selectedEntry.aiTranslation} />
                   </Field>
@@ -2413,39 +2594,41 @@ export function TimesheetWorkspace({
               ) : null
             ) : null}
 
-            <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-5">
-              <div>
-                {canDeleteSelected ? (
-                  <button
-                    className="text-sm font-semibold text-red-600 underline-offset-4 transition hover:text-red-700 hover:underline disabled:cursor-not-allowed disabled:text-red-300"
-                    disabled={deleteState === "deleting"}
-                    onClick={() => void deleteSelectedEntry()}
-                    type="button"
-                  >
-                    {deleteState === "deleting" ? "삭제 중" : "삭제"}
-                  </button>
-                ) : null}
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="text-right">
-                  <p className={cn("text-sm font-medium", saveState === "error" || deleteState === "error" ? "text-red-600" : "text-slate-500")}>
-                    {deleteState === "error" ? deleteError : saveState === "saved" ? "저장됨" : saveState === "saving" ? "저장 중" : saveError}
-                  </p>
-                  {aiCleanupDateKey === selectedDateKey && aiCleanupState !== "idle" ? (
-                    <p className={cn("mt-0.5 text-xs font-semibold", aiCleanupState === "error" ? "text-red-600" : aiCleanupState === "running" ? "text-slate-700" : "text-emerald-700")}>
-                      {aiCleanupState === "running" ? "AI 정리 중" : aiCleanupMessage}
-                    </p>
+            <div className="border-t border-slate-100 pt-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  {canDeleteSelected ? (
+                    <button
+                      className="text-sm font-semibold text-red-600 underline-offset-4 transition hover:text-red-700 hover:underline disabled:cursor-not-allowed disabled:text-red-300"
+                      disabled={deleteState === "deleting"}
+                      onClick={() => void deleteSelectedEntry()}
+                      type="button"
+                    >
+                      {deleteState === "deleting" ? "삭제 중" : "삭제"}
+                    </button>
                   ) : null}
                 </div>
-                {selectedIsSingleVacation ? (
-                  <Button className="h-10 px-4" disabled={saveState === "saving" || deleteState === "deleting" || vacationRangeState === "saving"} onClick={() => void openVacationRangeModal()} type="button" variant="secondary">
-                    기간 설정
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <p className={cn("text-sm font-medium", saveState === "error" || deleteState === "error" ? "text-red-600" : "text-slate-500")}>
+                      {deleteState === "error" ? deleteError : saveState === "saved" ? "저장됨" : saveState === "saving" ? "저장 중" : saveError}
+                    </p>
+                  </div>
+                  {selectedIsSingleVacation ? (
+                    <Button className="h-10 px-4" disabled={saveState === "saving" || deleteState === "deleting" || vacationRangeState === "saving"} onClick={() => void openVacationRangeModal()} type="button" variant="secondary">
+                      기간 설정
+                    </Button>
+                  ) : null}
+                  <Button className="h-10 px-4" disabled={isFutureWork || saveState === "saving" || deleteState === "deleting" || vacationRangeState === "saving"} onClick={() => void saveSelectedDraft()}>
+                    {saveState === "saving" ? "저장 중" : "저장"}
                   </Button>
-                ) : null}
-                <Button className="h-10 px-4" disabled={isFutureWork || saveState === "saving" || deleteState === "deleting" || vacationRangeState === "saving"} onClick={() => void saveSelectedDraft()}>
-                  {saveState === "saving" ? "저장 중" : "저장"}
-                </Button>
+                </div>
               </div>
+              {aiCleanupDateKey === selectedDateKey && aiCleanupState !== "idle" ? (
+                <p className={cn("mt-2 text-right text-xs font-semibold leading-5", aiCleanupState === "error" ? "text-red-600" : aiCleanupState === "running" ? "text-slate-700" : "text-emerald-700")}>
+                  {aiCleanupState === "running" ? "AI 정리 중" : aiCleanupMessage}
+                </p>
+              ) : null}
             </div>
           </div>
 
@@ -2888,6 +3071,47 @@ export function TimesheetWorkspace({
         </ModalShell>
       ) : null}
 
+      {notionSyncError ? (
+        <ModalShell onClose={() => setNotionSyncError("")} title="Notion 필드 업데이트 실패">
+          <div className="space-y-4">
+            <p className="text-sm leading-6 text-slate-600">
+              업무 기록은 저장/삭제됐지만 연결된 Notion 카드의 숫자/날짜 필드 업데이트에 실패했습니다.
+            </p>
+            <div className="rounded-md border border-red-100 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
+              {notionSyncError}
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600">
+              Notion 연결 설정에서 업무 기간 시간, 작업일수, 가용 시간, 마지막 작업일, aJam 업데이트 시간 필드 매핑과 integration 권한을 확인해 주세요.
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <Button onClick={() => setNotionSyncError("")} type="button">
+                확인
+              </Button>
+            </div>
+          </div>
+        </ModalShell>
+      ) : null}
+
+      <NotionCardPickerModal
+        candidates={notionCandidates.candidatesByDate[selectedDateKey] ?? []}
+        error={notionCandidates.error}
+        isLoading={notionCandidates.isPending}
+        linkedPageIds={
+          editingNotionEntryClientId
+            ? selectedDay.entries.find((entry) => (entry.clientId || entry.id) === editingNotionEntryClientId)?.notionCards.map((link) => link.notionPageId) ?? []
+            : []
+        }
+        onClose={() => setEditingNotionEntryClientId(null)}
+        onRefresh={() => notionCandidates.refreshCandidates(selectedDateKey)}
+        onToggleCard={(notionPageId) => {
+          if (editingNotionEntryClientId) {
+            toggleNotionCardForEntry(editingNotionEntryClientId, notionPageId);
+          }
+        }}
+        open={Boolean(editingNotionEntryClientId)}
+        sync={notionCandidates.syncByDate[selectedDateKey]}
+      />
+
       {pendingNavigation ? (
         <ModalShell onClose={() => setPendingNavigation(null)} title="저장되지 않은 변경">
           <div className="space-y-4">
@@ -2982,6 +3206,17 @@ function TimeMismatchIcon({ hours }: { hours: number }) {
   );
 }
 
+function UnlinkedNotionWorkIcon() {
+  return (
+    <span
+      className="inline-flex shrink-0 items-center justify-center text-amber-500"
+      title="저장된 업무 중 연결된 Notion 카드가 없는 항목이 있습니다."
+    >
+      <AlertTriangle aria-label="Notion 카드 미할당 경고" className="size-3.5" />
+    </span>
+  );
+}
+
 function ProgressBar({ label, progress }: { label: string; progress: { completed: number; total: number } }) {
   if (progress.total <= 0) {
     return null;
@@ -3056,6 +3291,7 @@ function CalendarView({
                         {cell.day}
                       </span>
                       {row && hasTimeMismatch(row) ? <TimeMismatchIcon hours={row.hours} /> : null}
+                      {row?.hasUnlinkedNotionWork ? <UnlinkedNotionWorkIcon /> : null}
                     </span>
                     {row ? <CalendarStatusBadges row={row} /> : null}
                   </div>

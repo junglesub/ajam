@@ -15,6 +15,7 @@
   "dependencies": {
     "@prisma/adapter-better-sqlite3": "^7.4.0",
     "@prisma/client": "^7.4.0",
+    "@timesheet/domain": "workspace:*",
     "better-sqlite3": "^12.4.1"
   },
   "devDependencies": {

@@ -7,6 +7,12 @@ Custom n8n community node package for aJam automation.
 - `aJam`
   - `Daily Reminder > List Missing Timesheet Users`
   - `Daily Reminder > Mark Reminder Sent`
+  - `Notion > Run Daily Maintenance`
+
+The node has two outputs:
+
+- `Summary`: normal operation results.
+- `Alerts`: alert-ready items for failed Notion daily maintenance runs. This output is empty when there are no Notion maintenance errors.
 
 ## Credentials
 

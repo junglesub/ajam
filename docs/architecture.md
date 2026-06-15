@@ -39,6 +39,10 @@
 - `Vacation`: 사용자별 휴가 날짜, 이름, 시간을 저장한다. 업무 기록을 휴가로 저장하면 같은 날짜의 휴가 레코드가 동기화된다.
 - `AppSetting`: 공공데이터포털 서비스 키 같은 앱 설정값을 저장한다.
 - `UserAiSetting`: 사용자별 Gemini API key, 모델, 자동 정리 여부, 참고할 이전 저장 WORK 날짜 수, 과거 미작성 AI 필드 보정 설정을 저장한다. API key는 앱 secret으로 암호화해 저장한다.
+- `UserNotionConnection`: 사용자별 Notion token, data source, 읽기/쓰기 필드 매핑, 완료 상태 값, 분석 설정 버전을 저장한다. 쓰기 필드에는 업무 기간 시간, 작업일수, 가용 시간, 마지막 작업일, aJam 업데이트 시간이 포함될 수 있다. token은 앱 secret으로 암호화한다.
+- `NotionCardCache`: Notion 카드 snapshot을 저장한다. 전체 복제본이 아니라 후보 표시와 월별 분석에 필요한 cache이다.
+- `WorkEntryNotionCard`: 저장된 `WORK` entry와 Notion 카드의 매핑 및 배분 시간을 저장한다.
+- `NotionSyncRun`: 날짜/월/schema 같은 scope별 동기화 결과, 실패 메시지, partial 여부를 저장한다.
 - `ReminderLog`: 사용자별 날짜와 리마인더 유형의 발송 기록을 저장해 n8n 재시도나 중복 실행 시 같은 리마인더가 반복 발송되지 않게 한다.
 
 ## Holiday Sync
@@ -55,7 +59,9 @@
 - 날짜가 전달되지 않으면 `Asia/Seoul` 기준 오늘을 사용한다.
 - 주말, 공휴일, 휴가-only, 수동 공휴일 entry는 리마인더 대상에서 제외한다.
 - 업무 entry가 있어도 내용이 비어 있으면 미작성으로 본다.
-- n8n은 `packages/n8n-nodes-ajam` custom node package의 `aJam` node를 통해 대상 조회와 발송 기록 API를 호출한다.
+- aJam은 내부 API `POST /api/internal/notion/daily-maintenance`로 사용자별 Notion 연결을 점검하고, 선택 날짜 기준 열린 카드 캐시와 진행중 카드의 mapped number/date fields를 갱신한다.
+- n8n은 `packages/n8n-nodes-ajam` custom node package의 `aJam` node를 통해 리마인더 API와 Notion daily maintenance API를 호출한다.
+- `aJam` n8n node의 두 번째 output은 Notion daily maintenance 실패가 있을 때만 alert item을 내보내므로, Email/Slack node를 IF 없이 직접 연결할 수 있다.
 - 퇴근시간 스케줄과 실제 이메일 발송은 n8n workflow가 담당한다.
 
 ## Data Flow
@@ -66,6 +72,8 @@
 - save-time AI cleanup은 저장 성공 후 별도 server action으로 실행한다. 일반 저장 결과와 AI 결과는 분리하며, AI 실패는 저장 성공을 되돌리지 않는다.
 - 휴가 기록은 저장 시 `Vacation`에도 upsert하고, 업무/공휴일로 바꾸면 해당 날짜의 휴가 레코드는 삭제한다.
 - 새 업무 기록을 작성할 때 이전 업무일의 프로젝트가 자동으로 기입된다.
+- Notion 카드 후보는 업무 entry에 명시적으로 매핑될 때만 분석에 포함된다.
+- Notion API 장애가 발생해도 업무 기록 저장은 계속 가능하며, 후보 조회는 캐시 fallback을 사용한다.
 - 저장하지 않은 상태에서 날짜/월을 이동하려 하면 앱 모달로 확인한다.
 - 앱은 런타임에서 필요한 테이블과 컬럼을 `CREATE TABLE IF NOT EXISTS` 및 보정 쿼리로 보장한다. 아직 배포 전이므로 Prisma migration 파일은 두지 않는다.
 

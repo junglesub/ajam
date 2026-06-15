@@ -30,6 +30,8 @@
 - 실시간 자동 저장
 - 휴가 관리/승인 시스템 연동
 - Jamis 자동 입력 Chrome extension
+- Notion OAuth 연결과 webhook 기반 실시간 동기화
+- Notion 원본 카드 수정
 
 ## UX Principles
 

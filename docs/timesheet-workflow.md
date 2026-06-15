@@ -19,6 +19,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - Today or past missing dates open with one default work entry.
 - The default work entry uses the previous work project's project when it can be predicted from loaded drafts.
 - If loaded drafts do not contain a previous work project, the editor asks the server for the latest saved work project before the selected date and fills it into the draft.
+- If a new unsaved `WORK` entry has no Notion cards, the editor asks the server for the latest previously saved `WORK` entry with linked Notion cards and auto-fills only cards still open on the selected date. Open-card checks use the card start/end dates and the user's configured done status values.
 - When changing months, the editor selects the first business day in the destination month and applies the same default draft and previous-project lookup behavior.
 - Future dates open with one default vacation entry because only vacation or holiday can be edited for future dates.
 - Future work creation is blocked; future vacation and holiday edits are allowed.
@@ -40,6 +41,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - Project names stay on one line.
 - Calendar preview content can use up to two lines and truncates with ellipsis.
 - Saved non-holiday days whose total hours are not `8h` show an orange timer icon next to the date. The icon hover text shows the current total hours.
+- Saved work days with at least one `WORK` entry that has no linked Notion card show a yellow warning icon next to the date.
 - Missing unselected days show `미기입`.
 - A selected missing work draft with no content shows `작성 예정`.
 - Saved work with empty content shows `(내용 없음)`.
@@ -73,6 +75,46 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - A revision prompt lets the user rerun the LLM with extra style instructions while preserving the same JSON rules.
 - The AI summary tab also shows a manual submission list for work entries. Date, Korean content, AI translation, and day summary each have their own copy control, and each control copies only that field's raw value.
 
+## Notion Card Mapping
+
+- Notion cards are user-specific. Card metadata is read from Notion, and optional number properties are written back to Notion after timesheet saves.
+- The `Notion 카드` menu stores each user's integration token, data source ID, field mapping, done status values, optional work-hours number property mapping, optional work-day-count number property mapping, optional available-hours number property mapping, optional last-worked-date property mapping, and optional aJam-update-time date property mapping.
+- The Notion connection popup shows the saved field mapping immediately from stored descriptors; schema refresh is needed only when selecting changed Notion properties.
+- Notion field mappings are applied by Notion property ID first, with property name fallback for older or incomplete descriptors. Renaming a mapped Notion field does not require remapping after the latest schema is available.
+- Connection testing uses a newly entered token when present, otherwise it reuses the saved token.
+- The work-hours property must be a Notion `number` property and stores total linked work-entry hours, not day-equivalent text.
+- The work-day-count property is labeled `작업일수`; it must be a Notion `number` property and stores the distinct count of saved `WORK` dates linked to the card. Any amount of linked work on a date counts as `1`.
+- The available-hours property is labeled `가용 시간`; it must be a Notion `number` property and stores available hours from the card start date through the end date, or today when no end date exists. It excludes weekends, holidays, and the user's vacations, and it is not divided across overlapping cards.
+- The last-worked-date property is labeled `마지막 작업일`; it must be a Notion `date` property and stores the latest saved `WORK` date linked to the card. If no saved `WORK` entries remain linked to the card, the Notion date value is cleared.
+- When the optional aJam-update-time mapping is configured, every Notion page update request writes the current request timestamp to that mapped Notion `date` property. If it is not mapped, timestamp writing is skipped.
+- The category mapping can use a Notion `multi_select` property; selected values are stored as one comma-separated category string such as `개발, 운영`.
+- Synced cards are candidates only; time analysis includes only cards mapped to saved `WORK` entries.
+- A `WORK` entry can link multiple Notion cards.
+- Auto allocation evenly splits the entry hours across linked cards.
+- Linked Notion card pills in the daily editor can be removed directly without reopening the card picker.
+- The Notion card picker shows candidate loading beside the popup title and uses skeleton rows when no candidate data is available yet.
+- The Notion card picker can refresh the selected date's candidates without closing the popup, and each candidate with a Notion URL can be opened from the list.
+- The Notion card picker shows linked candidates with a checkbox-style selection mark at the start of each row, and the full row padding area toggles selection except for the Notion external-link control.
+- Opening the Notion card picker is cache-first for the selected date. If that date has no successful date-scope sync record yet, the app syncs from Notion once; the picker refresh button always performs a fresh Notion sync.
+- The Notion card picker shows the selected date's last successful sync as relative time, such as `방금 전` or `5분 전`.
+- Notion sync timestamps are read from SQLite as UTC ISO strings before relative-time formatting, so the picker label is independent of the user's local timezone.
+- Saved work-entry Notion links load cached card title/status/category snapshots, so linked cards do not fall back to raw Notion page IDs after refresh.
+- The candidate sync control uses a candidate reference date: it syncs cards open on that date, not every card in the data source.
+- Notion popups close from an explicit close button or by clicking the backdrop.
+- Saving or deleting a timesheet day recalculates affected linked-card hour totals, work-day counts, available hours, and last-worked dates, then updates configured Notion number/date properties without asking. If the aJam save/delete succeeds but the Notion field update fails, the UI shows a non-blocking error popup with the Notion failure reason.
+- The internal Notion daily maintenance API lets n8n refresh open-card cache data and update mapped fields for active cards at midnight, especially the available-hours value for cards without an end date. It does not need to update the last-worked-date field because that value changes only when aJam work-entry mappings are saved or deleted.
+- If the `열린 카드 동기화` control syncs cards and writable mapped fields exist, the Notion card screen asks whether to update those synced card fields.
+- Skipping or failing the `열린 카드 동기화` field update is non-blocking: aJam keeps the card cache sync result.
+- Done cards are excluded from default candidate search, but already-linked cards remain visible when the entry is edited.
+- Candidate sync tries Notion first and falls back to cached cards so Notion API errors do not block normal timesheet writing.
+- Period-based estimates use mapped open cards as the denominator and exclude holidays and vacations.
+- When a saved work date has no explicit work hours for the estimate, the default fallback remains `8h = 1 day`.
+- The monthly Notion view shows work day count, available hours, period-based estimated hours, and work-entry linked hours.
+- In the monthly Notion view, clicking a card title opens the Notion page in a new tab when the cached card has a URL.
+- Notion duration columns use `8h = 1d` display, such as `2d (16h)` or `1.5d (12h)`.
+- The monthly Notion view also shows total linked work day count, total available duration, total linked work duration, and total calculable period estimate duration for the selected month.
+- The Notion connection form opens in a popup from the Notion card view, while the card table uses the full page width.
+
 ## Save-Time AI Cleanup
 
 - The Gemini-based cleanup flow saves the timesheet day first, then runs AI as a separate background-like action.
@@ -83,6 +125,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - If a saved WORK date already has `aiTranslation` or `shortVersion` and the user changes Korean content, saving asks whether AI should rewrite the current date's translation and summary.
 - When the user confirms that rewrite, only the current date may overwrite existing AI fields; previous-date backfill still fills empty fields only.
 - If Gemini responds but no patch can be applied, the UI reports the precise no-change reason: protected existing fields without overwrite, same text as the existing AI fields, or blank AI output.
+- AI cleanup status and no-change reasons are displayed below the editor action row so long Korean reason text does not compete with the save/delete controls.
 - AI cleanup targets only saved `WORK` records with non-empty Korean content.
 - `작성 예정`, `미기입`, unsaved drafts, future dates, vacation-only days, holiday-only days, vacation entries, holiday entries, and empty-content work entries are excluded from both context examples and update targets.
 - Previous saved WORK dates can be sent as style/context examples, defaulting to the latest 5 eligible WORK dates.
@@ -132,9 +175,13 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - `TimesheetDay` stores day-level metadata such as `shortVersion`.
 - `TimesheetEntry` stores individual work, vacation, or holiday entries with `sortOrder`.
 - `Vacation` remains synchronized from vacation entries for monthly vacation totals.
+- `UserNotionConnection` stores the user-owned Notion token, data source, field mapping, done status values, and analysis config version.
+- `NotionCardCache` stores scoped Notion card snapshots used for candidates and analysis.
+- `WorkEntryNotionCard` stores mappings between saved `WORK` entries and Notion cards, including allocated hours.
+- `NotionSyncRun` stores scope-specific sync results and partial/failure metadata.
 - Runtime schema bootstrap is still used; there is no Prisma migration file for this feature set.
 
 ## Verification
 
 - Run `pnpm --filter @timesheet/web typecheck` after changes.
-- Check calendar, list, and editor behavior for missing dates, projectless saved work, multiple work entries, mixed work and vacation days, future vacation/holiday drafts, vacation range saves with holidays and existing records, connected vacation saves and deletes across holidays, month navigation selecting an in-month business day, month navigation loading/error feedback, previous-project auto-fill across month boundaries, saved non-holiday days with totals below or above `8h`, and holiday API warning behavior.
+- Check calendar, list, and editor behavior for missing dates, projectless saved work, multiple work entries, Notion card linking on work entries, mixed work and vacation days, future vacation/holiday drafts, vacation range saves with holidays and existing records, connected vacation saves and deletes across holidays, month navigation selecting an in-month business day, month navigation loading/error feedback, previous-project auto-fill across month boundaries, saved non-holiday days with totals below or above `8h`, and holiday API warning behavior.

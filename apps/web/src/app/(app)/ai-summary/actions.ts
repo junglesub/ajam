@@ -92,6 +92,7 @@ function mergeLegacyVacations(entries: StoredTimesheetDraft[], vacations: Array<
       hours: vacation.hours,
       id: "",
       kind: "VACATION",
+      notionCards: [],
       project: "",
       sortOrder: day.entries.length,
       vacationName: vacation.name
