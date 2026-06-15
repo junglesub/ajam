@@ -62,7 +62,7 @@ import {
 
 import { NotionCardLinkSection } from "./notion-card-link-section";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
-import { useNotionCardCandidates, type NotionCardCandidate, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
+import { useNotionCardCandidates, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
 
 type ViewMode = "calendar" | "list";
 
