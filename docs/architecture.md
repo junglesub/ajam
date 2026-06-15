@@ -80,6 +80,7 @@
 ## Deployment
 
 - `Dockerfile`은 Next.js 앱을 빌드하고 production 서버를 실행한다.
+- Docker runner image는 컨테이너 시작 시 `pnpm db:seed`가 workspace TS source를 실행하므로, `packages/db`와 런타임 import 대상인 `packages/domain`을 함께 포함한다.
 - `docker-compose.example.yml`은 GHCR `ghcr.io/junglesub/ajam:latest` 이미지를 사용하고 SQLite 파일을 서버의 `./ajam-data`에 둔다.
 - GitHub Actions는 image 검증 성공 후 GHCR에 `latest`, commit SHA, `v<run-number>-<yymmdd>` 태그를 push한다.
 - GitHub Actions는 n8n node 검증 성공 후 `packages/n8n-nodes-ajam`을 GitHub Packages npm registry에 `@junglesub/n8n-nodes-ajam`으로 publish한다.
@@ -90,4 +91,4 @@
 
 ## CI
 
-image 검증 기준은 install, lint, typecheck, web build이다. n8n node 검증 기준은 install, n8n node typecheck, n8n node build이다. `main` 브랜치 push에서는 관련 파일 변경이 있는 publish 대상만 해당 검증 성공 후 배포한다.
+image 검증 기준은 install, lint, typecheck, web build, Docker image build, Docker `pnpm db:seed` smoke test이다. n8n node 검증 기준은 install, n8n node typecheck, n8n node build이다. `main` 브랜치 push에서는 관련 파일 변경이 있는 publish 대상만 해당 검증 성공 후 배포한다.

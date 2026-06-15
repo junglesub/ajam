@@ -81,6 +81,12 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Build Docker image
+        run: docker build --build-arg BUILD_VERSION=ci -t ajam-ci .
+
+      - name: Smoke test Docker database seed
+        run: docker run --rm --entrypoint sh ajam-ci -c "pnpm db:seed"
+
   verify-n8n-node:
     runs-on: ubuntu-latest
     steps:
