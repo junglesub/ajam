@@ -84,6 +84,16 @@ function getMonthRange(month: string) {
   return { endDateKey, startDateKey };
 }
 
+function isValidMonthKey(month: string): boolean {
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return false;
+  }
+
+  const monthValue = Number(month.slice(5, 7));
+
+  return monthValue >= 1 && monthValue <= 12;
+}
+
 function getAvailabilityRange(cards: NotionCardCacheRecord[], todayDateKey: string) {
   const ranges = cards
     .filter((card) => card.startDate)
@@ -164,7 +174,7 @@ export async function syncNotionCardFieldsAction(notionPageIds: string[]) {
   const uniquePageIds = [...new Set(notionPageIds.map((pageId) => pageId.trim()).filter(Boolean))];
 
   if (uniquePageIds.length === 0) {
-    return { updated: 0 };
+    return { errors: [], failed: 0, updated: 0 };
   }
 
   return syncNotionWorkHoursForPages({ notionPageIds: uniquePageIds, userId: user.id });
@@ -228,7 +238,7 @@ function buildNotionFieldUpdatePrompt(params: {
 export async function listNotionCardsForMonthAction(month: string) {
   const user = await requireSession();
 
-  if (!/^\d{4}-\d{2}$/.test(month)) {
+  if (!isValidMonthKey(month)) {
     throw new Error("월 형식이 올바르지 않습니다.");
   }
 
@@ -240,7 +250,7 @@ export async function listNotionCardsForMonthAction(month: string) {
 export async function buildNotionMonthlyAnalysisAction(month: string): Promise<NotionMonthlyAnalysis> {
   const user = await requireSession();
 
-  if (!/^\d{4}-\d{2}$/.test(month)) {
+  if (!isValidMonthKey(month)) {
     throw new Error("월 형식이 올바르지 않습니다.");
   }
 

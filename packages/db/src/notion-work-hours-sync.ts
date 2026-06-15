@@ -16,6 +16,11 @@ import {
 import { listHolidays, listVacations } from "./timesheet-store";
 
 export type NotionWorkHoursSyncResult = {
+  errors: Array<{
+    message: string;
+    notionPageId: string;
+  }>;
+  failed: number;
   skippedReason?:
     | "missing_connection"
     | "missing_token"
@@ -32,7 +37,7 @@ export async function syncNotionWorkHoursForPages(params: {
   const notionPageIds = [...new Set(params.notionPageIds.map((pageId) => pageId.trim()).filter(Boolean))];
 
   if (notionPageIds.length === 0) {
-    return { updated: 0 };
+    return { errors: [], failed: 0, updated: 0 };
   }
 
   const [connection, token] = await Promise.all([
@@ -41,11 +46,11 @@ export async function syncNotionWorkHoursForPages(params: {
   ]);
 
   if (!connection) {
-    return { skippedReason: "missing_connection", updated: 0 };
+    return { errors: [], failed: 0, skippedReason: "missing_connection", updated: 0 };
   }
 
   if (!token) {
-    return { skippedReason: "missing_token", updated: 0 };
+    return { errors: [], failed: 0, skippedReason: "missing_token", updated: 0 };
   }
 
   const ajamLastUpdatePropertyKey = isMappedNotionPropertyType(connection.ajamLastUpdateProperty, "date")
@@ -83,11 +88,11 @@ export async function syncNotionWorkHoursForPages(params: {
   });
 
   if (properties.length === 0) {
-    return { skippedReason: "missing_number_properties", updated: 0 };
+    return { errors: [], failed: 0, skippedReason: "missing_number_properties", updated: 0 };
   }
 
   if (validProperties.length === 0) {
-    return { skippedReason: "invalid_number_properties", updated: 0 };
+    return { errors: [], failed: 0, skippedReason: "invalid_number_properties", updated: 0 };
   }
 
   const shouldSyncAvailableHours = validProperties.some((property) => property.kind === "availableHours");
@@ -116,6 +121,7 @@ export async function syncNotionWorkHoursForPages(params: {
         })
       : Promise.resolve(new Map<string, string>())
   ]);
+  const errors: NotionWorkHoursSyncResult["errors"] = [];
   let updated = 0;
 
   for (const pageId of notionPageIds) {
@@ -148,16 +154,23 @@ export async function syncNotionWorkHoursForPages(params: {
       };
     }
 
-    await updateNotionPageProperties({
-      ajamLastUpdatePropertyKey,
-      pageId,
-      properties: pageProperties,
-      token
-    });
-    updated += 1;
+    try {
+      await updateNotionPageProperties({
+        ajamLastUpdatePropertyKey,
+        pageId,
+        properties: pageProperties,
+        token
+      });
+      updated += 1;
+    } catch (error) {
+      errors.push({
+        message: error instanceof Error ? error.message : "Notion 페이지 업데이트에 실패했습니다.",
+        notionPageId: pageId
+      });
+    }
   }
 
-  return { updated };
+  return { errors, failed: errors.length, updated };
 }
 
 async function buildAvailableHoursByPage(params: {

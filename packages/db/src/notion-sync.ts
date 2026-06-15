@@ -4,6 +4,7 @@ import {
   getUserNotionAccessToken,
   getUserNotionConnection,
   recordNotionSyncRun,
+  replaceNotionCardCacheForDate,
   upsertNotionCardCache,
   type NotionCardCacheRecord,
   type NotionPropertyDescriptor,
@@ -63,11 +64,20 @@ export async function syncNotionCardsForDate(params: {
     });
     const cards = result.pages.map((page) => normalizePage({ connection, page }));
 
-    await upsertNotionCardCache({
-      analysisConfigVersion: connection.analysisConfigVersion,
-      cards,
-      userId: params.userId
-    });
+    if (result.partial) {
+      await upsertNotionCardCache({
+        analysisConfigVersion: connection.analysisConfigVersion,
+        cards,
+        userId: params.userId
+      });
+    } else {
+      await replaceNotionCardCacheForDate({
+        analysisConfigVersion: connection.analysisConfigVersion,
+        cards,
+        dateKey: params.dateKey,
+        userId: params.userId
+      });
+    }
     await recordNotionSyncRun({
       analysisConfigVersion: connection.analysisConfigVersion,
       cardsFetched: cards.length,

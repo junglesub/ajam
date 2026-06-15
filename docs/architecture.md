@@ -75,7 +75,7 @@
 - Notion 카드 후보는 업무 entry에 명시적으로 매핑될 때만 분석에 포함된다.
 - Notion API 장애가 발생해도 업무 기록 저장은 계속 가능하며, 후보 조회는 캐시 fallback을 사용한다.
 - 저장하지 않은 상태에서 날짜/월을 이동하려 하면 앱 모달로 확인한다.
-- 앱은 런타임에서 필요한 테이블과 컬럼을 `CREATE TABLE IF NOT EXISTS` 및 보정 쿼리로 보장한다. 아직 배포 전이므로 Prisma migration 파일은 두지 않는다.
+- 앱은 런타임에서 필요한 테이블과 컬럼을 `CREATE TABLE IF NOT EXISTS` 및 보정 쿼리로 보장한다. Notion 카드 동기화 스키마의 SQL reference는 `docs/db-migrations/2026-06-15-notion-card-sync.sql`에 둔다.
 
 ## Deployment
 

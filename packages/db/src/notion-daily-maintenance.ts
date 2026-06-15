@@ -83,10 +83,14 @@ export async function runNotionDailyMaintenance(params: {
         usersSkipped += 1;
       }
 
+      if (syncResult.errors.length > 0) {
+        usersSkipped += 1;
+      }
+
       userResults.push({
         cardsSynced: cards.length,
         cardsUpdated: syncResult.updated,
-        error: "",
+        error: syncResult.errors.map((error) => `${error.notionPageId}: ${error.message}`).join("\n"),
         skippedReason: syncResult.skippedReason ?? "",
         userId: user.id,
         username: user.username

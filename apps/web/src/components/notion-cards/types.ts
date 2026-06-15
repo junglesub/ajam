@@ -18,12 +18,21 @@ export type NotionCardWorkspaceProps = {
     clearToken?: boolean;
     connection: Omit<UserNotionConnection, "hasToken" | "lastSyncError" | "lastSyncedAt">;
   }) => Promise<UserNotionConnection>;
-  syncCardFieldsAction: (notionPageIds: string[]) => Promise<{ updated: number }>;
+  syncCardFieldsAction: (notionPageIds: string[]) => Promise<NotionFieldSyncResult>;
   syncDateCandidatesAction: (dateKey: string) => Promise<NotionDateCandidatesSyncResult>;
   testDataSourceAction: (params: {
     dataSourceId: string;
     token?: string;
   }) => Promise<{ id: string; name: string; properties: Record<string, NotionSchemaProperty> }>;
+};
+
+export type NotionFieldSyncResult = {
+  errors: Array<{
+    message: string;
+    notionPageId: string;
+  }>;
+  failed: number;
+  updated: number;
 };
 
 export type NotionFieldUpdatePrompt = {

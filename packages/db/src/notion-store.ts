@@ -349,43 +349,45 @@ export async function upsertNotionCardCache(params: {
   await ensureNotionSchema();
 
   for (const card of params.cards) {
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO "NotionCardCache" (
-         "id", "userId", "notionPageId", "title", "status", "category", "startDate", "endDate", "url", "lastEditedTime",
-         "rawPropertiesJson", "archived", "stale", "lastSeenAt", "analysisConfigVersionUsed", "syncedAt", "updatedAt"
-       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-       ON CONFLICT("userId", "notionPageId") DO UPDATE SET
-         "title" = excluded."title",
-         "status" = excluded."status",
-         "category" = excluded."category",
-         "startDate" = excluded."startDate",
-         "endDate" = excluded."endDate",
-         "url" = excluded."url",
-         "lastEditedTime" = excluded."lastEditedTime",
-         "rawPropertiesJson" = excluded."rawPropertiesJson",
-         "archived" = excluded."archived",
-         "stale" = excluded."stale",
-         "lastSeenAt" = CURRENT_TIMESTAMP,
-         "analysisConfigVersionUsed" = excluded."analysisConfigVersionUsed",
-         "syncedAt" = CURRENT_TIMESTAMP,
-         "updatedAt" = CURRENT_TIMESTAMP`,
-      randomUUID(),
-      params.userId,
-      card.notionPageId,
-      card.title,
-      card.status,
-      card.category,
-      card.startDate,
-      card.endDate,
-      card.url,
-      card.lastEditedTime,
-      card.rawPropertiesJson,
-      card.archived ? 1 : 0,
-      card.stale ? 1 : 0,
-      params.analysisConfigVersion
-    );
+    await upsertNotionCardCacheRecord({
+      analysisConfigVersion: params.analysisConfigVersion,
+      card,
+      execute: prisma.$executeRawUnsafe.bind(prisma),
+      userId: params.userId
+    });
   }
+}
+
+export async function replaceNotionCardCacheForDate(params: {
+  analysisConfigVersion: number;
+  cards: NotionCardCacheRecord[];
+  dateKey: string;
+  userId: string;
+}) {
+  await ensureNotionSchema();
+
+  await prisma.$transaction(async (transaction) => {
+    await transaction.$executeRawUnsafe(
+      `UPDATE "NotionCardCache"
+       SET "stale" = 1, "updatedAt" = CURRENT_TIMESTAMP
+       WHERE "userId" = ?
+         AND trim("startDate") <> ''
+         AND "startDate" <= ?
+         AND (trim("endDate") = '' OR "endDate" >= ?)`,
+      params.userId,
+      params.dateKey,
+      params.dateKey
+    );
+
+    for (const card of params.cards) {
+      await upsertNotionCardCacheRecord({
+        analysisConfigVersion: params.analysisConfigVersion,
+        card,
+        execute: transaction.$executeRawUnsafe.bind(transaction),
+        userId: params.userId
+      });
+    }
+  });
 }
 
 export async function listCachedNotionCards(params: {
@@ -399,6 +401,7 @@ export async function listCachedNotionCards(params: {
     `SELECT "notionPageId", "title", "status", "category", "startDate", "endDate", "url", "lastEditedTime", "rawPropertiesJson", "archived", "stale"
      FROM "NotionCardCache"
      WHERE "userId" = ?
+       AND "stale" = 0
        AND trim("startDate") <> ''
        AND "startDate" <= ?
        AND (trim("endDate") = '' OR "endDate" >= ?)
@@ -413,6 +416,50 @@ export async function listCachedNotionCards(params: {
     archived: Boolean(row.archived),
     stale: Boolean(row.stale)
   }));
+}
+
+async function upsertNotionCardCacheRecord(params: {
+  analysisConfigVersion: number;
+  card: NotionCardCacheRecord;
+  execute: (query: string, ...values: unknown[]) => Promise<unknown>;
+  userId: string;
+}) {
+  await params.execute(
+    `INSERT INTO "NotionCardCache" (
+       "id", "userId", "notionPageId", "title", "status", "category", "startDate", "endDate", "url", "lastEditedTime",
+       "rawPropertiesJson", "archived", "stale", "lastSeenAt", "analysisConfigVersionUsed", "syncedAt", "updatedAt"
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT("userId", "notionPageId") DO UPDATE SET
+       "title" = excluded."title",
+       "status" = excluded."status",
+       "category" = excluded."category",
+       "startDate" = excluded."startDate",
+       "endDate" = excluded."endDate",
+       "url" = excluded."url",
+       "lastEditedTime" = excluded."lastEditedTime",
+       "rawPropertiesJson" = excluded."rawPropertiesJson",
+       "archived" = excluded."archived",
+       "stale" = excluded."stale",
+       "lastSeenAt" = CURRENT_TIMESTAMP,
+       "analysisConfigVersionUsed" = excluded."analysisConfigVersionUsed",
+       "syncedAt" = CURRENT_TIMESTAMP,
+       "updatedAt" = CURRENT_TIMESTAMP`,
+    randomUUID(),
+    params.userId,
+    params.card.notionPageId,
+    params.card.title,
+    params.card.status,
+    params.card.category,
+    params.card.startDate,
+    params.card.endDate,
+    params.card.url,
+    params.card.lastEditedTime,
+    params.card.rawPropertiesJson,
+    params.card.archived ? 1 : 0,
+    params.card.stale ? 1 : 0,
+    params.analysisConfigVersion
+  );
 }
 
 export async function listCachedNotionCardsByPageIds(params: {
@@ -615,6 +662,17 @@ export async function recordNotionSyncRun(params: {
     params.errorMessage ?? "",
     params.analysisConfigVersion,
     params.partial ? 1 : 0
+  );
+
+  await prisma.$executeRawUnsafe(
+    `UPDATE "UserNotionConnection"
+     SET "lastSyncedAt" = CASE WHEN ? = 'success' THEN CURRENT_TIMESTAMP ELSE "lastSyncedAt" END,
+         "lastSyncError" = ?,
+         "updatedAt" = CURRENT_TIMESTAMP
+     WHERE "userId" = ?`,
+    params.status,
+    params.status === "failed" ? params.errorMessage ?? "" : "",
+    params.userId
   );
 }
 

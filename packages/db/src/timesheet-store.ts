@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { TimesheetEntryNotionCardDraft } from "@timesheet/domain";
+import { allocateNotionCardHours, type TimesheetEntryNotionCardDraft } from "@timesheet/domain";
 
 import { prisma } from "./client";
 import { ensureNotionSchema } from "./notion-store";
@@ -131,16 +131,23 @@ function normalizeEntry(entry: StoredTimesheetEntry, sortOrder: number): StoredT
   const isWork = kind === "WORK";
   const isVacation = kind === "VACATION";
   const isHoliday = kind === "HOLIDAY";
+  const hours = Number.isFinite(entry.hours) ? entry.hours : 0;
+  const notionCards = isWork
+    ? allocateNotionCardHours({
+        entryHours: hours,
+        links: normalizeNotionCards(entry.notionCards)
+      })
+    : [];
 
   return {
     aiTranslation: isWork ? entry.aiTranslation.trim() : "",
     clientId: entry.clientId || entry.id || randomUUID(),
     content: isWork ? entry.content.trim() : "",
     holidayName: isHoliday ? entry.holidayName.trim() : "",
-    hours: Number.isFinite(entry.hours) ? entry.hours : 0,
+    hours,
     id: entry.id.trim(),
     kind,
-    notionCards: isWork ? normalizeNotionCards(entry.notionCards) : [],
+    notionCards,
     project: isWork ? entry.project.trim() : "",
     sortOrder,
     vacationName: isVacation ? entry.vacationName.trim() : ""

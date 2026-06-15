@@ -225,6 +225,16 @@ export function allocateNotionCardHours({
     return [];
   }
 
+  if (!Number.isFinite(entryHours) || entryHours < 0) {
+    throw new Error("Work entry hours must be a non-negative number.");
+  }
+
+  for (const link of links) {
+    if (!Number.isFinite(link.allocatedHours) || link.allocatedHours < 0) {
+      throw new Error("Notion card allocated hours must be non-negative numbers.");
+    }
+  }
+
   const hasManualAllocation = links.some((link) => link.allocationMode === "manual");
 
   if (hasManualAllocation) {
@@ -237,11 +247,13 @@ export function allocateNotionCardHours({
     return links;
   }
 
-  const allocatedHours = roundToTwoDecimals(entryHours / links.length);
+  const totalCents = Math.round(roundToTwoDecimals(entryHours) * 100);
+  const baseCents = Math.floor(totalCents / links.length);
+  const remainderCents = totalCents - baseCents * links.length;
 
-  return links.map((link) => ({
+  return links.map((link, index) => ({
     ...link,
-    allocatedHours
+    allocatedHours: (baseCents + (index < remainderCents ? 1 : 0)) / 100
   }));
 }
 
@@ -253,23 +265,30 @@ export function buildNotionCategorySummary(params: { cards: NotionCardSummaryInp
   const summaries = new Map<string, NotionCategorySummary>();
 
   for (const card of params.cards) {
-    const category = card.category.trim() || "미분류";
-    const current = summaries.get(category) ?? {
-      cardCount: 0,
-      category,
-      estimatedHours: 0,
-      linkedHours: 0
-    };
+    for (const category of getCategoryNames(card.category)) {
+      const current = summaries.get(category) ?? {
+        cardCount: 0,
+        category,
+        estimatedHours: 0,
+        linkedHours: 0
+      };
 
-    current.cardCount += 1;
-    current.estimatedHours = roundToTwoDecimals(current.estimatedHours + card.estimatedHours);
-    current.linkedHours = roundToTwoDecimals(current.linkedHours + card.linkedHours);
-    summaries.set(category, current);
+      current.cardCount += 1;
+      current.estimatedHours = roundToTwoDecimals(current.estimatedHours + card.estimatedHours);
+      current.linkedHours = roundToTwoDecimals(current.linkedHours + card.linkedHours);
+      summaries.set(category, current);
+    }
   }
 
   return Array.from(summaries.values()).sort(
     (left, right) => right.estimatedHours - left.estimatedHours || left.category.localeCompare(right.category, "ko-KR")
   );
+}
+
+function getCategoryNames(value: string): string[] {
+  const categories = value.split(",").map((category) => category.trim()).filter(Boolean);
+
+  return categories.length > 0 ? categories : ["미분류"];
 }
 
 function isCardOpenOnDate(card: NotionCardSnapshot, dateKey: string): boolean {

@@ -42,6 +42,25 @@ function buildNotionMaintenanceAlert(response: IDataObject): IDataObject | null 
   };
 }
 
+function buildNotionRequestFailureAlert(params: {
+  dateKey: string;
+  error: unknown;
+}): IDataObject {
+  const message = params.error instanceof Error ? params.error.message : "Unknown request error";
+
+  return {
+    dateKey: params.dateKey,
+    errorCount: 1,
+    errors: [{ message, username: "request" }],
+    message: [
+      `${params.dateKey || "aJam"} Notion daily maintenance request failed.`,
+      "",
+      `- request: ${message}`
+    ].join("\n"),
+    subject: `[aJam] Notion daily maintenance request failed${params.dateKey ? ` (${params.dateKey})` : ""}`
+  };
+}
+
 export class Ajam implements INodeType {
   description: INodeTypeDescription = {
     displayName: "aJam",
@@ -228,16 +247,44 @@ export class Ajam implements INodeType {
         }
       }
 
-      const response = (await this.helpers.httpRequest({
-        body,
-        headers: {
-          Authorization: `Bearer ${credentials.apiToken}`,
-          "Content-Type": "application/json"
-        },
-        json: true,
-        method: "POST",
-        url
-      })) as IDataObject;
+      let response: IDataObject;
+
+      try {
+        response = (await this.helpers.httpRequest({
+          body,
+          headers: {
+            Authorization: `Bearer ${credentials.apiToken}`,
+            "Content-Type": "application/json"
+          },
+          json: true,
+          method: "POST",
+          url
+        })) as IDataObject;
+      } catch (error) {
+        if (resource !== "notion") {
+          throw error;
+        }
+
+        const alert = buildNotionRequestFailureAlert({ dateKey, error });
+
+        alertData.push({
+          json: alert,
+          pairedItem: {
+            item: itemIndex
+          }
+        });
+        returnData.push({
+          json: {
+            dateKey,
+            error: alert.message,
+            ok: false
+          },
+          pairedItem: {
+            item: itemIndex
+          }
+        });
+        continue;
+      }
 
       if (operation === "listMissingTimesheetUsers" && this.getNodeParameter("splitTargets", itemIndex, true)) {
         const targets = Array.isArray(response.targets) ? response.targets : [];

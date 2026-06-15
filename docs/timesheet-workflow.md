@@ -179,7 +179,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - `NotionCardCache` stores scoped Notion card snapshots used for candidates and analysis.
 - `WorkEntryNotionCard` stores mappings between saved `WORK` entries and Notion cards, including allocated hours.
 - `NotionSyncRun` stores scope-specific sync results and partial/failure metadata.
-- Runtime schema bootstrap is still used; there is no Prisma migration file for this feature set.
+- Runtime schema bootstrap is still used. The Notion card sync schema is also documented as SQL in `docs/db-migrations/2026-06-15-notion-card-sync.sql` for review and operations.
 
 ## Verification
 

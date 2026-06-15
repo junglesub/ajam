@@ -31,30 +31,35 @@ export type NotionCardCandidatesResult = {
   sync: NotionCardCandidateSyncMeta;
 };
 
+export type LoadNotionCardCandidatesInput = {
+  dateKey: string;
+  linkedPageIds?: string[];
+};
+
 export function useNotionCardCandidates(params: {
-  loadNotionCardCandidatesAction: (dateKey: string) => Promise<NotionCardCandidatesResult>;
-  refreshNotionCardCandidatesAction: (dateKey: string) => Promise<NotionCardCandidatesResult>;
+  loadNotionCardCandidatesAction: (input: LoadNotionCardCandidatesInput) => Promise<NotionCardCandidatesResult>;
+  refreshNotionCardCandidatesAction: (input: LoadNotionCardCandidatesInput) => Promise<NotionCardCandidatesResult>;
 }) {
   const [candidatesByDate, setCandidatesByDate] = useState<Record<string, NotionCardCandidate[]>>({});
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
   const [syncByDate, setSyncByDate] = useState<Record<string, NotionCardCandidateSyncMeta>>({});
 
-  function loadCandidates(dateKey: string) {
-    requestCandidates(dateKey, params.loadNotionCardCandidatesAction);
+  function loadCandidates(input: LoadNotionCardCandidatesInput) {
+    requestCandidates(input, params.loadNotionCardCandidatesAction);
   }
 
-  function refreshCandidates(dateKey: string) {
-    requestCandidates(dateKey, params.refreshNotionCardCandidatesAction);
+  function refreshCandidates(input: LoadNotionCardCandidatesInput) {
+    requestCandidates(input, params.refreshNotionCardCandidatesAction);
   }
 
-  function requestCandidates(dateKey: string, action: (dateKey: string) => Promise<NotionCardCandidatesResult>) {
+  function requestCandidates(input: LoadNotionCardCandidatesInput, action: (input: LoadNotionCardCandidatesInput) => Promise<NotionCardCandidatesResult>) {
     startTransition(async () => {
       try {
         setError("");
-        const result = await action(dateKey);
-        setCandidatesByDate((current) => ({ ...current, [dateKey]: result.candidates }));
-        setSyncByDate((current) => ({ ...current, [dateKey]: result.sync }));
+        const result = await action(input);
+        setCandidatesByDate((current) => ({ ...current, [input.dateKey]: result.candidates }));
+        setSyncByDate((current) => ({ ...current, [input.dateKey]: result.sync }));
         setError(result.sync.errorMessage);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : "Notion 카드 후보를 불러오지 못했습니다.");

@@ -67,7 +67,7 @@ When `dateKey` is empty, aJam uses today's date in `Asia/Seoul`. The action chec
 The `aJam` node has two outputs:
 
 - `Summary`: always emits the operation result.
-- `Alerts`: emits one email/Slack-ready item only when Notion daily maintenance has errors. Connect this output directly to an Email or Slack node; no IF node is needed.
+- `Alerts`: emits one email/Slack-ready item when Notion daily maintenance returns user/card errors or when the maintenance API request itself fails. Connect this output directly to an Email or Slack node; no IF node is needed.
 
 ## Adding More Actions
 

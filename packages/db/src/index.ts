@@ -24,6 +24,7 @@ export {
   listCachedNotionCardsByPageIds,
   recordNotionSyncRun,
   replaceEntryNotionCards,
+  replaceNotionCardCacheForDate,
   sumLinkedNotionHoursByPage,
   upsertNotionCardCache,
   upsertUserNotionConnection

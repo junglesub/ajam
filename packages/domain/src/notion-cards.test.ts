@@ -179,6 +179,36 @@ describe("Notion work entry allocations", () => {
     ]);
   });
 
+  it("keeps rounded auto allocations equal to the entry total", () => {
+    const links: WorkEntryNotionCardLink[] = [
+      {
+        allocatedHours: 0,
+        allocationMode: "auto",
+        notionPageId: "card-a",
+        source: "manual"
+      },
+      {
+        allocatedHours: 0,
+        allocationMode: "auto",
+        notionPageId: "card-b",
+        source: "manual"
+      },
+      {
+        allocatedHours: 0,
+        allocationMode: "auto",
+        notionPageId: "card-c",
+        source: "manual"
+      }
+    ];
+    const allocated = allocateNotionCardHours({ entryHours: 8, links });
+
+    assert.deepEqual(
+      allocated.map((link) => link.allocatedHours),
+      [2.67, 2.67, 2.66]
+    );
+    assert.equal(allocated.reduce((sum, link) => sum + link.allocatedHours, 0), 8);
+  });
+
   it("rejects manual allocations that do not match entry hours", () => {
     const links: WorkEntryNotionCardLink[] = [
       {
@@ -204,13 +234,15 @@ describe("Notion category summary", () => {
     const summary = buildNotionCategorySummary({
       cards: [
         { category: "Feature", estimatedHours: 10, linkedHours: 6, notionPageId: "a" },
+        { category: "Feature, Ops", estimatedHours: 3, linkedHours: 1, notionPageId: "c" },
         { category: "", estimatedHours: 4, linkedHours: 2, notionPageId: "b" }
       ]
     });
 
     assert.deepEqual(summary, [
-      { cardCount: 1, category: "Feature", estimatedHours: 10, linkedHours: 6 },
-      { cardCount: 1, category: "미분류", estimatedHours: 4, linkedHours: 2 }
+      { cardCount: 2, category: "Feature", estimatedHours: 13, linkedHours: 7 },
+      { cardCount: 1, category: "미분류", estimatedHours: 4, linkedHours: 2 },
+      { cardCount: 1, category: "Ops", estimatedHours: 3, linkedHours: 1 }
     ]);
   });
 });

@@ -13,6 +13,7 @@ import {
   getUserNotionConnection,
   getManagedUser,
   listCachedNotionCards,
+  listCachedNotionCardsByPageIds,
   listHolidays,
   listProjects,
   listTimesheetEntries,
@@ -85,6 +86,13 @@ export type NotionCardCandidatesResult = {
   candidates: NotionCardCacheRecord[];
   sync: NotionCardCandidateSyncMeta;
 };
+
+export type LoadNotionCardCandidatesInput =
+  | string
+  | {
+      dateKey: string;
+      linkedPageIds?: string[];
+    };
 
 function toDateKey(year: number, monthIndex: number, day: number): string {
   return `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
@@ -769,7 +777,12 @@ async function syncNotionWorkHoursAfterTimesheetSave(params: {
   }
 
   try {
-    await syncNotionWorkHoursForPages(params);
+    const result = await syncNotionWorkHoursForPages(params);
+
+    if (result.errors.length > 0) {
+      return result.errors.map((error) => `${error.notionPageId}: ${error.message}`).join("\n");
+    }
+
     return "";
   } catch (error) {
     console.warn("Failed to sync Notion work hours after timesheet save.", error);
@@ -777,71 +790,158 @@ async function syncNotionWorkHoursAfterTimesheetSave(params: {
   }
 }
 
-export async function loadNotionCardCandidatesAction(dateKey: string): Promise<NotionCardCandidatesResult> {
+export async function loadNotionCardCandidatesAction(input: LoadNotionCardCandidatesInput): Promise<NotionCardCandidatesResult> {
   const user = await requireSession();
+  const { dateKey, linkedPageIds } = normalizeNotionCandidateInput(input);
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
     throw new Error("날짜 형식이 올바르지 않습니다.");
   }
 
-  const latestSuccess = await getDateNotionSyncRun({ dateKey, status: "success", userId: user.id });
+  const [latestSuccess, connection] = await Promise.all([
+    getDateNotionSyncRun({ dateKey, status: "success", userId: user.id }),
+    getUserNotionConnection(user.id)
+  ]);
+  const doneStatusValues = connection?.doneStatusValues ?? [];
 
   if (latestSuccess) {
     const [candidates, latestRun] = await Promise.all([
-      listCachedNotionCards({ endDateKey: dateKey, startDateKey: dateKey, userId: user.id }),
+      listCandidateCardsWithLinked({ dateKey, linkedPageIds, userId: user.id }),
       getDateNotionSyncRun({ dateKey, userId: user.id })
     ]);
 
     return buildNotionCardCandidatesResult({
       candidates,
+      dateKey,
+      doneStatusValues,
       latestRun,
       latestSuccess,
+      linkedPageIds,
       source: "cache"
     });
   }
 
-  return syncNotionCardCandidatesForDate({ dateKey, userId: user.id });
+  return syncNotionCardCandidatesForDate({ dateKey, doneStatusValues, linkedPageIds, userId: user.id });
 }
 
-export async function refreshNotionCardCandidatesAction(dateKey: string): Promise<NotionCardCandidatesResult> {
+export async function refreshNotionCardCandidatesAction(input: LoadNotionCardCandidatesInput): Promise<NotionCardCandidatesResult> {
   const user = await requireSession();
+  const { dateKey, linkedPageIds } = normalizeNotionCandidateInput(input);
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
     throw new Error("날짜 형식이 올바르지 않습니다.");
   }
 
-  return syncNotionCardCandidatesForDate({ dateKey, userId: user.id });
+  const connection = await getUserNotionConnection(user.id);
+
+  return syncNotionCardCandidatesForDate({
+    dateKey,
+    doneStatusValues: connection?.doneStatusValues ?? [],
+    linkedPageIds,
+    userId: user.id
+  });
 }
 
 async function syncNotionCardCandidatesForDate(params: {
   dateKey: string;
+  doneStatusValues: string[];
+  linkedPageIds?: string[];
   userId: string;
 }): Promise<NotionCardCandidatesResult> {
   try {
     const candidates = await syncNotionCardsForDate(params);
     const latestSuccess = await getDateNotionSyncRun({ dateKey: params.dateKey, status: "success", userId: params.userId });
+    const candidatesWithLinked = await mergeCandidateCardsWithLinked({
+      candidates,
+      linkedPageIds: params.linkedPageIds ?? [],
+      userId: params.userId
+    });
 
     return buildNotionCardCandidatesResult({
-      candidates,
+      candidates: candidatesWithLinked,
+      dateKey: params.dateKey,
+      doneStatusValues: params.doneStatusValues,
+      linkedPageIds: params.linkedPageIds ?? [],
       latestRun: latestSuccess,
       latestSuccess,
       source: "notion"
     });
   } catch (error) {
     const [candidates, latestRun, latestSuccess] = await Promise.all([
-      listCachedNotionCards({ endDateKey: params.dateKey, startDateKey: params.dateKey, userId: params.userId }),
+      listCandidateCardsWithLinked({
+        dateKey: params.dateKey,
+        linkedPageIds: params.linkedPageIds ?? [],
+        userId: params.userId
+      }),
       getDateNotionSyncRun({ dateKey: params.dateKey, userId: params.userId }),
       getDateNotionSyncRun({ dateKey: params.dateKey, status: "success", userId: params.userId })
     ]);
 
     return buildNotionCardCandidatesResult({
       candidates,
+      dateKey: params.dateKey,
+      doneStatusValues: params.doneStatusValues,
       errorMessage: error instanceof Error ? error.message : "Notion 카드 후보를 동기화하지 못했습니다.",
       latestRun,
       latestSuccess,
+      linkedPageIds: params.linkedPageIds ?? [],
       source: "cache"
     });
   }
+}
+
+async function listCandidateCardsWithLinked(params: {
+  dateKey: string;
+  linkedPageIds: string[];
+  userId: string;
+}): Promise<NotionCardCacheRecord[]> {
+  const [dateCards, linkedCards] = await Promise.all([
+    listCachedNotionCards({ endDateKey: params.dateKey, startDateKey: params.dateKey, userId: params.userId }),
+    listCachedNotionCardsByPageIds({ notionPageIds: params.linkedPageIds, userId: params.userId })
+  ]);
+  const cardsByPageId = new Map<string, NotionCardCacheRecord>();
+
+  for (const card of [...dateCards, ...linkedCards]) {
+    cardsByPageId.set(card.notionPageId, card);
+  }
+
+  return Array.from(cardsByPageId.values());
+}
+
+async function mergeCandidateCardsWithLinked(params: {
+  candidates: NotionCardCacheRecord[];
+  linkedPageIds: string[];
+  userId: string;
+}): Promise<NotionCardCacheRecord[]> {
+  if (params.linkedPageIds.length === 0) {
+    return params.candidates;
+  }
+
+  const linkedCards = await listCachedNotionCardsByPageIds({
+    notionPageIds: params.linkedPageIds,
+    userId: params.userId
+  });
+  const cardsByPageId = new Map<string, NotionCardCacheRecord>();
+
+  for (const card of [...params.candidates, ...linkedCards]) {
+    cardsByPageId.set(card.notionPageId, card);
+  }
+
+  return Array.from(cardsByPageId.values());
+}
+
+function normalizeNotionCandidateInput(input: LoadNotionCardCandidatesInput): {
+  dateKey: string;
+  linkedPageIds: string[];
+} {
+  if (typeof input === "string") {
+    return { dateKey: input, linkedPageIds: [] };
+  }
+
+  return {
+    dateKey: input.dateKey,
+    linkedPageIds: [...new Set((input.linkedPageIds ?? []).map((pageId) => pageId.trim()).filter(Boolean))]
+  };
 }
 
 function getDateNotionSyncRun(params: {
@@ -860,13 +960,24 @@ function getDateNotionSyncRun(params: {
 
 function buildNotionCardCandidatesResult(params: {
   candidates: NotionCardCacheRecord[];
+  dateKey: string;
+  doneStatusValues: string[];
   errorMessage?: string;
   latestRun: NotionSyncRunRecord | null;
   latestSuccess: NotionSyncRunRecord | null;
+  linkedPageIds: string[];
   source: "cache" | "notion";
 }): NotionCardCandidatesResult {
+  const filteredCandidates = filterOpenNotionCardCandidates({
+    cards: params.candidates,
+    dateKey: params.dateKey,
+    doneStatusValues: params.doneStatusValues,
+    linkedPageIds: params.linkedPageIds
+  });
+  const filteredPageIds = new Set(filteredCandidates.map((candidate) => candidate.notionPageId));
+
   return {
-    candidates: params.candidates,
+    candidates: params.candidates.filter((candidate) => filteredPageIds.has(candidate.notionPageId)),
     sync: {
       cardsFetched: params.latestSuccess?.cardsFetched ?? 0,
       errorMessage: params.errorMessage ?? "",

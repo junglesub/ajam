@@ -67,8 +67,17 @@ export function NotionCardWorkspace({
       try {
         const result = await syncCardFieldsAction(fieldUpdatePrompt.notionPageIds);
 
-        setFieldUpdatePrompt(null);
-        setMessage(`${result.updated}개 Notion 카드 필드를 업데이트했습니다.`);
+        if (result.errors.length > 0) {
+          setFieldUpdateError(result.errors.map((error) => `${error.notionPageId}: ${error.message}`).join("\n"));
+        } else {
+          setFieldUpdatePrompt(null);
+        }
+
+        setMessage(
+          result.failed > 0
+            ? `${result.updated}개 Notion 카드 필드를 업데이트했고 ${result.failed}개는 실패했습니다.`
+            : `${result.updated}개 Notion 카드 필드를 업데이트했습니다.`
+        );
         monthState.loadMonth();
       } catch (error) {
         setFieldUpdateError(error instanceof Error ? error.message : "Notion 필드를 업데이트하지 못했습니다.");

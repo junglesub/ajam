@@ -20,6 +20,7 @@ import {
 import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from "react";
 
 import {
+  allocateNotionCardHours,
   createEmptyDraft,
   createEmptyEntryDraft,
   formatKoreanDate,
@@ -62,7 +63,7 @@ import {
 
 import { NotionCardLinkSection } from "./notion-card-link-section";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
-import { useNotionCardCandidates, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
+import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
 
 type ViewMode = "calendar" | "list";
 
@@ -167,8 +168,8 @@ type TimesheetWorkspaceProps = {
   initialTodayKey: string;
   initialYear: number;
   loadMonthAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
-  loadNotionCardCandidatesAction: (dateKey: string) => Promise<NotionCardCandidatesResult>;
-  refreshNotionCardCandidatesAction: (dateKey: string) => Promise<NotionCardCandidatesResult>;
+  loadNotionCardCandidatesAction: (input: LoadNotionCardCandidatesInput) => Promise<NotionCardCandidatesResult>;
+  refreshNotionCardCandidatesAction: (input: LoadNotionCardCandidatesInput) => Promise<NotionCardCandidatesResult>;
   resetAllHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   resetHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   runAiCleanupAction: (dateKey: string, options?: AiCleanupOptions) => Promise<TimesheetAiCleanupResult>;
@@ -398,18 +399,14 @@ function findPreviousProject(dateKey: string, records: Record<string, TimesheetD
 }
 
 function allocateDefaultNotionCards(cards: TimesheetEntryNotionCardDraft[], entryHours: number): TimesheetEntryNotionCardDraft[] {
-  if (cards.length === 0) {
-    return [];
-  }
-
-  const allocatedHours = Number((entryHours / cards.length).toFixed(2));
-
-  return cards.map((card) => ({
-    ...card,
-    allocatedHours,
-    allocationMode: "auto",
-    source: "previous_business_day_default"
-  }));
+  return allocateNotionCardHours({
+    entryHours,
+    links: cards.map((card) => ({
+      ...card,
+      allocationMode: "auto",
+      source: "previous_business_day_default"
+    }))
+  });
 }
 
 function createEntryForDate(dateKey: string, records: Record<string, TimesheetDayDraft>, kind: WorkRecordKind = "WORK"): TimesheetEntryDraft {
@@ -1439,11 +1436,12 @@ export function TimesheetWorkspace({
                 title: candidate?.title ?? ""
               }
             ];
-        const allocatedHours = nextLinks.length > 0 ? Number((entry.hours / nextLinks.length).toFixed(2)) : 0;
-
         return {
           ...entry,
-          notionCards: nextLinks.map((link) => (link.allocationMode === "auto" ? { ...link, allocatedHours } : link))
+          notionCards: allocateNotionCardHours({
+            entryHours: entry.hours,
+            links: nextLinks
+          })
         };
       });
 
@@ -2573,7 +2571,10 @@ export function TimesheetWorkspace({
                     entry={selectedEntry}
                     onOpenPicker={() => {
                       setEditingNotionEntryClientId(selectedEntry.clientId || selectedEntry.id);
-                      notionCandidates.loadCandidates(selectedDateKey);
+                      notionCandidates.loadCandidates({
+                        dateKey: selectedDateKey,
+                        linkedPageIds: selectedEntry.notionCards.map((link) => link.notionPageId)
+                      });
                     }}
                     onRemoveCard={(notionPageId) => toggleNotionCardForEntry(selectedEntry.clientId || selectedEntry.id, notionPageId)}
                   />
@@ -3102,7 +3103,14 @@ export function TimesheetWorkspace({
             : []
         }
         onClose={() => setEditingNotionEntryClientId(null)}
-        onRefresh={() => notionCandidates.refreshCandidates(selectedDateKey)}
+        onRefresh={() =>
+          notionCandidates.refreshCandidates({
+            dateKey: selectedDateKey,
+            linkedPageIds: editingNotionEntryClientId
+              ? selectedDay.entries.find((entry) => (entry.clientId || entry.id) === editingNotionEntryClientId)?.notionCards.map((link) => link.notionPageId) ?? []
+              : []
+          })
+        }
         onToggleCard={(notionPageId) => {
           if (editingNotionEntryClientId) {
             toggleNotionCardForEntry(editingNotionEntryClientId, notionPageId);
