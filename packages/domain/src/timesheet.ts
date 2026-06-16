@@ -38,6 +38,7 @@ export type TimesheetRow = TimesheetDayDraft & {
   aiTranslation: string;
   content: string;
   entryCount: number;
+  hasNotionCardWarning: boolean;
   hasVacation: boolean;
   hasUnlinkedNotionWork: boolean;
   hours: number;

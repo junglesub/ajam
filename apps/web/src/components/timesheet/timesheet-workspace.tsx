@@ -435,13 +435,33 @@ function rebalanceDefaultWorkHours(entries: TimesheetEntryDraft[], newEntry: Tim
   const normalizedSharedHours = Number(sharedHours.toFixed(2));
 
   return [
-    ...entries.map((entry) => entry.kind === "WORK" && !entry.hoursTouched ? { ...entry, hours: normalizedSharedHours } : entry),
-    {
-      ...newEntry,
-      hours: normalizedSharedHours,
-      hoursTouched: false
-    }
+    ...entries.map((entry) => entry.kind === "WORK" && !entry.hoursTouched ? withRebalancedNotionCards(entry, normalizedSharedHours) : entry),
+    withRebalancedNotionCards(newEntry, normalizedSharedHours)
   ];
+}
+
+function withRebalancedNotionCards(entry: TimesheetEntryDraft, hours: number): TimesheetEntryDraft {
+  const nextEntry = {
+    ...entry,
+    hours,
+    hoursTouched: false
+  };
+
+  if (entry.kind !== "WORK" || entry.notionCards.length === 0) {
+    return nextEntry;
+  }
+
+  try {
+    return {
+      ...nextEntry,
+      notionCards: allocateNotionCardHours({
+        entryHours: hours,
+        links: entry.notionCards
+      })
+    };
+  } catch {
+    return nextEntry;
+  }
 }
 
 function createDraftForDate(dateKey: string, records: Record<string, TimesheetDayDraft>): TimesheetDayDraft {
@@ -482,13 +502,16 @@ function rowFromDraft(dateKey: string, todayKey: string, draft: TimesheetDayDraf
   const hasVacation = row.entries.some((entry) => entry.kind === "VACATION");
   const hasHoliday = Boolean(firstHoliday || row.holidayName);
   const isVacationOnly = hasVacation && !firstWork && !hasHoliday;
-  const hasUnlinkedNotionWork = isSaved && row.entries.some((entry) => entry.kind === "WORK" && entry.notionCards.length === 0);
+  const shouldWarnForMissingNotionCards = isSaved || !isAutoProjectOnlyDraft(row);
+  const hasUnlinkedNotionWork = shouldWarnForMissingNotionCards && row.entries.some((entry) => entry.kind === "WORK" && entry.notionCards.length === 0);
+  const hasNotionCardWarning = row.entries.some((entry) => entryHasNotionCardWarning(entry, shouldWarnForMissingNotionCards));
 
   return {
     ...row,
     aiTranslation: firstWork?.aiTranslation ?? "",
     content: firstWork?.content ?? "",
     entryCount: row.entries.length,
+    hasNotionCardWarning,
     hasUnlinkedNotionWork,
     hasVacation,
     hours: row.entries.reduce((sum, entry) => sum + entry.hours, 0),
@@ -530,6 +553,45 @@ function isAutoProjectOnlyDraft(draft: TimesheetDayDraft | undefined): boolean {
 
 function draftPreviewText(row: TimesheetRow): string {
   return truncateContent(row.previewContent);
+}
+
+function toHourCents(value: number): number {
+  return Math.round(value * 100);
+}
+
+function toHoursFromCents(value: number): number {
+  return value / 100;
+}
+
+function getNotionAllocationError(entry: TimesheetEntryDraft): string {
+  if (entry.kind !== "WORK" || entry.notionCards.length === 0) {
+    return "";
+  }
+
+  if (!Number.isFinite(entry.hours) || entry.hours < 0) {
+    return "업무 시간이 올바르지 않습니다.";
+  }
+
+  if (entry.notionCards.some((link) => !Number.isFinite(link.allocatedHours) || link.allocatedHours < 0)) {
+    return "카드 배분 시간이 올바르지 않습니다.";
+  }
+
+  const entryHourCents = toHourCents(entry.hours);
+  const allocatedHourCents = entry.notionCards.reduce((sum, link) => sum + toHourCents(link.allocatedHours), 0);
+
+  if (allocatedHourCents === entryHourCents) {
+    return "";
+  }
+
+  return `배분 합계 ${toHoursFromCents(allocatedHourCents)}h / 업무 ${toHoursFromCents(entryHourCents)}h`;
+}
+
+function entryHasNotionCardWarning(entry: TimesheetEntryDraft, isSaved: boolean): boolean {
+  if (entry.kind !== "WORK") {
+    return false;
+  }
+
+  return (isSaved && entry.notionCards.length === 0) || Boolean(getNotionAllocationError(entry));
 }
 
 function sanitizeDayForSave(day: TimesheetDayDraft): TimesheetDayDraft {
@@ -803,6 +865,7 @@ export function TimesheetWorkspace({
   const selectedEntry = selectedDay.entries.find((entry) => entry.clientId === selectedEntryIdCandidate) ?? selectedDay.entries[0];
   const selectedEntryId = selectedEntry?.clientId ?? "";
   const selectedEditorKind: WorkRecordKind = selectedEntry?.kind ?? (selectedDay.holidayName ? "HOLIDAY" : isFutureDate ? "VACATION" : "WORK");
+  const selectedNotionAllocationError = selectedEntry ? getNotionAllocationError(selectedEntry) : "";
 
   const monthRows = Object.values(rows).filter((row) => row.dateKey.startsWith(`${monthCursor.year}-${String(monthCursor.monthIndex + 1).padStart(2, "0")}`));
   const businessDayCount = monthRows.filter((row) => row.status !== "HOLIDAY").length;
@@ -1443,6 +1506,50 @@ export function TimesheetWorkspace({
     });
   }
 
+  function updateSelectedEntryHours(hours: number) {
+    resetEntryFeedback();
+    setIsDirty(true);
+    setRecords((current) => {
+      const previous = current[selectedDateKey] ?? createDraftForSelectedDate(current);
+      const selectedId = getSelectedEntryIdForDay(selectedDateKey, previous);
+      const entries = previous.entries.map((entry) => {
+        if (entry.clientId !== selectedId) {
+          return entry;
+        }
+
+        const nextEntry = {
+          ...entry,
+          hours,
+          hoursTouched: true
+        };
+
+        if (entry.kind !== "WORK" || entry.notionCards.length === 0) {
+          return nextEntry;
+        }
+
+        try {
+          return {
+            ...nextEntry,
+            notionCards: allocateNotionCardHours({
+              entryHours: hours,
+              links: entry.notionCards
+            })
+          };
+        } catch {
+          return nextEntry;
+        }
+      });
+
+      return {
+        ...current,
+        [selectedDateKey]: {
+          ...previous,
+          entries
+        }
+      };
+    });
+  }
+
   function toggleNotionCardForEntry(entryClientId: string, notionPageId: string) {
     resetEntryFeedback();
     setIsDirty(true);
@@ -1473,11 +1580,94 @@ export function TimesheetWorkspace({
                 title: candidate?.title ?? ""
               }
             ];
+
+        try {
+          return {
+            ...entry,
+            notionCards: allocateNotionCardHours({
+              entryHours: entry.hours,
+              links: nextLinks
+            })
+          };
+        } catch {
+          return {
+            ...entry,
+            notionCards: nextLinks
+          };
+        }
+      });
+
+      return {
+        ...current,
+        [selectedDateKey]: {
+          ...previous,
+          entries
+        }
+      };
+    });
+  }
+
+  function updateNotionCardAllocatedHours(entryClientId: string, notionPageId: string, allocatedHours: number) {
+    resetEntryFeedback();
+    setIsDirty(true);
+    setRecords((current) => {
+      const previous = current[selectedDateKey] ?? createDraftForSelectedDate(current);
+      const entries = previous.entries.map((entry) => {
+        if ((entry.clientId || entry.id) !== entryClientId || entry.kind !== "WORK") {
+          return entry;
+        }
+
+        const nextLinks = entry.notionCards.map((link) => ({
+          ...link,
+          allocatedHours: link.notionPageId === notionPageId ? Math.max(allocatedHours, 0) : link.allocatedHours,
+          allocationMode: link.notionPageId === notionPageId ? "manual" as const : link.allocationMode
+        }));
+
+        try {
+          return {
+            ...entry,
+            notionCards: allocateNotionCardHours({
+              entryHours: entry.hours,
+              links: nextLinks
+            })
+          };
+        } catch {
+          return {
+            ...entry,
+            notionCards: nextLinks
+          };
+        }
+      });
+
+      return {
+        ...current,
+        [selectedDateKey]: {
+          ...previous,
+          entries
+        }
+      };
+    });
+  }
+
+  function resetNotionCardAutoAllocation(entryClientId: string) {
+    resetEntryFeedback();
+    setIsDirty(true);
+    setRecords((current) => {
+      const previous = current[selectedDateKey] ?? createDraftForSelectedDate(current);
+      const entries = previous.entries.map((entry) => {
+        if ((entry.clientId || entry.id) !== entryClientId || entry.kind !== "WORK") {
+          return entry;
+        }
+
         return {
           ...entry,
           notionCards: allocateNotionCardHours({
             entryHours: entry.hours,
-            links: nextLinks
+            links: entry.notionCards.map((link) => ({
+              ...link,
+              allocatedHours: 0,
+              allocationMode: "auto" as const
+            }))
           })
         };
       });
@@ -1838,6 +2028,7 @@ export function TimesheetWorkspace({
 
   function addEntry(kind: WorkRecordKind) {
     const nextKind = selectedDateKey > todayKey && kind === "WORK" ? "VACATION" : kind;
+    const entryClientId = createClientId();
 
     resetEntryFeedback();
     setIsDirty(true);
@@ -1845,17 +2036,9 @@ export function TimesheetWorkspace({
       const previous = current[selectedDateKey] ?? createDraftForSelectedDate(current);
       const entry = {
         ...createEntryForDate(selectedDateKey, current, nextKind),
+        clientId: entryClientId,
         sortOrder: previous.entries.length
       };
-
-      if (entry.kind === "WORK") {
-        void fillPreviousNotionCardsFromDatabase(selectedDateKey, entry.clientId);
-      }
-
-      setSelectedEntryIdByDate((selected) => ({
-        ...selected,
-        [selectedDateKey]: entry.clientId
-      }));
 
       return {
         ...current,
@@ -1865,6 +2048,14 @@ export function TimesheetWorkspace({
         }
       };
     });
+    setSelectedEntryIdByDate((selected) => ({
+      ...selected,
+      [selectedDateKey]: entryClientId
+    }));
+
+    if (nextKind === "WORK") {
+      void fillPreviousNotionCardsFromDatabase(selectedDateKey, entryClientId);
+    }
   }
 
   function removeEntry(clientId: string) {
@@ -2555,6 +2746,7 @@ export function TimesheetWorkspace({
                         index={index}
                         isSelected={entry.clientId === selectedEntry?.clientId}
                         key={entry.clientId}
+                        notionCardWarning={entryHasNotionCardWarning(entry, true)}
                         onMoveDown={() => moveEntry(entry.clientId, 1)}
                         onMoveUp={() => moveEntry(entry.clientId, -1)}
                         onRemove={() => removeEntry(entry.clientId)}
@@ -2594,7 +2786,7 @@ export function TimesheetWorkspace({
                     </Field>
 
                     <Field label="일한 시간">
-                      <Input disabled={isFutureWork} max={24} min={0} onChange={(event) => updateSelectedEntry({ hours: Number(event.target.value) })} step={0.5} type="number" value={selectedEntry.hours} />
+                      <Input disabled={isFutureWork} max={24} min={0} onChange={(event) => updateSelectedEntryHours(Number(event.target.value))} step={0.5} type="number" value={selectedEntry.hours} />
                     </Field>
                   </div>
 
@@ -2603,9 +2795,11 @@ export function TimesheetWorkspace({
                   </Field>
 
                   <NotionCardLinkSection
+                    allocationError={selectedNotionAllocationError}
                     candidates={notionCandidates.candidatesByDate[selectedDateKey] ?? []}
                     disabled={isFutureWork}
                     entry={selectedEntry}
+                    onAllocatedHoursChange={(notionPageId, allocatedHours) => updateNotionCardAllocatedHours(selectedEntry.clientId || selectedEntry.id, notionPageId, allocatedHours)}
                     onOpenPicker={() => {
                       setIncludeDoneNotionCandidates(false);
                       setEditingNotionEntryClientId(selectedEntry.clientId || selectedEntry.id);
@@ -2616,6 +2810,7 @@ export function TimesheetWorkspace({
                       });
                     }}
                     onRemoveCard={(notionPageId) => toggleNotionCardForEntry(selectedEntry.clientId || selectedEntry.id, notionPageId)}
+                    onResetAutoAllocation={() => resetNotionCardAutoAllocation(selectedEntry.clientId || selectedEntry.id)}
                   />
 
                   <Field label="영문 번역본">
@@ -3250,13 +3445,13 @@ function TimeMismatchIcon({ hours }: { hours: number }) {
   );
 }
 
-function UnlinkedNotionWorkIcon() {
+function NotionCardWarningIcon() {
   return (
     <span
       className="inline-flex shrink-0 items-center justify-center text-amber-500"
-      title="저장된 업무 중 연결된 Notion 카드가 없는 항목이 있습니다."
+      title="Notion 카드가 없거나 배분 시간이 업무 시간과 맞지 않습니다."
     >
-      <AlertTriangle aria-label="Notion 카드 미할당 경고" className="size-3.5" />
+      <AlertTriangle aria-label="Notion 카드 경고" className="size-3.5" />
     </span>
   );
 }
@@ -3335,7 +3530,7 @@ function CalendarView({
                         {cell.day}
                       </span>
                       {row && hasTimeMismatch(row) ? <TimeMismatchIcon hours={row.hours} /> : null}
-                      {row?.hasUnlinkedNotionWork ? <UnlinkedNotionWorkIcon /> : null}
+                      {row?.hasNotionCardWarning ? <NotionCardWarningIcon /> : null}
                     </span>
                     {row ? <CalendarStatusBadges row={row} /> : null}
                   </div>
@@ -3407,6 +3602,7 @@ function ListView({
                 <span className="flex items-center gap-1.5 font-semibold text-slate-950">
                   <span>{formatKoreanDate(dateKey)}</span>
                   {hasTimeMismatch(row) ? <TimeMismatchIcon hours={row.hours} /> : null}
+                  {row.hasNotionCardWarning ? <NotionCardWarningIcon /> : null}
                 </span>
                 <span>
                   <Badge tone={emptyStatusTone}>{emptyStatusLabel}</Badge>
@@ -3423,6 +3619,7 @@ function ListView({
             const isSelected = selectedDateKey === dateKey && selectedEntryId === entry.clientId;
             const entryContent = entry.kind === "WORK" ? entry.content.trim() || "(내용 없음)" : "-";
             const entryTranslation = entry.kind === "WORK" ? entry.aiTranslation.trim() || "-" : "-";
+            const hasEntryNotionWarning = entryHasNotionCardWarning(entry, row.status !== "MISSING");
 
             return (
               <button
@@ -3443,7 +3640,10 @@ function ListView({
                   ) : null}
                 </span>
                 <span>
-                  <Badge tone={entryKindTone(entry)}>{entryKindLabel(entry)}</Badge>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Badge tone={entryKindTone(entry)}>{entryKindLabel(entry)}</Badge>
+                    {hasEntryNotionWarning ? <NotionCardWarningIcon /> : null}
+                  </span>
                 </span>
                 <span className="font-semibold text-slate-700">{entry.hours}h</span>
                 <span className="truncate font-medium text-slate-700">{entryTitle(entry)}</span>
@@ -3502,6 +3702,7 @@ function SortableEntryItem({
   entry,
   index,
   isSelected,
+  notionCardWarning,
   onMoveDown,
   onMoveUp,
   onRemove,
@@ -3511,6 +3712,7 @@ function SortableEntryItem({
   entry: TimesheetEntryDraft;
   index: number;
   isSelected: boolean;
+  notionCardWarning: boolean;
   onMoveDown: () => void;
   onMoveUp: () => void;
   onRemove: () => void;
@@ -3539,6 +3741,7 @@ function SortableEntryItem({
             <Badge tone={entryKindTone(entry)}>{entryKindLabel(entry)}</Badge>
             <span className="min-w-0 truncate text-sm font-semibold text-slate-800">{entryTitle(entry)}</span>
             <span className="text-sm font-bold text-slate-950">{entry.hours}h</span>
+            {notionCardWarning ? <NotionCardWarningIcon /> : null}
           </div>
           {entry.kind === "WORK" && entryContentPreview(entry) ? <p className="mt-1 line-clamp-2 text-xs font-medium leading-4 text-slate-500">{entryContentPreview(entry)}</p> : null}
         </button>

@@ -36,13 +36,13 @@
 - 완료 카드 분석은 기간 기반 추정과 업무기록 연결 시간을 함께 보여주며, 일수 표시는 `8h = 1일` 환산값으로만 사용한다.
 - Notion 시작일이 없는 카드는 후보와 기간 기반 추정에서 제외하고, 완료 상태지만 완료일이 없는 카드는 추정 불가로 표시한다.
 - 월 분석 동기화가 실패하면 마지막 캐시 기준 추정임을 표시해 캐시 불완전성을 드러낸다.
-- 수동 카드 시간 배분 합계는 해당 `WORK` entry의 시간과 일치해야 저장할 수 있다.
+- 수동 카드 시간 배분 합계가 해당 `WORK` entry의 시간과 달라도 저장은 허용하고, UI 경고로 드러낸다.
 - Notion API는 `2026-03-11` data source API를 기준으로 하고, UI 입력값은 database/data source URL 또는 ID를 허용하되 내부 query 대상은 `dataSourceId`로 저장한다.
 - Notion 필드 매핑은 property name만 저장하지 않고 property `id`, `name`, `type`을 함께 저장한다.
 - 날짜 매핑은 별도 시작/완료 date property와 단일 date range property를 모두 지원한다.
 - scope별 동기화 상태와 오류를 위해 `NotionSyncRun` 모델을 1차 MVP에 포함한다.
 - 완료 상태인데 완료일이 없는 카드는 다른 카드의 기간 기반 추정 분모에서 제외한다.
-- 업무 entry 시간이 바뀌면 자동 배분은 재계산하고, 수동 배분은 합계 검증을 다시 통과해야 한다.
+- 업무 entry 시간이 바뀌거나 카드 연결이 바뀌면 수동 카드 배분은 보존하고, 자동 카드 배분은 남은 시간을 균등 재계산한다. 카드 배분 합계가 업무 시간과 달라도 저장은 허용하되, 캘린더와 업무 리스트에서 경고로 드러낸다.
 - database 입력값이 여러 data source를 가리키면 사용자가 data source를 선택해야 하며, 직접 data source ID를 입력하면 schema 조회로 검증한다.
 - 카드 캐시의 raw Notion properties는 매핑된 속성과 진단용 metadata만 저장한다.
 - done status 값 변경도 `analysisConfigVersion` 증가 조건에 포함한다.

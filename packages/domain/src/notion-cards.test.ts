@@ -209,7 +209,7 @@ describe("Notion work entry allocations", () => {
     assert.equal(allocated.reduce((sum, link) => sum + link.allocatedHours, 0), 8);
   });
 
-  it("rejects manual allocations that do not match entry hours", () => {
+  it("preserves all-manual allocations even when they do not match entry hours", () => {
     const links: WorkEntryNotionCardLink[] = [
       {
         allocatedHours: 2,
@@ -219,7 +219,60 @@ describe("Notion work entry allocations", () => {
       }
     ];
 
-    assert.throws(() => allocateNotionCardHours({ entryHours: 3, links }), /allocated hours/);
+    assert.deepEqual(allocateNotionCardHours({ entryHours: 3, links }), [
+      { ...links[0], allocatedHours: 2 }
+    ]);
+  });
+
+  it("preserves manual allocations and splits the remaining time across auto links", () => {
+    const links: WorkEntryNotionCardLink[] = [
+      {
+        allocatedHours: 3,
+        allocationMode: "manual",
+        notionPageId: "card-a",
+        source: "manual"
+      },
+      {
+        allocatedHours: 0,
+        allocationMode: "auto",
+        notionPageId: "card-b",
+        source: "manual"
+      },
+      {
+        allocatedHours: 0,
+        allocationMode: "auto",
+        notionPageId: "card-c",
+        source: "manual"
+      }
+    ];
+
+    assert.deepEqual(allocateNotionCardHours({ entryHours: 4, links }), [
+      { ...links[0], allocatedHours: 3 },
+      { ...links[1], allocatedHours: 0.5 },
+      { ...links[2], allocatedHours: 0.5 }
+    ]);
+  });
+
+  it("preserves manual overflow and sets auto allocations to zero", () => {
+    const links: WorkEntryNotionCardLink[] = [
+      {
+        allocatedHours: 5,
+        allocationMode: "manual",
+        notionPageId: "card-a",
+        source: "manual"
+      },
+      {
+        allocatedHours: 0,
+        allocationMode: "auto",
+        notionPageId: "card-b",
+        source: "manual"
+      }
+    ];
+
+    assert.deepEqual(allocateNotionCardHours({ entryHours: 4, links }), [
+      { ...links[0], allocatedHours: 5 },
+      { ...links[1], allocatedHours: 0 }
+    ]);
   });
 
   it("normalizes manual allocation precision before storing", () => {

@@ -235,29 +235,40 @@ export function allocateNotionCardHours({
     }
   }
 
-  const hasManualAllocation = links.some((link) => link.allocationMode === "manual");
   const entryHourCents = toHourCents(entryHours);
+  const manualTotalCents = links
+    .filter((link) => link.allocationMode === "manual")
+    .reduce((total, link) => total + toHourCents(link.allocatedHours), 0);
+  const autoLinks = links.filter((link) => link.allocationMode !== "manual");
 
-  if (hasManualAllocation) {
-    const allocatedTotalCents = links.reduce((total, link) => total + toHourCents(link.allocatedHours), 0);
-
-    if (allocatedTotalCents !== entryHourCents) {
-      throw new Error("Notion card allocated hours must equal the work entry hours.");
-    }
-
+  if (autoLinks.length === 0) {
     return links.map((link) => ({
       ...link,
       allocatedHours: toHoursFromCents(toHourCents(link.allocatedHours))
     }));
   }
 
-  const baseCents = Math.floor(entryHourCents / links.length);
-  const remainderCents = entryHourCents - baseCents * links.length;
+  const remainingCents = Math.max(entryHourCents - manualTotalCents, 0);
+  const baseCents = Math.floor(remainingCents / autoLinks.length);
+  const remainderCents = remainingCents - baseCents * autoLinks.length;
+  let autoIndex = 0;
 
-  return links.map((link, index) => ({
-    ...link,
-    allocatedHours: toHoursFromCents(baseCents + (index < remainderCents ? 1 : 0))
-  }));
+  return links.map((link) => {
+    if (link.allocationMode === "manual") {
+      return {
+        ...link,
+        allocatedHours: toHoursFromCents(toHourCents(link.allocatedHours))
+      };
+    }
+
+    const allocatedHours = toHoursFromCents(baseCents + (autoIndex < remainderCents ? 1 : 0));
+    autoIndex += 1;
+
+    return {
+      ...link,
+      allocatedHours
+    };
+  });
 }
 
 export function shouldWarnAboutFallbackHours(fallbackDateCount: number): boolean {
