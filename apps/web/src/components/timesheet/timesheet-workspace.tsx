@@ -109,6 +109,18 @@ type UserAiSettingUpdate = {
   model: string;
 };
 
+type NotionWeeklyDefaultCard = {
+  allocatedHours: number;
+  category: string;
+  enabled: boolean;
+  endDate: string;
+  notionPageId: string;
+  startDate: string;
+  status: string;
+  title: string;
+  weekday: number;
+};
+
 type TimesheetAiCleanupResult = {
   appliedDateKeys: string[];
   days: TimesheetDayDraft[];
@@ -165,6 +177,8 @@ type TimesheetWorkspaceProps = {
   initialManagedUsers: ManagedUser[];
   initialMonthIndex: number;
   initialMonthData: TimesheetMonthData;
+  initialNotionDoneStatusValues: string[];
+  initialNotionWeeklyDefaults: NotionWeeklyDefaultCard[];
   initialTodayKey: string;
   initialYear: number;
   loadMonthAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
@@ -407,6 +421,85 @@ function allocateDefaultNotionCards(cards: TimesheetEntryNotionCardDraft[], entr
       source: card.source === "weekday_default" ? "weekday_default" : "previous_business_day_default"
     }))
   });
+}
+
+function getDateKeyWeekday(dateKey: string): number {
+  const [year, month, day] = dateKey.split("-").map(Number);
+
+  return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1).getDay();
+}
+
+function createWeekdayDefaultNotionCards(dateKey: string, defaults: NotionWeeklyDefaultCard[]): TimesheetEntryNotionCardDraft[] {
+  const weekday = getDateKeyWeekday(dateKey);
+
+  return defaults
+    .filter((card) => card.enabled && card.weekday === weekday && card.notionPageId.trim())
+    .map((card) => ({
+      allocatedHours: card.allocatedHours,
+      allocationMode: "manual",
+      category: card.category,
+      endDate: card.endDate,
+      notionPageId: card.notionPageId,
+      source: "weekday_default",
+      startDate: card.startDate,
+      status: card.status,
+      title: card.title
+    }));
+}
+
+function isNotionCardOpenForDate(card: TimesheetEntryNotionCardDraft, dateKey: string, doneStatusValues: string[]): boolean {
+  if (!card.startDate || card.startDate > dateKey) {
+    return false;
+  }
+
+  if (card.endDate && card.endDate < dateKey) {
+    return false;
+  }
+
+  return Boolean(card.endDate) || !doneStatusValues.includes(card.status ?? "");
+}
+
+function findLocalPreviousNotionCards(params: {
+  dateKey: string;
+  doneStatusValues: string[];
+  savedRecords: Record<string, TimesheetDayDraft>;
+}): { cards: TimesheetEntryNotionCardDraft[]; foundPreviousEntry: boolean } {
+  const previousEntry = Object.values(params.savedRecords)
+    .flatMap((record) =>
+      record.entries.map((entry) => ({
+        dateKey: record.dateKey,
+        entry
+      }))
+    )
+    .filter((record) =>
+      record.dateKey < params.dateKey &&
+      record.entry.kind === "WORK" &&
+      record.entry.notionCards.some((card) => card.source !== "weekday_default")
+    )
+    .sort((left, right) =>
+      right.dateKey.localeCompare(left.dateKey) ||
+      left.entry.sortOrder - right.entry.sortOrder
+    )[0];
+
+  if (!previousEntry) {
+    return {
+      cards: [],
+      foundPreviousEntry: false
+    };
+  }
+
+  return {
+    cards: previousEntry.entry.notionCards
+      .filter((card) => card.source !== "weekday_default")
+      .filter((card) => isNotionCardOpenForDate(card, params.dateKey, params.doneStatusValues))
+      .map((card) => ({
+        ...card,
+        allocatedHours: 0,
+        allocationMode: "auto",
+        source: "previous_business_day_default"
+      })),
+    foundPreviousEntry: true
+  };
 }
 
 function createEntryForDate(dateKey: string, records: Record<string, TimesheetDayDraft>, kind: WorkRecordKind = "WORK"): TimesheetEntryDraft {
@@ -698,6 +791,8 @@ export function TimesheetWorkspace({
   initialManagedUsers,
   initialMonthIndex,
   initialMonthData,
+  initialNotionDoneStatusValues,
+  initialNotionWeeklyDefaults,
   initialTodayKey,
   initialYear,
   loadMonthAction,
@@ -998,22 +1093,7 @@ export function TimesheetWorkspace({
   }, [isDirty]);
 
   useEffect(() => {
-    if (savedEntryDateKeys.has(selectedDateKey)) {
-      return;
-    }
-
-    const entry = records[selectedDateKey]?.entries[0];
-
-    if (entry?.kind === "WORK" && entry.notionCards.length === 0) {
-      const recommendationKey = `${selectedDateKey}:${entry.clientId}`;
-
-      if (previousNotionCardRecommendationKeys.current.has(recommendationKey)) {
-        return;
-      }
-
-      previousNotionCardRecommendationKeys.current.add(recommendationKey);
-      void fillPreviousNotionCardsFromDatabase(selectedDateKey, entry.clientId);
-    }
+    recommendPreviousNotionCardsForDraft(selectedDateKey, records[selectedDateKey]);
   }, [records, savedEntryDateKeys, selectedDateKey]);
 
   function resetEntryFeedback() {
@@ -1105,13 +1185,23 @@ export function TimesheetWorkspace({
         }
 
         const entries = day.entries.map((entry) => {
-          if (entry.clientId !== clientId || entry.kind !== "WORK" || entry.notionCards.length > 0) {
+          if (entry.clientId !== clientId || entry.kind !== "WORK" || entry.notionCards.some((card) => card.source !== "weekday_default")) {
+            return entry;
+          }
+
+          const existingPageIds = new Set(entry.notionCards.map((card) => card.notionPageId));
+          const nextCards = [
+            ...entry.notionCards,
+            ...cards.filter((card) => !existingPageIds.has(card.notionPageId))
+          ];
+
+          if (nextCards.length === entry.notionCards.length) {
             return entry;
           }
 
           return {
             ...entry,
-            notionCards: allocateDefaultNotionCards(cards, entry.hours)
+            notionCards: allocateDefaultNotionCards(nextCards, entry.hours)
           };
         });
 
@@ -1156,7 +1246,54 @@ export function TimesheetWorkspace({
     const entry = day?.entries[0];
 
     if (entry?.kind === "WORK" && entry.notionCards.length === 0) {
-      void fillPreviousNotionCardsFromDatabase(dateKey, entry.clientId);
+      const recommendationKey = `${dateKey}:${entry.clientId}`;
+
+      if (previousNotionCardRecommendationKeys.current.has(recommendationKey)) {
+        return;
+      }
+
+      previousNotionCardRecommendationKeys.current.add(recommendationKey);
+
+      const weekdayCards = createWeekdayDefaultNotionCards(dateKey, initialNotionWeeklyDefaults);
+      const previousCards = findLocalPreviousNotionCards({
+        dateKey,
+        doneStatusValues: initialNotionDoneStatusValues,
+        savedRecords
+      });
+      const localCards = [...weekdayCards, ...previousCards.cards];
+
+      if (localCards.length > 0) {
+        setRecords((current) => {
+          const currentDay = current[dateKey];
+
+          if (!currentDay) {
+            return current;
+          }
+
+          const entries = currentDay.entries.map((currentEntry) => {
+            if (currentEntry.clientId !== entry.clientId || currentEntry.kind !== "WORK" || currentEntry.notionCards.length > 0) {
+              return currentEntry;
+            }
+
+            return {
+              ...currentEntry,
+              notionCards: allocateDefaultNotionCards(localCards, currentEntry.hours)
+            };
+          });
+
+          return {
+            ...current,
+            [dateKey]: {
+              ...currentDay,
+              entries
+            }
+          };
+        });
+      }
+
+      if (!previousCards.foundPreviousEntry) {
+        void fillPreviousNotionCardsFromDatabase(dateKey, entry.clientId);
+      }
     }
   }
 
@@ -1466,10 +1603,6 @@ export function TimesheetWorkspace({
 
     if (draft.entries[0]?.kind === "WORK" && !draft.entries[0].project.trim()) {
       void fillPreviousProjectFromDatabase(selectedDateKey, draft.entries[0].clientId);
-    }
-
-    if (draft.entries[0]?.kind === "WORK" && draft.entries[0].notionCards.length === 0) {
-      void fillPreviousNotionCardsFromDatabase(selectedDateKey, draft.entries[0].clientId);
     }
 
     return draft;
@@ -2035,9 +2168,14 @@ export function TimesheetWorkspace({
       vacationName: kind === "VACATION" ? selectedEntry.vacationName : ""
     });
 
-    if (kind === "WORK" && selectedEntry.notionCards.length === 0) {
-      void fillPreviousNotionCardsFromDatabase(selectedDateKey, selectedEntry.clientId);
-    }
+    recommendPreviousNotionCardsForDraft(selectedDateKey, {
+      ...selectedDay,
+      entries: [{
+        ...selectedEntry,
+        kind,
+        notionCards: kind === "WORK" ? selectedEntry.notionCards : []
+      }]
+    });
   }
 
   function addEntry(kind: WorkRecordKind) {
@@ -2068,7 +2206,14 @@ export function TimesheetWorkspace({
     }));
 
     if (nextKind === "WORK") {
-      void fillPreviousNotionCardsFromDatabase(selectedDateKey, entryClientId);
+      recommendPreviousNotionCardsForDraft(selectedDateKey, {
+        ...createEmptyDraft(selectedDateKey),
+        entries: [{
+          ...createEmptyEntryDraft(),
+          clientId: entryClientId,
+          kind: "WORK"
+        }]
+      });
     }
   }
 

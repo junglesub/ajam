@@ -1,4 +1,4 @@
-import { getAppSetting, getManagedUser, getUserAiSetting, listManagedUsers } from "@timesheet/db";
+import { getAppSetting, getManagedUser, getUserAiSetting, getUserNotionConnection, listManagedUsers, listUserNotionWeeklyDefaultCards } from "@timesheet/db";
 import { toBrowserDateKey } from "@timesheet/domain";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
@@ -46,11 +46,13 @@ export default async function TimesheetPage() {
 
   const today = new Date();
   const initialTodayKey = toBrowserDateKey(today);
-  const [initialMonthData, holidayApiKey, managedUsers, aiSetting] = await Promise.all([
+  const [initialMonthData, holidayApiKey, managedUsers, aiSetting, notionConnection, notionWeeklyDefaults] = await Promise.all([
     loadTimesheetMonthAction(today.getFullYear(), today.getMonth()),
     currentUser.role === "ADMIN" ? getAppSetting("data_go_kr_service_key") : Promise.resolve(null),
     currentUser.role === "ADMIN" ? listManagedUsers() : Promise.resolve([]),
-    getUserAiSetting(currentUser.id)
+    getUserAiSetting(currentUser.id),
+    getUserNotionConnection(currentUser.id),
+    listUserNotionWeeklyDefaultCards(currentUser.id)
   ]);
 
   return (
@@ -65,6 +67,8 @@ export default async function TimesheetPage() {
       initialManagedUsers={managedUsers}
       initialMonthIndex={today.getMonth()}
       initialMonthData={initialMonthData}
+      initialNotionDoneStatusValues={notionConnection?.doneStatusValues ?? []}
+      initialNotionWeeklyDefaults={notionWeeklyDefaults}
       initialTodayKey={initialTodayKey}
       initialYear={today.getFullYear()}
       loadMonthAction={loadTimesheetMonthAction}

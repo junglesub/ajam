@@ -14,6 +14,7 @@ Allow each user to configure Notion cards that are automatically attached to new
 - Configure weekday defaults in a separate `요일별 자동 카드` popup instead of embedding them in the Notion connection popup.
 - Let one popup row select multiple weekdays for the same card and hour value, while storing expanded weekday-specific rules.
 - Show a lightweight skeleton while automatic Notion recommendation is being fetched.
+- Prefer loaded client month data for previous-card recommendations and use the server fallback only when the client has no previous Notion-card entry.
 
 ## Implementation Checklist
 
@@ -25,4 +26,5 @@ Allow each user to configure Notion cards that are automatically attached to new
 - [x] Preserve fixed weekday hours during allocation.
 - [x] Exclude weekday defaults from previous-date lookup.
 - [x] Add recommendation loading skeleton.
+- [x] Apply same-month previous-card recommendations locally before server fallback.
 - [x] Update architecture, workflow, and SQL reference docs.
