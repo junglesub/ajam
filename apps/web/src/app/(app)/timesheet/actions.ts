@@ -7,7 +7,6 @@ import {
   findLatestWorkNotionCardsBefore,
   findLatestWorkProjectBefore,
   getLatestNotionSyncRun,
-  getUserAiSetting,
   getUserGeminiApiKey,
   getUserNotionConnection,
   getManagedUser,
