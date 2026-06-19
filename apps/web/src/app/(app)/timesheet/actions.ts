@@ -40,6 +40,8 @@ import { redirect } from "next/navigation";
 
 import { createSession, destroySession, getSession } from "@/server/session";
 
+import { collectChangedNotionPageIdsForTimesheetSave } from "./notion-timesheet-sync-scope";
+
 export type TimesheetMonthData = {
   entries: StoredTimesheetDraft[];
   holidayWarning?: string;
@@ -655,7 +657,10 @@ export async function saveTimesheetEntryAction(day: StoredTimesheetDraft): Promi
   }
 
   const previousDay = await listTimesheetEntries({ endDateKey: day.dateKey, startDateKey: day.dateKey, userId: user.id });
-  const affectedNotionPageIds = collectNotionPageIds([...previousDay, day]);
+  const affectedNotionPageIds = collectChangedNotionPageIdsForTimesheetSave({
+    afterDay: day,
+    beforeDays: previousDay
+  });
   const savedDay = await saveTimesheetDay({ day, userId: user.id });
 
   const notionSyncError = await syncNotionWorkHoursAfterTimesheetSave({ notionPageIds: affectedNotionPageIds, userId: user.id });
