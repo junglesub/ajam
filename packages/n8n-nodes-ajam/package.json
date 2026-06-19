@@ -1,6 +1,6 @@
 {
   "name": "@junglesub/n8n-nodes-ajam",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "n8n community nodes for aJam automation.",
   "license": "MIT",
   "type": "commonjs",

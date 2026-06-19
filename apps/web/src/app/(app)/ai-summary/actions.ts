@@ -73,6 +73,7 @@ function mergeLegacyVacations(entries: StoredTimesheetDraft[], vacations: Array<
 
   for (const vacation of vacations) {
     const day = days.get(vacation.dateKey) ?? {
+      aiRewriteRequested: false,
       dateKey: vacation.dateKey,
       entries: [],
       holidayName: "",
@@ -117,6 +118,7 @@ async function loadMonthData(params: { monthIndex: number; userId: string; year:
 
   for (const holiday of holidays) {
     const day = daysByDate.get(holiday.dateKey) ?? {
+      aiRewriteRequested: false,
       dateKey: holiday.dateKey,
       entries: [],
       holidayName: holiday.name,

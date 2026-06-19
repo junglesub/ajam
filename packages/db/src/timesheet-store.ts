@@ -21,6 +21,7 @@ export type StoredTimesheetEntry = {
 };
 
 export type StoredTimesheetDay = {
+  aiRewriteRequested: boolean;
   dateKey: string;
   entries: StoredTimesheetEntry[];
   holidayName: string;
@@ -40,6 +41,15 @@ export type VacationRecord = {
   name: string;
 };
 
+export type TimesheetAiRewriteRequest = {
+  cleanupType: "fill_missing" | "rewrite";
+  dateKey: string;
+  entryCount: number;
+  previewContent: string;
+  rewriteRequested: boolean;
+  shortVersion: string;
+};
+
 type TimesheetEntryRow = {
   aiTranslation: string;
   clientId: string;
@@ -56,6 +66,7 @@ type TimesheetEntryRow = {
 };
 
 type TimesheetDayRow = {
+  aiRewriteRequested: number;
   dateKey: string;
   shortVersion: string;
   userId: string;
@@ -88,6 +99,15 @@ type ProjectSummaryRow = {
   latestDateKey: string | null;
   name: string;
   totalHours: number | null;
+};
+
+type TimesheetAiRewriteRequestRow = {
+  dateKey: string;
+  entryCount: number | bigint | null;
+  missingTranslationCount: number | bigint | null;
+  previewContent: string | null;
+  rewriteRequested: number;
+  shortVersion: string;
 };
 
 type WorkEntryNotionCardRow = TimesheetEntryNotionCardDraft & {
@@ -187,7 +207,10 @@ function normalizeNotionCards(links: TimesheetEntryNotionCardDraft[] | undefined
 }
 
 function normalizeDay(day: StoredTimesheetDay): StoredTimesheetDay {
+  const hasWork = day.entries.some((entry) => entry.kind === "WORK");
+
   return {
+    aiRewriteRequested: hasWork ? Boolean(day.aiRewriteRequested) : false,
     dateKey: day.dateKey,
     entries: day.entries.map((entry, index) => normalizeEntry(entry, index)),
     holidayName: day.holidayName.trim(),
@@ -253,10 +276,14 @@ export async function ensureTimesheetSchema() {
     "userId" TEXT NOT NULL,
     "dateKey" TEXT NOT NULL,
     "shortVersion" TEXT NOT NULL DEFAULT '',
+    "aiRewriteRequested" INTEGER NOT NULL DEFAULT 0,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "TimesheetDay_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
   )`);
+  if (!(await hasColumn("TimesheetDay", "aiRewriteRequested"))) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "TimesheetDay" ADD COLUMN "aiRewriteRequested" INTEGER NOT NULL DEFAULT 0`);
+  }
   await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "TimesheetDay_userId_dateKey_key" ON "TimesheetDay"("userId", "dateKey")`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "TimesheetDay_dateKey_idx" ON "TimesheetDay"("dateKey")`);
   await migrateTimesheetDaySummaries();
@@ -390,7 +417,7 @@ export async function listTimesheetEntries(params: { endDateKey: string; startDa
       params.endDateKey
     ),
     prisma.$queryRawUnsafe<TimesheetDayRow[]>(
-      `SELECT "userId", "dateKey", "shortVersion"
+      `SELECT "userId", "dateKey", "shortVersion", "aiRewriteRequested"
        FROM "TimesheetDay"
        WHERE "userId" = ? AND "dateKey" BETWEEN ? AND ?
        ORDER BY "dateKey" ASC`,
@@ -407,6 +434,7 @@ export async function listTimesheetEntries(params: { endDateKey: string; startDa
 
   for (const day of dayRows) {
     days.set(day.dateKey, {
+      aiRewriteRequested: Boolean(day.aiRewriteRequested),
       dateKey: day.dateKey,
       entries: [],
       holidayName: "",
@@ -416,6 +444,7 @@ export async function listTimesheetEntries(params: { endDateKey: string; startDa
 
   for (const entry of entries) {
     const day = days.get(entry.dateKey) ?? {
+      aiRewriteRequested: false,
       dateKey: entry.dateKey,
       entries: [],
       holidayName: entry.kind === "HOLIDAY" ? entry.holidayName : "",
@@ -777,7 +806,7 @@ async function listTimesheetDaysInTransaction(params: {
       ...dateKeys
     ),
     params.transaction.$queryRawUnsafe<TimesheetDayRow[]>(
-      `SELECT "userId", "dateKey", "shortVersion"
+      `SELECT "userId", "dateKey", "shortVersion", "aiRewriteRequested"
        FROM "TimesheetDay"
        WHERE "userId" = ? AND "dateKey" IN (${dateKeyPlaceholders})
        ORDER BY "dateKey" ASC`,
@@ -794,6 +823,7 @@ async function listTimesheetDaysInTransaction(params: {
 
   for (const day of dayRows) {
     days.set(day.dateKey, {
+      aiRewriteRequested: Boolean(day.aiRewriteRequested),
       dateKey: day.dateKey,
       entries: [],
       holidayName: "",
@@ -803,6 +833,7 @@ async function listTimesheetDaysInTransaction(params: {
 
   for (const entry of entries) {
     const day = days.get(entry.dateKey) ?? {
+      aiRewriteRequested: false,
       dateKey: entry.dateKey,
       entries: [],
       holidayName: entry.kind === "HOLIDAY" ? entry.holidayName : "",
@@ -837,13 +868,14 @@ async function saveTimesheetDayInTransaction(params: {
   userId: string;
 }) {
   await params.transaction.$executeRawUnsafe(
-    `INSERT INTO "TimesheetDay" ("id", "userId", "dateKey", "shortVersion", "createdAt", "updatedAt")
-     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-     ON CONFLICT("userId", "dateKey") DO UPDATE SET "shortVersion" = excluded."shortVersion", "updatedAt" = CURRENT_TIMESTAMP`,
+    `INSERT INTO "TimesheetDay" ("id", "userId", "dateKey", "shortVersion", "aiRewriteRequested", "createdAt", "updatedAt")
+     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT("userId", "dateKey") DO UPDATE SET "shortVersion" = excluded."shortVersion", "aiRewriteRequested" = excluded."aiRewriteRequested", "updatedAt" = CURRENT_TIMESTAMP`,
     randomUUID(),
     params.userId,
     params.day.dateKey,
-    params.day.shortVersion
+    params.day.shortVersion,
+    params.day.aiRewriteRequested ? 1 : 0
   );
   await params.transaction.$executeRawUnsafe(`DELETE FROM "WorkEntryNotionCard" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.day.dateKey);
   await params.transaction.$executeRawUnsafe(`DELETE FROM "TimesheetEntry" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.day.dateKey);
@@ -915,6 +947,68 @@ export async function deleteTimesheetEntry(params: { dateKey: string; userId: st
 }
 
 export const upsertTimesheetEntry = saveTimesheetDay;
+
+export async function listTimesheetAiRewriteRequests(userId: string): Promise<TimesheetAiRewriteRequest[]> {
+  await ensureTimesheetSchema();
+
+  const rows = await prisma.$queryRawUnsafe<TimesheetAiRewriteRequestRow[]>(
+    `SELECT day."dateKey",
+            day."shortVersion",
+            day."aiRewriteRequested" AS "rewriteRequested",
+            count(entry."id") AS "entryCount",
+            sum(CASE WHEN trim(entry."content") <> '' AND trim(entry."aiTranslation") = '' THEN 1 ELSE 0 END) AS "missingTranslationCount",
+            coalesce(max(CASE WHEN trim(entry."content") <> '' THEN entry."content" ELSE NULL END), '') AS "previewContent"
+     FROM "TimesheetDay" day
+     LEFT JOIN "TimesheetEntry" entry ON entry."userId" = day."userId" AND entry."dateKey" = day."dateKey" AND entry."kind" = 'WORK'
+     WHERE day."userId" = ?
+     GROUP BY day."dateKey", day."shortVersion", day."aiRewriteRequested"
+     HAVING (
+          day."aiRewriteRequested" = 1
+          AND sum(CASE WHEN trim(entry."content") <> '' THEN 1 ELSE 0 END) > 0
+        )
+        OR (
+          sum(CASE WHEN trim(entry."content") <> '' THEN 1 ELSE 0 END) > 0
+          AND (
+            trim(day."shortVersion") = ''
+            OR sum(CASE WHEN trim(entry."content") <> '' AND trim(entry."aiTranslation") = '' THEN 1 ELSE 0 END) > 0
+          )
+        )
+     ORDER BY day."dateKey" DESC`,
+    userId
+  );
+
+  return rows.map((row) => ({
+    cleanupType: row.rewriteRequested ? "rewrite" : "fill_missing",
+    dateKey: row.dateKey,
+    entryCount: Number(row.entryCount ?? 0),
+    previewContent: row.previewContent?.trim() ?? "",
+    rewriteRequested: Boolean(row.rewriteRequested),
+    shortVersion: row.shortVersion
+  }));
+}
+
+export async function clearTimesheetAiRewriteRequests(params: {
+  dateKeys: string[];
+  userId: string;
+}): Promise<void> {
+  await ensureTimesheetSchema();
+
+  const dateKeys = [...new Set(params.dateKeys.map((dateKey) => dateKey.trim()).filter(Boolean))];
+
+  if (dateKeys.length === 0) {
+    return;
+  }
+
+  const placeholders = dateKeys.map(() => "?").join(", ");
+
+  await prisma.$executeRawUnsafe(
+    `UPDATE "TimesheetDay"
+     SET "aiRewriteRequested" = 0, "updatedAt" = CURRENT_TIMESTAMP
+     WHERE "userId" = ? AND "dateKey" IN (${placeholders})`,
+    params.userId,
+    ...dateKeys
+  );
+}
 
 export async function addProject(params: { name: string; userId: string }) {
   await ensureTimesheetSchema();

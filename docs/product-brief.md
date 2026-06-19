@@ -14,14 +14,14 @@
 - 브라우저 timezone 기준 오늘 날짜 선택
 - 주말을 제외한 월간 캘린더/리스트 화면
 - 날짜별 프로젝트, 근무 시간, 내용, 영문 번역본, 짧은 버전 입력 UI
-- 사용자별 Gemini API key 기반 저장 후 AI 번역/요약 자동 정리
+- 사용자별 Gemini API key 기반 즉시/예약/수동 AI 번역·요약 정리
 - 사용자가 직접 등록한 프로젝트 선택과 전일 프로젝트 자동 기입
 - 날짜별 업무 기록의 SQLite 저장과 재조회
 - 공공데이터포털 `getRestDeInfo` 기반 한국 공휴일 조회
 - 공휴일 월별 캐시와 관리자 리셋
 - 휴가 유형 저장과 휴가/공휴일/업무 상태 표시
 - Docker Compose 기반 단일 컨테이너 배포 예시
-- n8n 연동용 업무 기록 미작성 리마인더 API
+- n8n 연동용 업무 기록 미작성 리마인더 및 예약 AI 정리 API
 - n8n custom node package
 - GHCR Docker image 자동 publish
 

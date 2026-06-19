@@ -13,6 +13,25 @@ It follows n8n's community node package shape:
 
 ## Current Actions
 
+### AI Cleanup: Run Scheduled Cleanup
+
+Calls:
+
+```http
+POST /api/internal/ai/scheduled-cleanup
+```
+
+with optional fields:
+
+```json
+{
+  "dateKey": "2026-06-19",
+  "lookbackDays": 7
+}
+```
+
+When `dateKey` is empty, aJam uses today's date in `Asia/Seoul`. The action scans recent saved work entries for users whose personal AI cleanup mode is `scheduled`, then fills missing English translations and short versions. Existing AI fields are overwritten only for dates where the user chose `AI도 업데이트`, which sets the per-day rewrite request in aJam. The node emits failures through the `Alerts` output so it can connect directly to Email or Slack nodes.
+
 ### Daily Reminder: List Missing Timesheet Users
 
 Calls:
@@ -67,7 +86,7 @@ When `dateKey` is empty, aJam uses today's date in `Asia/Seoul`. The action chec
 The `aJam` node has two outputs:
 
 - `Summary`: always emits the operation result.
-- `Alerts`: emits one email/Slack-ready item when Notion daily maintenance returns user/card errors or when the maintenance API request itself fails. Connect this output directly to an Email or Slack node; no IF node is needed.
+- `Alerts`: emits one email/Slack-ready item when Notion daily maintenance or scheduled AI cleanup returns errors, or when the automation API request itself fails. Connect this output directly to an Email or Slack node; no IF node is needed.
 
 ## Adding More Actions
 
@@ -102,7 +121,7 @@ Install the package into n8n's custom extensions directory. This is a local inst
 ```powershell
 New-Item -ItemType Directory -Force $env:USERPROFILE\.n8n\custom
 Set-Location $env:USERPROFILE\.n8n\custom
-pnpm add C:\path\to\ajam\dist\junglesub-n8n-nodes-ajam-0.3.0.tgz
+pnpm add C:\path\to\ajam\dist\junglesub-n8n-nodes-ajam-0.4.0.tgz
 ```
 
 Restart n8n after installation.
@@ -113,15 +132,15 @@ For a self-hosted n8n container, mount or copy the tarball into the container an
 
 ```bash
 mkdir -p ./n8n-custom
-cp ./dist/junglesub-n8n-nodes-ajam-0.3.0.tgz ./n8n-custom/
-docker compose exec -u node n8n sh -lc "mkdir -p /home/node/.n8n/custom && cd /home/node/.n8n/custom && pnpm add /home/node/.n8n/custom/junglesub-n8n-nodes-ajam-0.3.0.tgz"
+cp ./dist/junglesub-n8n-nodes-ajam-0.4.0.tgz ./n8n-custom/
+docker compose exec -u node n8n sh -lc "mkdir -p /home/node/.n8n/custom && cd /home/node/.n8n/custom && pnpm add /home/node/.n8n/custom/junglesub-n8n-nodes-ajam-0.4.0.tgz"
 docker compose restart n8n
 ```
 
 If the n8n image does not include `pnpm`, enable it inside the container with Corepack before running the install:
 
 ```bash
-docker compose exec -u node n8n sh -lc "corepack enable && cd /home/node/.n8n/custom && pnpm add /home/node/.n8n/custom/junglesub-n8n-nodes-ajam-0.3.0.tgz"
+docker compose exec -u node n8n sh -lc "corepack enable && cd /home/node/.n8n/custom && pnpm add /home/node/.n8n/custom/junglesub-n8n-nodes-ajam-0.4.0.tgz"
 ```
 
 ## GitHub Packages Install
@@ -179,3 +198,4 @@ After restart:
 3. Set `Internal API Token` to the same value as `AJAM_INTERNAL_API_TOKEN` in aJam.
 4. Add the `aJam` node to a workflow.
 5. Use `Daily Reminder > List Missing Timesheet Users`, send email, then call `Daily Reminder > Mark Reminder Sent`.
+6. Use `AI Cleanup > Run Scheduled Cleanup` on the desired schedule for users who selected 예약 mode.

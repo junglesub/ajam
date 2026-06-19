@@ -28,6 +28,7 @@ export type TimesheetEntryDraft = {
 };
 
 export type TimesheetDayDraft = {
+  aiRewriteRequested?: boolean;
   dateKey: string;
   entries: TimesheetEntryDraft[];
   holidayName: string;
@@ -69,6 +70,7 @@ export function createEmptyEntryDraft(sortOrder = 0): TimesheetEntryDraft {
 
 export function createEmptyDraft(dateKey: string): TimesheetDayDraft {
   return {
+    aiRewriteRequested: false,
     dateKey,
     entries: [],
     holidayName: "",

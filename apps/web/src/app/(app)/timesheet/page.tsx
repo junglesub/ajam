@@ -1,4 +1,4 @@
-import { getAppSetting, getManagedUser, getUserAiSetting, getUserNotionConnection, listManagedUsers, listUserNotionWeeklyDefaultCards } from "@timesheet/db";
+import { getAppSetting, getManagedUser, getUserAiSetting, getUserNotionConnection, listManagedUsers, listTimesheetAiRewriteRequests, listUserNotionWeeklyDefaultCards } from "@timesheet/db";
 import { toBrowserDateKey } from "@timesheet/domain";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
@@ -12,6 +12,7 @@ import {
   deleteTimesheetEntryAction,
   findPreviousOpenNotionCardsAction,
   findPreviousProjectAction,
+  listTimesheetAiRewriteRequestsAction,
   loadNotionCardCandidatesAction,
   loadTimesheetMonthAction,
   refreshNotionCardCandidatesAction,
@@ -46,13 +47,14 @@ export default async function TimesheetPage() {
 
   const today = new Date();
   const initialTodayKey = toBrowserDateKey(today);
-  const [initialMonthData, holidayApiKey, managedUsers, aiSetting, notionConnection, notionWeeklyDefaults] = await Promise.all([
+  const [initialMonthData, holidayApiKey, managedUsers, aiSetting, notionConnection, notionWeeklyDefaults, aiRewriteRequests] = await Promise.all([
     loadTimesheetMonthAction(today.getFullYear(), today.getMonth()),
     currentUser.role === "ADMIN" ? getAppSetting("data_go_kr_service_key") : Promise.resolve(null),
     currentUser.role === "ADMIN" ? listManagedUsers() : Promise.resolve([]),
     getUserAiSetting(currentUser.id),
     getUserNotionConnection(currentUser.id),
-    listUserNotionWeeklyDefaultCards(currentUser.id)
+    listUserNotionWeeklyDefaultCards(currentUser.id),
+    listTimesheetAiRewriteRequests(currentUser.id)
   ]);
 
   return (
@@ -71,6 +73,7 @@ export default async function TimesheetPage() {
       initialNotionWeeklyDefaults={notionWeeklyDefaults}
       initialTodayKey={initialTodayKey}
       initialYear={today.getFullYear()}
+      listAiRewriteRequestsAction={listTimesheetAiRewriteRequestsAction}
       loadMonthAction={loadTimesheetMonthAction}
       loadNotionCardCandidatesAction={loadNotionCardCandidatesAction}
       refreshNotionCardCandidatesAction={refreshNotionCardCandidatesAction}
@@ -80,6 +83,7 @@ export default async function TimesheetPage() {
       saveEntryAction={saveTimesheetEntryAction}
       saveHolidayApiKeyAction={saveHolidayApiKeyAction}
       initialAiSetting={aiSetting}
+      initialAiRewriteRequests={aiRewriteRequests}
       testHolidayApiKeyAction={testHolidayApiKeyAction}
       testGeminiApiKeyAction={testGeminiApiKeyAction}
       updateAiSettingAction={updateUserAiSettingAction}

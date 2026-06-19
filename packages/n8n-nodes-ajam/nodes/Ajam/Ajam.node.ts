@@ -61,6 +61,54 @@ function buildNotionRequestFailureAlert(params: {
   };
 }
 
+function buildAiScheduledCleanupAlert(response: IDataObject): IDataObject | null {
+  const errors = Array.isArray(response.errors) ? response.errors : [];
+
+  if (errors.length === 0) {
+    return null;
+  }
+
+  const dateKey = String(response.dateKey ?? "");
+  const lines = errors.map((error) => {
+    const item = error as IDataObject;
+    const username = String(item.username ?? item.userId ?? "unknown");
+    const message = String(item.message ?? "Unknown error");
+
+    return `- ${username}: ${message}`;
+  });
+
+  return {
+    dateKey,
+    errorCount: errors.length,
+    errors,
+    message: [
+      `${dateKey || "aJam"} AI scheduled cleanup failed for ${errors.length} user${errors.length === 1 ? "" : "s"}.`,
+      "",
+      ...lines
+    ].join("\n"),
+    subject: `[aJam] AI scheduled cleanup failed${dateKey ? ` (${dateKey})` : ""}`
+  };
+}
+
+function buildAiRequestFailureAlert(params: {
+  dateKey: string;
+  error: unknown;
+}): IDataObject {
+  const message = params.error instanceof Error ? params.error.message : "Unknown request error";
+
+  return {
+    dateKey: params.dateKey,
+    errorCount: 1,
+    errors: [{ message, username: "request" }],
+    message: [
+      `${params.dateKey || "aJam"} AI scheduled cleanup request failed.`,
+      "",
+      `- request: ${message}`
+    ].join("\n"),
+    subject: `[aJam] AI scheduled cleanup request failed${params.dateKey ? ` (${params.dateKey})` : ""}`
+  };
+}
+
 export class Ajam implements INodeType {
   description: INodeTypeDescription = {
     displayName: "aJam",
@@ -89,6 +137,10 @@ export class Ajam implements INodeType {
         name: "resource",
         noDataExpression: true,
         options: [
+          {
+            name: "AI Cleanup",
+            value: "aiCleanup"
+          },
           {
             name: "Daily Reminder",
             value: "dailyReminder"
@@ -129,6 +181,27 @@ export class Ajam implements INodeType {
         type: "options"
       },
       {
+        default: "runScheduledCleanup",
+        displayName: "Operation",
+        displayOptions: {
+          show: {
+            resource: ["aiCleanup"]
+          }
+        },
+        name: "operation",
+        noDataExpression: true,
+        options: [
+          {
+            action: "Run scheduled AI cleanup",
+            description: "Fill missing English translations and short versions for users using scheduled AI cleanup",
+            name: "Run Scheduled Cleanup",
+            value: "runScheduledCleanup"
+          }
+        ],
+        required: true,
+        type: "options"
+      },
+      {
         default: "runDailyMaintenance",
         displayName: "Operation",
         displayOptions: {
@@ -156,6 +229,24 @@ export class Ajam implements INodeType {
         name: "dateKey",
         placeholder: "2026-05-29",
         type: "string"
+      },
+      {
+        default: 7,
+        description: "How many recent days to scan, including the date key.",
+        displayName: "Lookback Days",
+        displayOptions: {
+          show: {
+            operation: ["runScheduledCleanup"],
+            resource: ["aiCleanup"]
+          }
+        },
+        name: "lookbackDays",
+        type: "number",
+        typeOptions: {
+          maxValue: 31,
+          minValue: 1,
+          numberPrecision: 0
+        }
       },
       {
         default: false,
@@ -227,9 +318,17 @@ export class Ajam implements INodeType {
       const body: IDataObject = {};
       const url = resource === "notion"
         ? `${baseUrl}/api/internal/notion/daily-maintenance`
-        : `${baseUrl}/api/internal/reminders/daily-timesheet`;
+        : resource === "aiCleanup"
+          ? `${baseUrl}/api/internal/ai/scheduled-cleanup`
+          : `${baseUrl}/api/internal/reminders/daily-timesheet`;
 
       if (resource === "notion") {
+        if (dateKey) {
+          body.dateKey = dateKey;
+        }
+      } else if (resource === "aiCleanup") {
+        body.lookbackDays = this.getNodeParameter("lookbackDays", itemIndex, 7) as number;
+
         if (dateKey) {
           body.dateKey = dateKey;
         }
@@ -261,11 +360,13 @@ export class Ajam implements INodeType {
           url
         })) as IDataObject;
       } catch (error) {
-        if (resource !== "notion") {
+        if (resource !== "notion" && resource !== "aiCleanup") {
           throw error;
         }
 
-        const alert = buildNotionRequestFailureAlert({ dateKey, error });
+        const alert = resource === "aiCleanup"
+          ? buildAiRequestFailureAlert({ dateKey, error })
+          : buildNotionRequestFailureAlert({ dateKey, error });
 
         alertData.push({
           json: alert,
@@ -305,6 +406,17 @@ export class Ajam implements INodeType {
 
       if (resource === "notion") {
         const alert = buildNotionMaintenanceAlert(response);
+
+        if (alert) {
+          alertData.push({
+            json: alert,
+            pairedItem: {
+              item: itemIndex
+            }
+          });
+        }
+      } else if (resource === "aiCleanup") {
+        const alert = buildAiScheduledCleanupAlert(response);
 
         if (alert) {
           alertData.push({

@@ -5,6 +5,7 @@ Custom n8n community node package for aJam automation.
 ## Nodes
 
 - `aJam`
+  - `AI Cleanup > Run Scheduled Cleanup`
   - `Daily Reminder > List Missing Timesheet Users`
   - `Daily Reminder > Mark Reminder Sent`
   - `Notion > Run Daily Maintenance`
@@ -12,7 +13,7 @@ Custom n8n community node package for aJam automation.
 The node has two outputs:
 
 - `Summary`: normal operation results.
-- `Alerts`: alert-ready items for failed Notion daily maintenance runs. This output is empty when there are no Notion maintenance errors.
+- `Alerts`: alert-ready items for failed Notion maintenance or AI cleanup runs. This output is empty when there are no automation errors.
 
 ## Credentials
 

@@ -17,7 +17,7 @@ import {
   useSortable,
   verticalListSortingStrategy
 } from "@dnd-kit/sortable";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from "react";
 
 import {
   allocateNotionCardHours,
@@ -68,6 +68,7 @@ import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type Notio
 type ViewMode = "calendar" | "list";
 
 type UserRole = "ADMIN" | "USER";
+type AiCleanupMode = "immediate" | "manual" | "scheduled";
 
 type ManagedUser = {
   email: string;
@@ -94,6 +95,7 @@ type UserAiSetting = {
   backfillLimit: number;
   backfillMissing: boolean;
   contextDays: number;
+  cleanupMode: AiCleanupMode;
   enabled: boolean;
   model: string;
   provider: "GEMINI";
@@ -105,6 +107,7 @@ type UserAiSettingUpdate = {
   backfillMissing: boolean;
   clearApiKey?: boolean;
   contextDays: number;
+  cleanupMode: AiCleanupMode;
   enabled: boolean;
   model: string;
 };
@@ -126,6 +129,15 @@ type TimesheetAiCleanupResult = {
   days: TimesheetDayDraft[];
   message: string;
   skipped: boolean;
+};
+
+type TimesheetAiRewriteRequest = {
+  cleanupType: "fill_missing" | "rewrite";
+  dateKey: string;
+  entryCount: number;
+  previewContent: string;
+  rewriteRequested: boolean;
+  shortVersion: string;
 };
 
 type TimesheetDeleteResult = {
@@ -174,6 +186,7 @@ type TimesheetWorkspaceProps = {
   findPreviousProjectAction: (dateKey: string) => Promise<string>;
   initialHolidayApiKey: string;
   initialAiSetting: UserAiSetting;
+  initialAiRewriteRequests: TimesheetAiRewriteRequest[];
   initialManagedUsers: ManagedUser[];
   initialMonthIndex: number;
   initialMonthData: TimesheetMonthData;
@@ -181,6 +194,7 @@ type TimesheetWorkspaceProps = {
   initialNotionWeeklyDefaults: NotionWeeklyDefaultCard[];
   initialTodayKey: string;
   initialYear: number;
+  listAiRewriteRequestsAction: () => Promise<TimesheetAiRewriteRequest[]>;
   loadMonthAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   loadNotionCardCandidatesAction: (input: LoadNotionCardCandidatesInput) => Promise<NotionCardCandidatesResult>;
   refreshNotionCardCandidatesAction: (input: LoadNotionCardCandidatesInput) => Promise<NotionCardCandidatesResult>;
@@ -714,6 +728,16 @@ function hasExistingAiFields(day: TimesheetDayDraft): boolean {
   return Boolean(day.shortVersion.trim() || day.entries.some((entry) => entry.kind === "WORK" && entry.aiTranslation.trim()));
 }
 
+function hasWorkContent(day: TimesheetDayDraft): boolean {
+  return day.entries.some((entry) => entry.kind === "WORK" && entry.content.trim());
+}
+
+function hasMissingAiFields(day: TimesheetDayDraft): boolean {
+  const workEntries = day.entries.filter((entry) => entry.kind === "WORK" && entry.content.trim());
+
+  return workEntries.length > 0 && (workEntries.some((entry) => !entry.aiTranslation.trim()) || !day.shortVersion.trim());
+}
+
 function hasWorkContentChange(savedDay: TimesheetDayDraft | undefined, currentDay: TimesheetDayDraft): boolean {
   if (!savedDay) {
     return false;
@@ -730,6 +754,27 @@ function hasWorkContentChange(savedDay: TimesheetDayDraft | undefined, currentDa
 
     return !savedEntry || savedEntry.content.trim() !== entry.content.trim();
   });
+}
+
+function toAiRewriteRequest(day: TimesheetDayDraft): TimesheetAiRewriteRequest | null {
+  const rewriteRequested = Boolean(day.aiRewriteRequested);
+  const missingAiFields = hasMissingAiFields(day);
+
+  if ((!rewriteRequested && !missingAiFields) || !hasWorkContent(day)) {
+    return null;
+  }
+
+  const workEntries = day.entries.filter((entry) => entry.kind === "WORK");
+  const previewContent = workEntries.find((entry) => entry.content.trim())?.content.trim() ?? "";
+
+  return {
+    cleanupType: rewriteRequested ? "rewrite" : "fill_missing",
+    dateKey: day.dateKey,
+    entryCount: workEntries.length,
+    previewContent,
+    rewriteRequested,
+    shortVersion: day.shortVersion
+  };
 }
 
 function statusText(row: TimesheetRow): string {
@@ -787,6 +832,7 @@ export function TimesheetWorkspace({
   findPreviousNotionCardsAction,
   findPreviousProjectAction,
   initialAiSetting,
+  initialAiRewriteRequests,
   initialHolidayApiKey,
   initialManagedUsers,
   initialMonthIndex,
@@ -795,6 +841,7 @@ export function TimesheetWorkspace({
   initialNotionWeeklyDefaults,
   initialTodayKey,
   initialYear,
+  listAiRewriteRequestsAction,
   loadMonthAction,
   loadNotionCardCandidatesAction,
   refreshNotionCardCandidatesAction,
@@ -835,6 +882,7 @@ export function TimesheetWorkspace({
   const [aiCleanupMessage, setAiCleanupMessage] = useState("");
   const [deleteState, setDeleteState] = useState<DeleteState>("idle");
   const [deleteError, setDeleteError] = useState("");
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [projectAddState, setProjectAddState] = useState<ProjectAddState>("idle");
@@ -852,6 +900,8 @@ export function TimesheetWorkspace({
   const [holidayApiKeyTestState, setHolidayApiKeyTestState] = useState<SettingsSaveState>("idle");
   const [holidayApiKeyTestMessage, setHolidayApiKeyTestMessage] = useState("");
   const [aiSetting, setAiSetting] = useState(initialAiSetting);
+  const [aiRewriteRequests, setAiRewriteRequests] = useState(initialAiRewriteRequests);
+  const [isAiRewriteQueueOpen, setIsAiRewriteQueueOpen] = useState(false);
   const [aiEnabled, setAiEnabled] = useState(initialAiSetting.enabled);
   const [aiApiKey, setAiApiKey] = useState("");
   const [aiClearApiKey, setAiClearApiKey] = useState(false);
@@ -860,6 +910,7 @@ export function TimesheetWorkspace({
   const [aiContextDays, setAiContextDays] = useState(initialAiSetting.contextDays);
   const [aiBackfillMissing, setAiBackfillMissing] = useState(initialAiSetting.backfillMissing);
   const [aiBackfillLimit, setAiBackfillLimit] = useState(initialAiSetting.backfillLimit);
+  const [aiCleanupMode, setAiCleanupMode] = useState<AiCleanupMode>(initialAiSetting.cleanupMode);
   const [aiSettingState, setAiSettingState] = useState<SettingsSaveState>("idle");
   const [aiSettingMessage, setAiSettingMessage] = useState("");
   const [aiTestState, setAiTestState] = useState<SettingsSaveState>("idle");
@@ -896,6 +947,11 @@ export function TimesheetWorkspace({
   const [isConnectedVacationSaving, setIsConnectedVacationSaving] = useState(false);
   const [connectedVacationProgress, setConnectedVacationProgress] = useState({ completed: 0, total: 0 });
   const [aiRewritePromptDateKey, setAiRewritePromptDateKey] = useState("");
+  const [aiOverwriteEditPrompt, setAiOverwriteEditPrompt] = useState<{
+    entryClientId?: string;
+    field: "summary" | "translation";
+    previousValue: string;
+  } | null>(null);
   const [monthLoadState, setMonthLoadState] = useState<MonthLoadState>("idle");
   const [monthLoadError, setMonthLoadError] = useState("");
   const [isInitialMonthSyncing, setIsInitialMonthSyncing] = useState(true);
@@ -978,6 +1034,7 @@ export function TimesheetWorkspace({
       : `${vacationRemainderHours}시간`;
   const isViewingToday = selectedDateKey === todayKey;
   const isFutureWork = false;
+  const shortcutModifierKey = useMemo(() => getSystemModifierKey(), []);
   const editorKindOptions = isFutureDate ? kindOptions.filter((option) => option.value !== "WORK") : kindOptions;
   const canDeleteSelected = savedEntryDateKeys.has(selectedDateKey);
   const isAdmin = currentUser.role === "ADMIN";
@@ -2107,6 +2164,7 @@ export function TimesheetWorkspace({
 
       return next;
     });
+    setAiRewriteRequests((current) => current.filter((request) => !dateKeys.includes(request.dateKey)));
   }
 
   async function deleteConnectedVacationPrompt() {
@@ -2355,6 +2413,7 @@ export function TimesheetWorkspace({
     }
 
     const nextDays = days.map(withClientIds);
+    updateAiRewriteRequestsFromDays(nextDays);
 
     setRecords((current) => ({
       ...current,
@@ -2375,6 +2434,32 @@ export function TimesheetWorkspace({
     });
   }
 
+  function updateAiRewriteRequestsFromDays(days: TimesheetDayDraft[]) {
+    setAiRewriteRequests((current) => {
+      const next = new Map(current.map((request) => [request.dateKey, request]));
+
+      for (const day of days) {
+        const request = toAiRewriteRequest(day);
+
+        if (request) {
+          next.set(day.dateKey, request);
+        } else {
+          next.delete(day.dateKey);
+        }
+      }
+
+      return Array.from(next.values()).sort((left, right) => right.dateKey.localeCompare(left.dateKey));
+    });
+  }
+
+  async function refreshAiRewriteRequests() {
+    try {
+      setAiRewriteRequests(await listAiRewriteRequestsAction());
+    } catch {
+      // The settings modal can still show the last known queue state.
+    }
+  }
+
   function shouldPromptForAiRewrite(day: TimesheetDayDraft): boolean {
     const savedDay = savedRecords[day.dateKey];
 
@@ -2388,6 +2473,87 @@ export function TimesheetWorkspace({
       hasExistingAiFields(savedDay) &&
       hasWorkContentChange(savedDay, day)
     );
+  }
+
+  function isScheduledOverwriteActive() {
+    const savedDay = savedRecords[selectedDateKey];
+
+    return (
+      aiSetting.enabled &&
+      aiSetting.apiKeySaved &&
+      aiSetting.cleanupMode === "scheduled" &&
+      Boolean(selectedDay.aiRewriteRequested || savedDay?.aiRewriteRequested)
+    );
+  }
+
+  function isSelectedDayScheduledCleanupPending() {
+    if (!aiSetting.enabled || !aiSetting.apiKeySaved || aiSetting.cleanupMode !== "scheduled" || isFutureWork) {
+      return false;
+    }
+
+    const savedDay = savedRecords[selectedDateKey];
+
+    if (!savedDay || !savedEntryDateKeys.has(selectedDateKey)) {
+      return false;
+    }
+
+    return savedDay.aiRewriteRequested ? hasWorkContent(savedDay) : hasMissingAiFields(savedDay);
+  }
+
+  function shouldWarnScheduledOverwriteField() {
+    return isScheduledOverwriteActive() && hasWorkContent(selectedDay) && !isFutureWork;
+  }
+
+  function promptForScheduledOverwriteEdit(prompt: NonNullable<typeof aiOverwriteEditPrompt>) {
+    if (!shouldWarnScheduledOverwriteField() || aiOverwriteEditPrompt) {
+      return;
+    }
+
+    setAiOverwriteEditPrompt(prompt);
+  }
+
+  function updateSelectedShortVersion(value: string) {
+    promptForScheduledOverwriteEdit({
+      field: "summary",
+      previousValue: selectedDay.shortVersion
+    });
+    updateSelectedDay({ shortVersion: value });
+  }
+
+  function updateSelectedAiTranslation(value: string) {
+    if (!selectedEntry) {
+      return;
+    }
+
+    promptForScheduledOverwriteEdit({
+      entryClientId: selectedEntry.clientId,
+      field: "translation",
+      previousValue: selectedEntry.aiTranslation
+    });
+    updateSelectedEntry({ aiTranslation: value });
+  }
+
+  function keepScheduledOverwriteAfterManualEdit() {
+    setAiOverwriteEditPrompt(null);
+  }
+
+  function revertScheduledOverwriteManualEdit() {
+    if (!aiOverwriteEditPrompt) {
+      return;
+    }
+
+    if (aiOverwriteEditPrompt.field === "summary") {
+      updateSelectedDay({ shortVersion: aiOverwriteEditPrompt.previousValue });
+    } else {
+      updateSelectedEntry({ aiTranslation: aiOverwriteEditPrompt.previousValue });
+    }
+
+    setAiOverwriteEditPrompt(null);
+  }
+
+  function disableScheduledOverwriteAfterManualEdit() {
+    updateSelectedDay({ aiRewriteRequested: false });
+    setAiOverwriteEditPrompt(null);
   }
 
   async function runAiCleanup(dateKey: string, options?: AiCleanupOptions) {
@@ -2414,7 +2580,7 @@ export function TimesheetWorkspace({
     }
   }
 
-  async function saveSelectedDraft(options: { overwriteAiAfterSave?: boolean; skipAiRewritePrompt?: boolean; skipConnectedVacation?: boolean } = {}) {
+  async function saveSelectedDraft(options: { forceImmediateAiAfterSave?: boolean; overwriteAiAfterSave?: boolean; skipAiRewritePrompt?: boolean; skipConnectedVacation?: boolean } = {}) {
     if (selectedIsSingleVacation && !options.skipConnectedVacation) {
       try {
         const prompt = await findConnectedVacationPrompt();
@@ -2432,9 +2598,17 @@ export function TimesheetWorkspace({
       }
     }
 
-    const entry = sanitizeDayForSave(selectedDay);
+    const sanitizedEntry = sanitizeDayForSave(selectedDay);
+    const shouldScheduleAiRewrite =
+      Boolean(options.overwriteAiAfterSave) &&
+      aiSetting.cleanupMode === "scheduled" &&
+      !options.forceImmediateAiAfterSave;
+    const entry = {
+      ...sanitizedEntry,
+      aiRewriteRequested: shouldScheduleAiRewrite ? true : sanitizedEntry.aiRewriteRequested
+    };
 
-    if (!options.skipAiRewritePrompt && shouldPromptForAiRewrite(entry)) {
+    if (!options.forceImmediateAiAfterSave && !options.skipAiRewritePrompt && shouldPromptForAiRewrite(entry)) {
       setAiRewritePromptDateKey(entry.dateKey);
       return;
     }
@@ -2450,6 +2624,7 @@ export function TimesheetWorkspace({
       const saveResult = await saveEntryAction(entry);
       const savedEntry = withClientIds(saveResult.day);
 
+      updateAiRewriteRequestsFromDays([savedEntry]);
       showNotionSyncError(saveResult.notionSyncError);
       setRecords((current) => ({
         ...current,
@@ -2466,10 +2641,53 @@ export function TimesheetWorkspace({
       }));
       setIsDirty(false);
       setSaveState("saved");
-      void runAiCleanup(savedEntry.dateKey, options.overwriteAiAfterSave ? { overwriteCurrentDate: true } : undefined);
+      if (
+        options.forceImmediateAiAfterSave ||
+        aiSetting.cleanupMode === "immediate" ||
+        (options.overwriteAiAfterSave && aiSetting.cleanupMode === "manual")
+      ) {
+        void runAiCleanup(
+          savedEntry.dateKey,
+          options.forceImmediateAiAfterSave || options.overwriteAiAfterSave ? { overwriteCurrentDate: true } : undefined
+        );
+      }
     } catch {
       setSaveState("error");
       setSaveError("저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    }
+  }
+
+  function isSaveDisabled() {
+    return isFutureWork || saveState === "saving" || deleteState === "deleting" || vacationRangeState === "saving";
+  }
+
+  function requestDeleteSelectedDate() {
+    if (!canDeleteSelected || deleteState === "deleting") {
+      return;
+    }
+
+    setIsDeleteConfirmOpen(true);
+  }
+
+  function confirmDeleteSelectedDate() {
+    setIsDeleteConfirmOpen(false);
+    void deleteSelectedEntry();
+  }
+
+  function handleWorkspaceKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.nativeEvent.isComposing) {
+      return;
+    }
+
+    if (event.key === "Delete" && !isTextEditingTarget(event.target) && canDeleteSelected && deleteState !== "deleting") {
+      event.preventDefault();
+      requestDeleteSelectedDate();
+      return;
+    }
+
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !isSaveDisabled()) {
+      event.preventDefault();
+      void saveSelectedDraft();
     }
   }
 
@@ -2529,10 +2747,12 @@ export function TimesheetWorkspace({
     setAiContextDays(aiSetting.contextDays);
     setAiBackfillMissing(aiSetting.backfillMissing);
     setAiBackfillLimit(aiSetting.backfillLimit);
+    setAiCleanupMode(aiSetting.cleanupMode);
     setAiSettingState("idle");
     setAiSettingMessage("");
     setAiTestState("idle");
     setAiTestMessage("");
+    void refreshAiRewriteRequests();
     setHolidayResetState("idle");
     setHolidayResetError("");
     setUserCreateState("idle");
@@ -2600,6 +2820,7 @@ export function TimesheetWorkspace({
         backfillMissing: aiBackfillMissing,
         clearApiKey: aiClearApiKey,
         contextDays: aiContextDays,
+        cleanupMode: aiCleanupMode,
         enabled: aiEnabled,
         model: getSelectedAiModel()
       });
@@ -2776,7 +2997,7 @@ export function TimesheetWorkspace({
 
   return (
     <>
-      <div className="mx-auto grid max-w-[1600px] gap-4 px-4 pb-0 pt-4 lg:grid-cols-[minmax(680px,1fr)_420px] xl:grid-cols-[minmax(760px,1fr)_460px]">
+      <div className="mx-auto grid max-w-[1600px] gap-4 px-4 pb-0 pt-4 lg:grid-cols-[minmax(680px,1fr)_420px] xl:grid-cols-[minmax(760px,1fr)_460px]" onKeyDown={handleWorkspaceKeyDown}>
         <section className="min-w-0 rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
             <div className="flex items-center gap-2">
@@ -2871,7 +3092,7 @@ export function TimesheetWorkspace({
           <div className={cn("space-y-5 p-5", isFutureWork && "opacity-70")}>
             {selectedHasWork ? (
               <Field label="짧은 버전">
-                <Input disabled={isFutureWork} onChange={(event) => updateSelectedDay({ shortVersion: event.target.value })} placeholder="월간 캘린더에 표시할 한 줄 요약" value={selectedDay.shortVersion} />
+                <Input disabled={isFutureWork} onChange={(event) => updateSelectedShortVersion(event.target.value)} placeholder="월간 캘린더에 표시할 한 줄 요약" value={selectedDay.shortVersion} />
               </Field>
             ) : null}
 
@@ -2974,7 +3195,7 @@ export function TimesheetWorkspace({
                   />
 
                   <Field label="영문 번역본">
-                    <Textarea disabled={isFutureWork} onChange={(event) => updateSelectedEntry({ aiTranslation: event.target.value })} placeholder="오늘 진행한 일을 영어로 간단히 적어주세요." rows={4} value={selectedEntry.aiTranslation} />
+                    <Textarea disabled={isFutureWork} onChange={(event) => updateSelectedAiTranslation(event.target.value)} placeholder="오늘 진행한 일을 영어로 간단히 적어주세요." rows={4} value={selectedEntry.aiTranslation} />
                   </Field>
                 </>
               ) : selectedEntry.kind === "VACATION" ? (
@@ -2990,16 +3211,24 @@ export function TimesheetWorkspace({
             ) : null}
 
             <div className="border-t border-slate-100 pt-5">
+              {isSelectedDayScheduledCleanupPending() ? (
+                <p className="mb-3 inline-flex w-full items-center justify-end gap-1 text-right text-xs font-semibold leading-5 text-amber-700">
+                  <span>AI 예약 정리 대기 ·</span>
+                  <ShortcutHint keys={[shortcutModifierKey]} />
+                  <span>저장 클릭으로 즉시 정리</span>
+                </p>
+              ) : null}
               <div className="flex items-center justify-between gap-3">
                 <div>
                   {canDeleteSelected ? (
                     <button
-                      className="text-sm font-semibold text-red-600 underline-offset-4 transition hover:text-red-700 hover:underline disabled:cursor-not-allowed disabled:text-red-300"
+                      className="inline-flex items-center gap-2 text-sm font-semibold text-red-600 underline-offset-4 transition hover:text-red-700 hover:underline disabled:cursor-not-allowed disabled:text-red-300"
                       disabled={deleteState === "deleting"}
-                      onClick={() => void deleteSelectedEntry()}
+                      onClick={requestDeleteSelectedDate}
                       type="button"
                     >
                       {deleteState === "deleting" ? "삭제 중" : "삭제"}
+                      <ShortcutHint keys={["Del"]} />
                     </button>
                   ) : null}
                 </div>
@@ -3014,8 +3243,9 @@ export function TimesheetWorkspace({
                       기간 설정
                     </Button>
                   ) : null}
-                  <Button className="h-10 px-4" disabled={isFutureWork || saveState === "saving" || deleteState === "deleting" || vacationRangeState === "saving"} onClick={() => void saveSelectedDraft()}>
+                  <Button className="h-10 px-4" disabled={isSaveDisabled()} onClick={(event) => void saveSelectedDraft({ forceImmediateAiAfterSave: event.ctrlKey || event.metaKey })}>
                     {saveState === "saving" ? "저장 중" : "저장"}
+                    <ShortcutHint keys={[shortcutModifierKey, "↵"]} />
                   </Button>
                 </div>
               </div>
@@ -3073,7 +3303,7 @@ export function TimesheetWorkspace({
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h4 className="text-sm font-bold text-slate-950">개인 AI 자동 정리</h4>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">내 Gemini API key로 저장 후 빈 영문 번역본과 짧은 버전을 채웁니다.</p>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">내 Gemini API key로 빈 영문 번역본과 짧은 버전을 채웁니다.</p>
                   </div>
                   <Badge tone={aiSetting.apiKeySaved ? "green" : "gray"}>{aiSetting.apiKeySaved ? "개인 key 저장됨" : "개인 key 없음"}</Badge>
                 </div>
@@ -3083,6 +3313,53 @@ export function TimesheetWorkspace({
                     <input checked={aiEnabled} className="size-4 accent-slate-950" onChange={(event) => setAiEnabled(event.target.checked)} type="checkbox" />
                     AI 자동 정리 사용
                   </label>
+
+                  <div>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-bold text-slate-700">AI 정리 방식</p>
+                      <button
+                        className={cn(
+                          "rounded-md border px-2 py-1 text-xs font-bold transition",
+                          aiRewriteRequests.length > 0
+                            ? "border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-300"
+                            : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+                        )}
+                        onClick={() => setIsAiRewriteQueueOpen(true)}
+                        type="button"
+                      >
+                        {aiRewriteRequests.length}개 대기중
+                      </button>
+                    </div>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                      {[
+                        { description: "저장 직후 실행", label: "즉시", value: "immediate" },
+                        { description: "n8n에서 일괄 실행", label: "예약", value: "scheduled" },
+                        { description: "직접 실행만 사용", label: "수동", value: "manual" }
+                      ].map((option) => (
+                        <label
+                          className={cn(
+                            "cursor-pointer rounded-md border bg-white px-3 py-2 transition",
+                            aiCleanupMode === option.value ? "border-slate-950 ring-2 ring-slate-100" : "border-slate-200 hover:border-slate-300"
+                          )}
+                          key={option.value}
+                        >
+                          <input
+                            checked={aiCleanupMode === option.value}
+                            className="sr-only"
+                            onChange={() => setAiCleanupMode(option.value as AiCleanupMode)}
+                            type="radio"
+                          />
+                          <span className="block text-sm font-bold text-slate-950">{option.label}</span>
+                          <span className="mt-1 block text-xs font-medium leading-5 text-slate-500">{option.description}</span>
+                        </label>
+                      ))}
+                    </div>
+                    {aiRewriteRequests.length > 0 && aiCleanupMode !== "scheduled" ? (
+                      <p className="mt-2 text-xs font-semibold leading-5 text-amber-700">
+                        대기 목록은 보존되지만, 예약 모드가 아니면 n8n 예약 정리에서 처리되지 않습니다.
+                      </p>
+                    ) : null}
+                  </div>
 
                 <Field label="Gemini API key">
                   <Input
@@ -3312,6 +3589,50 @@ export function TimesheetWorkspace({
         </ModalShell>
       ) : null}
 
+      {isAiRewriteQueueOpen ? (
+        <ModalShell onClose={() => setIsAiRewriteQueueOpen(false)} onConfirm={() => setIsAiRewriteQueueOpen(false)} title="AI 예약 정리 대기 목록">
+          <div className="space-y-4">
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium leading-6 text-slate-600">
+              {aiCleanupMode === "scheduled"
+                ? "아래 날짜는 n8n 예약 정리 때 빈 AI 필드를 채우거나, 덮어쓰기 예약이 있으면 기존 값을 다시 작성합니다."
+                : "대기 목록은 보존되어 있지만, AI 정리 방식이 예약이 아니면 n8n 예약 정리에서 처리되지 않습니다."}
+            </div>
+            {aiRewriteRequests.length > 0 ? (
+              <div className="max-h-[420px] overflow-y-auto rounded-md border border-slate-200">
+                {aiRewriteRequests.map((request) => (
+                  <div className="border-b border-slate-100 px-3 py-3 last:border-b-0" key={request.dateKey}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-slate-950">{formatKoreanDate(request.dateKey)}</p>
+                        <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
+                          WORK {request.entryCount}개 · {request.cleanupType === "rewrite" ? "기존 AI 필드 덮어쓰기 예약" : "빈 AI 필드 채우기 대기"}
+                        </p>
+                      </div>
+                      <Badge tone={aiCleanupMode === "scheduled" ? request.cleanupType === "rewrite" ? "orange" : "blue" : "gray"}>
+                        {aiCleanupMode === "scheduled" ? request.cleanupType === "rewrite" ? "덮어쓰기" : "채우기" : "보류"}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      {request.shortVersion.trim() || truncateContent(request.previewContent) || "(내용 없음)"}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-md border border-slate-200 bg-white px-3 py-6 text-center text-sm font-semibold text-slate-500">
+                대기중인 AI 예약 정리가 없습니다.
+              </div>
+            )}
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <Button onClick={() => setIsAiRewriteQueueOpen(false)} type="button">
+                확인
+                <ShortcutHint keys={["↵"]} />
+              </Button>
+            </div>
+          </div>
+        </ModalShell>
+      ) : null}
+
       {isProjectModalOpen ? (
         <ModalShell onClose={closeProjectModal} title="새 프로젝트 등록">
           <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void addProject(); }}>
@@ -3322,10 +3643,12 @@ export function TimesheetWorkspace({
             <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
               <Button onClick={closeProjectModal} type="button" variant="secondary">
                 취소
+                <ShortcutHint keys={["Esc"]} />
               </Button>
               <Button disabled={projectAddState === "saving"} type="submit">
                 <Plus aria-hidden="true" className="size-4" />
                 {projectAddState === "saving" ? "등록 중" : "등록"}
+                <ShortcutHint keys={["↵"]} />
               </Button>
             </div>
           </form>
@@ -3333,7 +3656,7 @@ export function TimesheetWorkspace({
       ) : null}
 
       {isVacationRangeOpen ? (
-        <ModalShell onClose={closeVacationRangeModal} title="휴가 기간 설정">
+        <ModalShell onClose={closeVacationRangeModal} onConfirm={() => void applyVacationRange(vacationRangeConflictKeys.length > 0)} title="휴가 기간 설정">
           <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
               {canEditVacationRangeStart ? (
@@ -3383,9 +3706,11 @@ export function TimesheetWorkspace({
             <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
               <Button disabled={vacationRangeState === "saving"} onClick={closeVacationRangeModal} type="button" variant="secondary">
                 취소
+                <ShortcutHint keys={["Esc"]} />
               </Button>
               <Button disabled={vacationRangeState === "saving"} onClick={() => void applyVacationRange(vacationRangeConflictKeys.length > 0)} type="button">
                 {vacationRangeState === "saving" ? "저장 중" : vacationRangeConflictKeys.length > 0 ? "교체하고 기간 저장" : "기간 저장"}
+                <ShortcutHint keys={["↵"]} />
               </Button>
             </div>
           </div>
@@ -3393,7 +3718,7 @@ export function TimesheetWorkspace({
       ) : null}
 
       {connectedVacationPrompt && connectedVacationAction === "delete" ? (
-        <ModalShell onClose={() => setConnectedVacationPrompt(null)} title="연결된 휴가 삭제">
+        <ModalShell onClose={() => setConnectedVacationPrompt(null)} onConfirm={() => void deleteConnectedVacationPrompt()} title="연결된 휴가 삭제">
           <div className="space-y-4">
             <p className="text-sm leading-6 text-slate-600">
               붙어있는 휴가 {connectedVacationPrompt.dateKeys.length}일이 있습니다. 연결된 휴가를 함께 삭제할까요?
@@ -3405,12 +3730,14 @@ export function TimesheetWorkspace({
             <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
               <Button disabled={isConnectedVacationSaving} onClick={() => setConnectedVacationPrompt(null)} type="button" variant="secondary">
                 취소
+                <ShortcutHint keys={["Esc"]} />
               </Button>
               <Button disabled={isConnectedVacationSaving} onClick={() => { setConnectedVacationPrompt(null); void deleteSelectedEntry({ skipConnectedVacation: true }); }} type="button" variant="secondary">
                 현재 날짜만 삭제
               </Button>
               <Button disabled={isConnectedVacationSaving} onClick={() => void deleteConnectedVacationPrompt()} type="button" variant="danger">
                 {isConnectedVacationSaving ? "삭제 중" : "함께 삭제"}
+                <ShortcutHint keys={["↵"]} />
               </Button>
             </div>
           </div>
@@ -3418,7 +3745,7 @@ export function TimesheetWorkspace({
       ) : null}
 
       {connectedVacationPrompt && connectedVacationAction === "save" ? (
-        <ModalShell onClose={() => setConnectedVacationPrompt(null)} title="연결된 휴가 수정">
+        <ModalShell onClose={() => setConnectedVacationPrompt(null)} onConfirm={() => void saveConnectedVacationPrompt()} title="연결된 휴가 수정">
           <div className="space-y-4">
             <p className="text-sm leading-6 text-slate-600">
               붙어있는 휴가 {connectedVacationPrompt.dateKeys.length}일이 있습니다. 현재 휴가 유형과 시간을 연결된 휴가에 함께 적용할까요?
@@ -3430,12 +3757,14 @@ export function TimesheetWorkspace({
             <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
               <Button disabled={isConnectedVacationSaving} onClick={() => setConnectedVacationPrompt(null)} type="button" variant="secondary">
                 취소
+                <ShortcutHint keys={["Esc"]} />
               </Button>
               <Button disabled={isConnectedVacationSaving} onClick={() => { setConnectedVacationPrompt(null); void saveSelectedDraft({ skipConnectedVacation: true }); }} type="button" variant="secondary">
                 현재 날짜만 저장
               </Button>
               <Button disabled={isConnectedVacationSaving} onClick={() => void saveConnectedVacationPrompt()} type="button">
                 {isConnectedVacationSaving ? "저장 중" : "함께 저장"}
+                <ShortcutHint keys={["↵"]} />
               </Button>
             </div>
           </div>
@@ -3443,23 +3772,76 @@ export function TimesheetWorkspace({
       ) : null}
 
       {aiRewritePromptDateKey ? (
-        <ModalShell onClose={() => setAiRewritePromptDateKey("")} title="AI 번역/요약 업데이트">
+        <ModalShell onClose={() => setAiRewritePromptDateKey("")} onConfirm={() => { setAiRewritePromptDateKey(""); void saveSelectedDraft({ overwriteAiAfterSave: true, skipAiRewritePrompt: true }); }} title="AI 번역/요약 업데이트">
           <div className="space-y-4">
             <p className="text-sm leading-6 text-slate-600">
-              {formatKoreanDate(aiRewritePromptDateKey)}의 내용이 변경되었고 기존 영문 번역본 또는 짧은 버전이 있습니다. 저장 후 AI가 현재 날짜의 번역본과 요약을 새 내용 기준으로 다시 작성할까요?
+              {formatKoreanDate(aiRewritePromptDateKey)}의 내용이 변경되었고 기존 영문 번역본 또는 짧은 버전이 있습니다. {aiSetting.cleanupMode === "scheduled" ? "저장 후 이 날짜를 n8n 예약 정리의 덮어쓰기 대상으로 표시할까요?" : "저장 후 AI가 현재 날짜의 번역본과 요약을 새 내용 기준으로 다시 작성할까요?"}
             </p>
             <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600">
-              이전 날짜 보정은 기존처럼 비어 있는 AI 필드만 채우고, 덮어쓰기는 현재 날짜에만 적용됩니다.
+              {aiSetting.cleanupMode === "scheduled"
+                ? "예약 정리는 기본적으로 빈 AI 필드만 채우고, 덮어쓰기는 이 날짜에만 한 번 예약됩니다."
+                : "이전 날짜 보정은 기존처럼 비어 있는 AI 필드만 채우고, 덮어쓰기는 현재 날짜에만 적용됩니다."}
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
               <Button onClick={() => setAiRewritePromptDateKey("")} type="button" variant="secondary">
                 취소
+                <ShortcutHint keys={["Esc"]} />
               </Button>
               <Button onClick={() => { setAiRewritePromptDateKey(""); void saveSelectedDraft({ skipAiRewritePrompt: true }); }} type="button" variant="secondary">
                 저장만
               </Button>
               <Button onClick={() => { setAiRewritePromptDateKey(""); void saveSelectedDraft({ overwriteAiAfterSave: true, skipAiRewritePrompt: true }); }} type="button">
                 AI도 업데이트
+                <ShortcutHint keys={["↵"]} />
+              </Button>
+            </div>
+          </div>
+        </ModalShell>
+      ) : null}
+
+      {aiOverwriteEditPrompt ? (
+        <ModalShell onClose={revertScheduledOverwriteManualEdit} onConfirm={disableScheduledOverwriteAfterManualEdit} title="예약 AI 덮어쓰기 경고">
+          <div className="space-y-4">
+            <p className="text-sm leading-6 text-slate-600">
+              이 날짜는 예약 AI 정리에서 기존 {aiOverwriteEditPrompt.field === "summary" ? "짧은 버전" : "영문 번역본"}을 덮어쓰도록 대기 중입니다. 지금 수동으로 수정한 값을 보호하려면 이 날짜의 예약 덮어쓰기를 꺼주세요.
+            </p>
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold leading-6 text-amber-900">
+              덮어쓰기를 유지하면 다음 n8n 예약 실행 때 이 값이 다시 작성될 수 있습니다.
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <Button onClick={revertScheduledOverwriteManualEdit} type="button" variant="secondary">
+                수정 취소
+                <ShortcutHint keys={["Esc"]} />
+              </Button>
+              <Button onClick={keepScheduledOverwriteAfterManualEdit} type="button" variant="secondary">
+                덮어쓰기 유지
+              </Button>
+              <Button onClick={disableScheduledOverwriteAfterManualEdit} type="button">
+                이 날짜만 끄기
+                <ShortcutHint keys={["↵"]} />
+              </Button>
+            </div>
+          </div>
+        </ModalShell>
+      ) : null}
+
+      {isDeleteConfirmOpen ? (
+        <ModalShell onClose={() => setIsDeleteConfirmOpen(false)} onConfirm={confirmDeleteSelectedDate} title="기록 삭제">
+          <div className="space-y-4">
+            <p className="text-sm leading-6 text-slate-600">
+              {formatKoreanDate(selectedDateKey)}의 저장된 업무 기록을 삭제할까요? 이 날짜의 업무, 휴가, 공휴일 entry가 함께 삭제됩니다.
+            </p>
+            <div className="rounded-md border border-red-100 bg-red-50 px-3 py-2 text-sm font-semibold leading-6 text-red-700">
+              삭제 후에는 해당 날짜가 다시 미기입 상태로 돌아갑니다.
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <Button onClick={() => setIsDeleteConfirmOpen(false)} type="button" variant="secondary">
+                취소
+                <ShortcutHint keys={["Esc"]} />
+              </Button>
+              <Button disabled={deleteState === "deleting"} onClick={confirmDeleteSelectedDate} type="button" variant="danger">
+                {deleteState === "deleting" ? "삭제 중" : "삭제"}
+                <ShortcutHint keys={["↵"]} />
               </Button>
             </div>
           </div>
@@ -3467,7 +3849,7 @@ export function TimesheetWorkspace({
       ) : null}
 
       {notionSyncError ? (
-        <ModalShell onClose={() => setNotionSyncError("")} title="Notion 필드 업데이트 실패">
+        <ModalShell onClose={() => setNotionSyncError("")} onConfirm={() => setNotionSyncError("")} title="Notion 필드 업데이트 실패">
           <div className="space-y-4">
             <p className="text-sm leading-6 text-slate-600">
               업무 기록은 저장/삭제됐지만 연결된 Notion 카드의 숫자/날짜 필드 업데이트에 실패했습니다.
@@ -3481,6 +3863,7 @@ export function TimesheetWorkspace({
             <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
               <Button onClick={() => setNotionSyncError("")} type="button">
                 확인
+                <ShortcutHint keys={["↵"]} />
               </Button>
             </div>
           </div>
@@ -3512,15 +3895,17 @@ export function TimesheetWorkspace({
       />
 
       {pendingNavigation ? (
-        <ModalShell onClose={() => setPendingNavigation(null)} title="저장되지 않은 변경">
+        <ModalShell onClose={() => setPendingNavigation(null)} onConfirm={confirmPendingNavigation} title="저장되지 않은 변경">
           <div className="space-y-4">
             <p className="text-sm leading-6 text-slate-600">현재 날짜의 변경사항이 아직 저장되지 않았습니다. 저장하지 않고 이동하면 마지막 저장 상태로 되돌아갑니다.</p>
             <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
               <Button onClick={() => setPendingNavigation(null)} variant="secondary">
                 계속 작성
+                <ShortcutHint keys={["Esc"]} />
               </Button>
               <Button onClick={confirmPendingNavigation} variant="danger">
                 저장하지 않고 이동
+                <ShortcutHint keys={["↵"]} />
               </Button>
             </div>
           </div>
@@ -3933,10 +4318,81 @@ function Field({ children, label }: { children: ReactNode; label: string }) {
   );
 }
 
-function ModalShell({ children, onClose, title }: { children: ReactNode; onClose: () => void; title: string }) {
+function getSystemModifierKey(): string {
+  if (typeof navigator === "undefined") {
+    return "Ctrl";
+  }
+
+  const platform = navigator.platform.toLowerCase();
+  const userAgent = navigator.userAgent.toLowerCase();
+
+  return platform.includes("mac") || userAgent.includes("mac os") ? "⌘" : "Ctrl";
+}
+
+function isTextEditingTarget(target: EventTarget): boolean {
+  const element = target instanceof HTMLElement ? target : null;
+
+  if (!element) {
+    return false;
+  }
+
+  return Boolean(element.closest("input, textarea, select, [contenteditable='true']"));
+}
+
+function ShortcutKey({ children }: { children: ReactNode }) {
+  return (
+    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded-md border border-current/20 bg-current/10 px-1.5 font-mono text-[10px] font-black leading-none tracking-normal">
+      {children}
+    </kbd>
+  );
+}
+
+function ShortcutHint({ keys }: { keys: ReactNode[] }) {
+  return (
+    <span aria-hidden="true" className="inline-flex items-center gap-1 opacity-80">
+      {keys.map((key, index) => (
+        <ShortcutKey key={index}>{key}</ShortcutKey>
+      ))}
+    </span>
+  );
+}
+
+function ModalShell({ children, onClose, onConfirm, title }: { children: ReactNode; onClose: () => void; onConfirm?: () => void; title: string }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.nativeEvent.isComposing) {
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+
+    if (event.key !== "Enter" || !onConfirm) {
+      return;
+    }
+
+    const target = event.target as HTMLElement;
+
+    if (target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.closest("button")) {
+      return;
+    }
+
+    event.preventDefault();
+    onConfirm();
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-6"
+      onKeyDown={handleKeyDown}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           onClose();
@@ -3944,7 +4400,7 @@ function ModalShell({ children, onClose, title }: { children: ReactNode; onClose
       }}
       role="presentation"
     >
-      <div aria-labelledby="modal-title" aria-modal="true" className="w-full max-w-2xl rounded-lg border border-slate-200 bg-white p-5 shadow-2xl shadow-slate-950/20" role="dialog">
+      <div aria-labelledby="modal-title" aria-modal="true" className="w-full max-w-2xl rounded-lg border border-slate-200 bg-white p-5 shadow-2xl shadow-slate-950/20 outline-none" ref={dialogRef} role="dialog" tabIndex={-1}>
         <h2 className="text-lg font-bold text-slate-950" id="modal-title">
           {title}
         </h2>

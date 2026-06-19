@@ -2,7 +2,6 @@
 
 import {
   addProject,
-  applyTimesheetAiSummaryPatches,
   createManagedUser,
   deleteTimesheetEntry,
   findLatestWorkNotionCardsBefore,
@@ -17,6 +16,7 @@ import {
   listCachedNotionCardsByPageIds,
   listHolidays,
   listProjects,
+  listTimesheetAiRewriteRequests,
   listTimesheetEntries,
   listVacations,
   resetHolidayCache,
@@ -33,12 +33,19 @@ import {
   type ManagedUser,
   type StoredTimesheetDraft,
   type StoredTimesheetEntry,
+  type TimesheetAiRewriteRequest,
   type UserRole
 } from "@timesheet/db";
-import { filterOpenNotionCardCandidates, type TimesheetEntryNotionCardDraft } from "@timesheet/domain";
+import { filterOpenNotionCardCandidates, type TimesheetDayDraft, type TimesheetEntryNotionCardDraft } from "@timesheet/domain";
 import { redirect } from "next/navigation";
 
 import { createSession, destroySession, getSession } from "@/server/session";
+import {
+  runTimesheetAiCleanupForUser,
+  testGeminiAiCleanupConnection,
+  type AiCleanupOptions,
+  type TimesheetAiCleanupResult
+} from "@/server/timesheet-ai-cleanup";
 
 import { collectChangedNotionPageIdsForTimesheetSave } from "./notion-timesheet-sync-scope";
 
@@ -53,13 +60,6 @@ export type TimesheetMonthData = {
 export type HolidayApiKeyTestResult = {
   holidays: Array<{ dateKey: string; name: string }>;
   ok: boolean;
-};
-
-export type TimesheetAiCleanupResult = {
-  appliedDateKeys: string[];
-  days: StoredTimesheetDraft[];
-  message: string;
-  skipped: boolean;
 };
 
 export type TimesheetDeleteResult = {
@@ -143,6 +143,7 @@ function mergeLegacyVacations(entries: StoredTimesheetDraft[], vacations: Array<
 
   for (const vacation of vacations) {
     const day = days.get(vacation.dateKey) ?? {
+      aiRewriteRequested: false,
       dateKey: vacation.dateKey,
       entries: [],
       holidayName: "",
@@ -242,383 +243,6 @@ async function fetchRestDeInfoWithKey(params: { serviceKey: string; solMonth: nu
   });
 }
 
-type AiCleanupTargetDay = StoredTimesheetDraft;
-
-type AiCleanupResponse = {
-  days: Array<{
-    dateKey: string;
-    entries: Array<{
-      aiTranslation: string;
-      id: string;
-    }>;
-    shortVersion: string;
-  }>;
-};
-
-type AiCleanupOptions = {
-  overwriteCurrentDate?: boolean;
-};
-
-type AiCleanupPatch = {
-  dateKey: string;
-  entries: Array<{ aiTranslation: string; id: string }>;
-  shortVersion: string;
-};
-
-type AiNoChangeReason = "blank-ai-response" | "none" | "protected-existing" | "same-as-existing" | "unknown-response";
-
-function selectAiCleanupTargets(params: {
-  currentDateKey: string;
-  days: StoredTimesheetDraft[];
-  overwriteCurrentDate: boolean;
-  setting: UserAiSetting;
-}): AiCleanupTargetDay[] {
-  const currentDay = params.days.find((day) => day.dateKey === params.currentDateKey);
-  const targets: AiCleanupTargetDay[] = [];
-
-  if (currentDay && (needsAiCleanup(currentDay) || (params.overwriteCurrentDate && hasSavedWorkContent(currentDay)))) {
-    targets.push(currentDay);
-  }
-
-  if (!params.setting.backfillMissing) {
-    return targets;
-  }
-
-  const previousTargets = params.days
-    .filter((day) => day.dateKey < params.currentDateKey && needsAiCleanup(day))
-    .sort((left, right) => right.dateKey.localeCompare(left.dateKey))
-    .slice(0, params.setting.backfillLimit);
-
-  return [...targets, ...previousTargets];
-}
-
-function selectAiCleanupContext(params: {
-  currentDateKey: string;
-  days: StoredTimesheetDraft[];
-  excludeDateKeys: Set<string>;
-  limit: number;
-}): StoredTimesheetDraft[] {
-  if (params.limit <= 0) {
-    return [];
-  }
-
-  return params.days
-    .filter((day) => day.dateKey < params.currentDateKey && !params.excludeDateKeys.has(day.dateKey) && hasSavedWorkContent(day))
-    .sort((left, right) => right.dateKey.localeCompare(left.dateKey))
-    .slice(0, params.limit);
-}
-
-function hasSavedWorkContent(day: StoredTimesheetDraft): boolean {
-  return day.entries.some((entry) => entry.kind === "WORK" && entry.content.trim());
-}
-
-function needsAiCleanup(day: StoredTimesheetDraft): boolean {
-  const workEntries = day.entries.filter((entry) => entry.kind === "WORK" && entry.content.trim());
-
-  return workEntries.length > 0 && (workEntries.some((entry) => !entry.aiTranslation.trim()) || !day.shortVersion.trim());
-}
-
-function toAiCleanupBaselineDay(day: StoredTimesheetDraft) {
-  return {
-    dateKey: day.dateKey,
-    entries: day.entries.map((entry) => ({
-      aiTranslation: entry.aiTranslation,
-      clientId: entry.clientId,
-      id: entry.id,
-      kind: entry.kind
-    })),
-    shortVersion: day.shortVersion
-  };
-}
-
-async function requestGeminiAiCleanup(params: {
-  apiKey: string;
-  contextDays: StoredTimesheetDraft[];
-  model: string;
-  overwriteDateKey?: string;
-  targetDays: AiCleanupTargetDay[];
-}): Promise<AiCleanupResponse> {
-  const text = await requestGeminiText({
-    apiKey: params.apiKey,
-    model: params.model,
-    prompt: buildAiCleanupPrompt(params)
-  });
-  const parsed = parseGeminiJson(text);
-
-  if (!isAiCleanupResponse(parsed)) {
-    throw new Error("Gemini 응답 JSON 구조가 올바르지 않습니다.");
-  }
-
-  return parsed;
-}
-
-async function requestGeminiText(params: { apiKey: string; model: string; prompt: string }): Promise<string> {
-  const model = params.model.trim() || "gemini-3.1-flash-lite";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(params.apiKey)}`;
-  const response = await fetch(url, {
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [{ text: params.prompt }]
-        }
-      ],
-      generationConfig: {
-        responseMimeType: "application/json",
-        temperature: 0.2
-      }
-    }),
-    cache: "no-store",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    method: "POST"
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gemini 요청에 실패했습니다. (${response.status})`);
-  }
-
-  const data = (await response.json()) as {
-    candidates?: Array<{
-      content?: {
-        parts?: Array<{ text?: string }>;
-      };
-    }>;
-  };
-  const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim();
-
-  if (!text) {
-    throw new Error("Gemini 응답이 비어 있습니다.");
-  }
-
-  return text;
-}
-
-function buildAiCleanupPrompt(params: {
-  contextDays: StoredTimesheetDraft[];
-  overwriteDateKey?: string;
-  targetDays: AiCleanupTargetDay[];
-}) {
-  const overwriteInstruction = params.overwriteDateKey
-    ? `For target date ${params.overwriteDateKey}, rewrite all returned WORK entry aiTranslation values and the day shortVersion even if existing values are present. Use existing English only as reference context, not as a locked value.`
-    : "There is no overwrite target in this request.";
-
-  return `You help prepare concise English work-report text from Korean timesheet records.
-
-Return ONLY valid JSON. Do not include Markdown, comments, explanations, or code fences.
-
-Rules:
-1. Translate only saved WORK entries with Korean content.
-2. Fill only fields that are empty in the target JSON, except for the explicit overwrite target.
-3. Do not overwrite existing aiTranslation or shortVersion values for non-overwrite targets.
-4. Do not invent work that is not in the Korean content or project name.
-5. Keep English concise, professional, and suitable for a monthly report.
-6. Exclude vacation, holiday, missing, future, and draft-only dates.
-7. Use context examples only for style and terminology.
-8. ${overwriteInstruction}
-9. Return only this shape:
-{
-  "days": [
-    {
-      "dateKey": "YYYY-MM-DD",
-      "shortVersion": "Short English day summary.",
-      "entries": [
-        {
-          "id": "entry-id",
-          "aiTranslation": "Concise English work translation."
-        }
-      ]
-    }
-  ]
-}
-
-Context examples:
-${JSON.stringify(params.contextDays.map((day) => toAiCleanupPromptDay(day)), null, 2)}
-
-Targets:
-${JSON.stringify(params.targetDays.map((day) => toAiCleanupPromptDay(day, { overwriteDateKey: params.overwriteDateKey })), null, 2)}`;
-}
-
-function toAiCleanupPromptDay(day: StoredTimesheetDraft, options: { overwriteDateKey?: string } = {}) {
-  const shouldRewrite = day.dateKey === options.overwriteDateKey;
-
-  return {
-    dateKey: day.dateKey,
-    previousShortVersion: shouldRewrite ? day.shortVersion : undefined,
-    shortVersion: shouldRewrite ? "" : day.shortVersion,
-    entries: day.entries
-      .filter((entry) => entry.kind === "WORK" && entry.content.trim())
-      .map((entry) => ({
-        aiTranslation: shouldRewrite ? "" : entry.aiTranslation,
-        content: entry.content,
-        id: entry.id || entry.clientId,
-        previousAiTranslation: shouldRewrite ? entry.aiTranslation : undefined,
-        project: entry.project
-      }))
-  };
-}
-
-function parseGeminiJson(value: string): unknown {
-  const trimmed = value.trim();
-  const withoutFence = trimmed
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "");
-
-  return JSON.parse(withoutFence);
-}
-
-function isAiCleanupResponse(value: unknown): value is AiCleanupResponse {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    Array.isArray((value as { days?: unknown }).days) &&
-    (value as { days: unknown[] }).days.every(
-      (day) =>
-        typeof day === "object" &&
-        day !== null &&
-        typeof (day as { dateKey?: unknown }).dateKey === "string" &&
-        typeof (day as { shortVersion?: unknown }).shortVersion === "string" &&
-        Array.isArray((day as { entries?: unknown }).entries) &&
-        (day as { entries: unknown[] }).entries.every(
-          (entry) =>
-            typeof entry === "object" &&
-            entry !== null &&
-            typeof (entry as { id?: unknown }).id === "string" &&
-            typeof (entry as { aiTranslation?: unknown }).aiTranslation === "string"
-        )
-    )
-  );
-}
-
-function buildAiCleanupPatches(params: {
-  overwriteDateKey?: string;
-  payload: AiCleanupResponse;
-  targetDays: AiCleanupTargetDay[];
-}) {
-  const targetDaysByDate = new Map(params.targetDays.map((day) => [day.dateKey, day]));
-  const skipped = {
-    blankAiResponse: 0,
-    protectedExisting: 0,
-    sameAsExisting: 0,
-    unknownResponse: 0
-  };
-  const patches: AiCleanupPatch[] = [];
-
-  for (const day of params.payload.days) {
-    const targetDay = targetDaysByDate.get(day.dateKey);
-
-    if (!targetDay) {
-      skipped.unknownResponse += 1;
-      continue;
-    }
-
-    const canOverwriteDay = targetDay.dateKey === params.overwriteDateKey;
-    const workEntriesById = new Map(
-      targetDay.entries
-        .filter((entry) => entry.kind === "WORK" && entry.content.trim())
-        .map((entry) => [entry.id || entry.clientId, entry])
-    );
-    const entries = day.entries.flatMap((entry) => {
-      const targetEntry = workEntriesById.get(entry.id);
-      const nextTranslation = entry.aiTranslation.trim();
-
-      if (!targetEntry) {
-        skipped.unknownResponse += 1;
-        return [];
-      }
-
-      if (!nextTranslation) {
-        skipped.blankAiResponse += 1;
-        return [];
-      }
-
-      if (!canOverwriteDay && targetEntry.aiTranslation.trim()) {
-        skipped.protectedExisting += 1;
-        return [];
-      }
-
-      if (targetEntry.aiTranslation === nextTranslation) {
-        skipped.sameAsExisting += 1;
-        return [];
-      }
-
-      return [{ id: entry.id, aiTranslation: nextTranslation }];
-    });
-    const nextShortVersion = day.shortVersion.trim();
-    const shortVersion = canOverwriteDay
-      ? nextShortVersion || targetDay.shortVersion
-      : targetDay.shortVersion.trim() ? targetDay.shortVersion : nextShortVersion;
-
-    if (!nextShortVersion && !targetDay.shortVersion.trim()) {
-      skipped.blankAiResponse += 1;
-    } else if (!canOverwriteDay && targetDay.shortVersion.trim() && nextShortVersion) {
-      skipped.protectedExisting += 1;
-    } else if (targetDay.shortVersion === shortVersion) {
-      skipped.sameAsExisting += 1;
-    }
-
-    if (entries.length === 0 && shortVersion === targetDay.shortVersion) {
-      continue;
-    }
-
-    patches.push({
-      dateKey: targetDay.dateKey,
-      entries,
-      shortVersion
-    });
-  }
-
-  return {
-    patches,
-    reason: getAiNoChangeReason(skipped)
-  };
-}
-
-function getAiNoChangeReason(skipped: {
-  blankAiResponse: number;
-  protectedExisting: number;
-  sameAsExisting: number;
-  unknownResponse: number;
-}): AiNoChangeReason {
-  if (skipped.protectedExisting > 0) {
-    return "protected-existing";
-  }
-
-  if (skipped.sameAsExisting > 0) {
-    return "same-as-existing";
-  }
-
-  if (skipped.blankAiResponse > 0) {
-    return "blank-ai-response";
-  }
-
-  if (skipped.unknownResponse > 0) {
-    return "unknown-response";
-  }
-
-  return "none";
-}
-
-function getAiNoChangeMessage(reason: AiNoChangeReason): string {
-  if (reason === "protected-existing") {
-    return "사유 1: 기존 AI 번역본/짧은 버전이 이미 있고 덮어쓰기 요청이 아니어서 업데이트하지 않았습니다. 내용 수정 후에는 'AI도 업데이트'를 선택해 주세요.";
-  }
-
-  if (reason === "same-as-existing") {
-    return "사유 2: AI가 기존 번역/요약과 같은 내용을 반환해서 업데이트할 차이가 없습니다.";
-  }
-
-  if (reason === "blank-ai-response") {
-    return "사유 3: AI가 빈 번역/요약을 반환해서 업데이트하지 않았습니다. 내용을 조금 더 구체적으로 적고 다시 저장해 주세요.";
-  }
-
-  if (reason === "unknown-response") {
-    return "AI 응답에 알 수 없는 날짜나 항목이 포함되어 업데이트하지 않았습니다.";
-  }
-
-  return "AI가 적용 가능한 변경사항을 반환하지 않았습니다.";
-}
-
 export async function loadTimesheetMonthAction(year: number, monthIndex: number): Promise<TimesheetMonthData> {
   const user = await requireSession();
   const range = getMonthRange(year, monthIndex);
@@ -643,7 +267,7 @@ export async function loadTimesheetMonthAction(year: number, monthIndex: number)
   };
 }
 
-export async function saveTimesheetEntryAction(day: StoredTimesheetDraft): Promise<TimesheetSaveResult> {
+export async function saveTimesheetEntryAction(day: TimesheetDayDraft): Promise<TimesheetSaveResult> {
   const user = await requireSession();
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day.dateKey)) {
@@ -656,12 +280,16 @@ export async function saveTimesheetEntryAction(day: StoredTimesheetDraft): Promi
     }
   }
 
-  const previousDay = await listTimesheetEntries({ endDateKey: day.dateKey, startDateKey: day.dateKey, userId: user.id });
+  const normalizedDay: StoredTimesheetDraft = {
+    ...day,
+    aiRewriteRequested: Boolean(day.aiRewriteRequested)
+  };
+  const previousDay = await listTimesheetEntries({ endDateKey: normalizedDay.dateKey, startDateKey: normalizedDay.dateKey, userId: user.id });
   const affectedNotionPageIds = collectChangedNotionPageIdsForTimesheetSave({
-    afterDay: day,
+    afterDay: normalizedDay,
     beforeDays: previousDay
   });
-  const savedDay = await saveTimesheetDay({ day, userId: user.id });
+  const savedDay = await saveTimesheetDay({ day: normalizedDay, userId: user.id });
 
   const notionSyncError = await syncNotionWorkHoursAfterTimesheetSave({ notionPageIds: affectedNotionPageIds, userId: user.id });
 
@@ -678,73 +306,13 @@ export async function runTimesheetAiCleanupAction(dateKey: string, options: AiCl
     throw new Error("날짜 형식이 올바르지 않습니다.");
   }
 
-  const setting = await getUserAiSetting(user.id);
-  const apiKey = await getUserGeminiApiKey(user.id);
+  return runTimesheetAiCleanupForUser({ dateKey, options, userId: user.id });
+}
 
-  if (!setting.enabled || !apiKey) {
-    return {
-      appliedDateKeys: [],
-      days: [],
-      message: !setting.enabled ? "AI 자동 정리가 꺼져 있습니다." : "Gemini API key가 없어 AI 정리를 건너뛰었습니다.",
-      skipped: true
-    };
-  }
+export async function listTimesheetAiRewriteRequestsAction(): Promise<TimesheetAiRewriteRequest[]> {
+  const user = await requireSession();
 
-  const year = Number(dateKey.slice(0, 4));
-  const monthIndex = Number(dateKey.slice(5, 7)) - 1;
-  const range = getMonthRange(year, monthIndex);
-  const days = await listTimesheetEntries({ ...range, userId: user.id });
-  const overwriteDateKey = options.overwriteCurrentDate ? dateKey : undefined;
-  const targetDays = selectAiCleanupTargets({ currentDateKey: dateKey, days, overwriteCurrentDate: Boolean(overwriteDateKey), setting });
-  const currentDay = days.find((day) => day.dateKey === dateKey);
-
-  if (targetDays.length === 0) {
-    return {
-      appliedDateKeys: [],
-      days: [],
-      message: currentDay && hasSavedWorkContent(currentDay) && !needsAiCleanup(currentDay) && !overwriteDateKey
-        ? getAiNoChangeMessage("protected-existing")
-        : "AI로 채울 빈 번역/요약이 없습니다.",
-      skipped: true
-    };
-  }
-
-  const contextDays = selectAiCleanupContext({ currentDateKey: dateKey, days, excludeDateKeys: new Set(targetDays.map((day) => day.dateKey)), limit: setting.contextDays });
-  const payload = overwriteDateKey
-    ? await requestGeminiAiCleanup({ apiKey, contextDays, model: setting.model, overwriteDateKey, targetDays })
-    : await requestGeminiAiCleanup({ apiKey, contextDays, model: setting.model, targetDays });
-  const patchResult = overwriteDateKey
-    ? buildAiCleanupPatches({ overwriteDateKey, payload, targetDays })
-    : buildAiCleanupPatches({ payload, targetDays });
-  const patches = patchResult.patches;
-
-  if (patches.length === 0) {
-    return {
-      appliedDateKeys: [],
-      days: [],
-      message: getAiNoChangeMessage(patchResult.reason),
-      skipped: true
-    };
-  }
-
-  await applyTimesheetAiSummaryPatches({
-    baseline: { days: targetDays.map(toAiCleanupBaselineDay) },
-    days: targetDays,
-    patches,
-    userId: user.id
-  });
-
-  const appliedDateKeys = patches.map((patch) => patch.dateKey);
-  const sortedAppliedDateKeys = [...appliedDateKeys].sort((left, right) => left.localeCompare(right));
-  const refreshedDays = await listTimesheetEntries({ endDateKey: sortedAppliedDateKeys[sortedAppliedDateKeys.length - 1]!, startDateKey: sortedAppliedDateKeys[0]!, userId: user.id });
-  const previousCount = appliedDateKeys.filter((appliedDateKey) => appliedDateKey < dateKey).length;
-
-  return {
-    appliedDateKeys,
-    days: refreshedDays.filter((day) => appliedDateKeys.includes(day.dateKey)),
-    message: previousCount > 0 ? `AI 정리 완료 · 이전 ${previousCount}일 보정됨` : "AI 정리 완료",
-    skipped: false
-  };
+  return listTimesheetAiRewriteRequests(user.id);
 }
 
 export async function deleteTimesheetEntryAction(dateKey: string): Promise<TimesheetDeleteResult> {
@@ -1125,10 +693,9 @@ export async function testGeminiApiKeyAction(params: { apiKey?: string; model: s
     throw new Error("Gemini API key를 입력해 주세요.");
   }
 
-  await requestGeminiText({
+  await testGeminiAiCleanupConnection({
     apiKey,
-    model: params.model.trim() || "gemini-3.1-flash-lite",
-    prompt: "Return only this JSON: {\"ok\":true}"
+    model: params.model.trim() || "gemini-3.1-flash-lite"
   });
 
   return { ok: true };

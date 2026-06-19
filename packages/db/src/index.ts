@@ -2,7 +2,7 @@ export { prisma } from "./client";
 export { databaseUrl } from "./database-url";
 export { hashPassword, verifyPassword } from "./password";
 export { ensureUserAiSettingSchema, getUserAiSetting, getUserGeminiApiKey, updateUserAiSetting } from "./ai-settings-store";
-export type { AiProvider, UserAiSetting, UserAiSettingUpdate } from "./ai-settings-store";
+export type { AiCleanupMode, AiProvider, UserAiSetting, UserAiSettingUpdate } from "./ai-settings-store";
 export { retrieveNotionDataSourceSchema, syncNotionCardsForDate } from "./notion-sync";
 export type { NotionDataSourceSchema } from "./notion-sync";
 export { runNotionDailyMaintenance } from "./notion-daily-maintenance";
@@ -43,5 +43,5 @@ export type {
   UserNotionWeeklyDefaultCard,
   UserNotionConnection
 } from "./notion-store";
-export { addProject, applyTimesheetAiSummaryPatches, deleteTimesheetEntry, ensureTimesheetSchema, findLatestWorkNotionCardsBefore, findLatestWorkProjectBefore, listHolidays, listProjectSummaries, listProjects, listTimesheetEntries, listVacations, renameProject, resetHolidayCache, saveTimesheetDay, saveTimesheetDays, upsertTimesheetEntry } from "./timesheet-store";
-export type { HolidayRecord, ProjectSummary, StoredTimesheetDay, StoredTimesheetDraft, StoredTimesheetEntry, VacationRecord } from "./timesheet-store";
+export { addProject, applyTimesheetAiSummaryPatches, clearTimesheetAiRewriteRequests, deleteTimesheetEntry, ensureTimesheetSchema, findLatestWorkNotionCardsBefore, findLatestWorkProjectBefore, listHolidays, listProjectSummaries, listProjects, listTimesheetAiRewriteRequests, listTimesheetEntries, listVacations, renameProject, resetHolidayCache, saveTimesheetDay, saveTimesheetDays, upsertTimesheetEntry } from "./timesheet-store";
+export type { HolidayRecord, ProjectSummary, StoredTimesheetDay, StoredTimesheetDraft, StoredTimesheetEntry, TimesheetAiRewriteRequest, VacationRecord } from "./timesheet-store";

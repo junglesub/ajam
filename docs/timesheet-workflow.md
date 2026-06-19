@@ -119,8 +119,15 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 
 ## Save-Time AI Cleanup
 
-- The Gemini-based cleanup flow saves the timesheet day first, then runs AI as a separate background-like action.
-- Each user configures their own Gemini API key, model, previous saved WORK date context count, and previous-date backfill limits.
+- The Gemini-based cleanup flow saves the timesheet day first, then runs AI separately when the user's cleanup mode is `immediate`.
+- Each user configures their own Gemini API key, model, cleanup mode, previous saved WORK date context count, and previous-date backfill limits.
+- AI cleanup mode can be `immediate`, `scheduled`, or `manual`. In `scheduled` mode, saving a day does not call Gemini; the editor shows that AI cleanup is waiting for n8n only when the selected day has work that scheduled cleanup can process, and Ctrl/Cmd-clicking the save button forces an immediate cleanup for that save.
+- Scheduled cleanup fills missing AI fields by default. Existing AI fields are overwritten only for dates whose `TimesheetDay.aiRewriteRequested` flag was set by choosing `AI도 업데이트` in the daily editor. When that per-date request is active, the editor warns next to the `짧은 버전` and `영문 번역본` fields, and manual edits prompt the user to keep the date request, turn it off for that date, or cancel the edit.
+- The AI cleanup mode control shows the user's scheduled cleanup queue count as `N개 대기중`. The count includes dates with missing AI fields and dates with per-day overwrite requests. Clicking it opens a queue modal with pending dates, labeled as fill-missing or overwrite. Pending requests are preserved if the user switches cleanup mode to `immediate` or `manual`, but n8n scheduled cleanup processes them only while the user's cleanup mode is `scheduled`.
+- The save shortcut is shown with OS-aware keycaps: `⌘ ↵` on macOS and `Ctrl ↵` elsewhere. It saves the current day from daily input fields such as content, English translation, short version, and Notion card hour inputs.
+- Pressing `Del` outside text-editing fields opens the same confirmation flow as the bottom delete action and deletes the saved selected date only after confirmation.
+- Confirmation popups support `Esc` to close/cancel and `↵` for the primary action when a safe primary action is defined. Buttons show compact shortcut keycaps for these actions.
+- The internal scheduled AI cleanup API lets n8n scan recent saved work days for users in `scheduled` mode and fill missing AI fields in a batch.
 - AI settings are shown under `내 설정` because the Gemini API key and cleanup preferences are user-owned, not site-wide server settings.
 - Model presets should include `gemini-3.1-flash-lite`, `gemini-3.5-flash`, `gemini-2.5-flash`, `gemini-2.5-pro`, and custom model entry.
 - AI cleanup fills only empty work-entry `aiTranslation` and empty day-level `shortVersion`; it does not overwrite existing user-written values.
@@ -174,7 +181,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 
 ## Persistence Notes
 
-- `TimesheetDay` stores day-level metadata such as `shortVersion`.
+- `TimesheetDay` stores day-level metadata such as `shortVersion` and the per-date `aiRewriteRequested` flag used by scheduled AI cleanup.
 - `TimesheetEntry` stores individual work, vacation, or holiday entries with `sortOrder`.
 - `Vacation` remains synchronized from vacation entries for monthly vacation totals.
 - `UserNotionConnection` stores the user-owned Notion token, data source, field mapping, done status values, and analysis config version.
