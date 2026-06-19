@@ -12,6 +12,7 @@ import {
   getUserGeminiApiKey,
   getUserNotionConnection,
   getManagedUser,
+  listEnabledNotionWeeklyDefaultCardsForDate,
   listCachedNotionCards,
   listCachedNotionCardsByPageIds,
   listHolidays,
@@ -1014,10 +1015,12 @@ export async function findPreviousOpenNotionCardsAction(dateKey: string): Promis
     throw new Error("날짜 형식이 올바르지 않습니다.");
   }
 
-  const [connection, previousCards] = await Promise.all([
+  const [connection, weeklyDefaultCards, previousCards] = await Promise.all([
     getUserNotionConnection(user.id),
+    listEnabledNotionWeeklyDefaultCardsForDate({ dateKey, userId: user.id }),
     findLatestWorkNotionCardsBefore({ beforeDateKey: dateKey, userId: user.id })
   ]);
+  const weeklyDefaultPageIds = new Set(weeklyDefaultCards.map((card) => card.notionPageId));
   const openPageIds = new Set(
     filterOpenNotionCardCandidates({
       cards: previousCards.map((card) => ({
@@ -1036,8 +1039,19 @@ export async function findPreviousOpenNotionCardsAction(dateKey: string): Promis
       doneStatusValues: connection?.doneStatusValues ?? []
     }).map((card) => card.notionPageId)
   );
-
-  return previousCards
+  const weeklyLinks: TimesheetEntryNotionCardDraft[] = weeklyDefaultCards.map((card) => ({
+    allocatedHours: card.allocatedHours,
+    allocationMode: "manual",
+    category: card.category,
+    endDate: card.endDate,
+    notionPageId: card.notionPageId,
+    source: "weekday_default",
+    startDate: card.startDate,
+    status: card.status,
+    title: card.title
+  }));
+  const previousLinks: TimesheetEntryNotionCardDraft[] = previousCards
+    .filter((card) => !weeklyDefaultPageIds.has(card.notionPageId))
     .filter((card) => openPageIds.has(card.notionPageId))
     .map((card) => ({
       ...card,
@@ -1045,6 +1059,8 @@ export async function findPreviousOpenNotionCardsAction(dateKey: string): Promis
       allocationMode: "auto",
       source: "previous_business_day_default"
     }));
+
+  return [...weeklyLinks, ...previousLinks];
 }
 
 export async function addProjectAction(name: string) {

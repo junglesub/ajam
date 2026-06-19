@@ -162,6 +162,14 @@ function normalizeHours(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+function normalizeNotionCardSource(source: string | undefined): TimesheetEntryNotionCardDraft["source"] {
+  if (source === "previous_business_day_default" || source === "weekday_default") {
+    return source;
+  }
+
+  return "manual";
+}
+
 function normalizeNotionCards(links: TimesheetEntryNotionCardDraft[] | undefined): TimesheetEntryNotionCardDraft[] {
   return (links ?? [])
     .map((link): TimesheetEntryNotionCardDraft => ({
@@ -170,7 +178,7 @@ function normalizeNotionCards(links: TimesheetEntryNotionCardDraft[] | undefined
       category: link.category?.trim() ?? "",
       endDate: link.endDate?.trim() ?? "",
       notionPageId: link.notionPageId.trim(),
-      source: link.source === "previous_business_day_default" ? "previous_business_day_default" : "manual",
+      source: normalizeNotionCardSource(link.source),
       startDate: link.startDate?.trim() ?? "",
       status: link.status?.trim() ?? "",
       title: link.title?.trim() ?? ""
@@ -357,7 +365,7 @@ function mapNotionCardLinks(rows: WorkEntryNotionCardRow[]): Map<string, Timeshe
       category: row.category,
       endDate: row.endDate,
       notionPageId: row.notionPageId,
-      source: row.source === "previous_business_day_default" ? "previous_business_day_default" : "manual",
+      source: normalizeNotionCardSource(row.source),
       startDate: row.startDate,
       status: row.status,
       title: row.title
@@ -458,7 +466,7 @@ export async function findLatestWorkNotionCardsBefore(params: {
     `WITH latest_entry AS (
        SELECT entry."id"
        FROM "TimesheetEntry" entry
-       INNER JOIN "WorkEntryNotionCard" link ON link."userId" = entry."userId" AND link."timesheetEntryId" = entry."id"
+       INNER JOIN "WorkEntryNotionCard" link ON link."userId" = entry."userId" AND link."timesheetEntryId" = entry."id" AND link."source" <> 'weekday_default'
        WHERE entry."userId" = ? AND entry."dateKey" < ? AND entry."kind" = 'WORK'
        GROUP BY entry."id", entry."dateKey", entry."sortOrder", entry."createdAt"
        ORDER BY entry."dateKey" DESC, entry."sortOrder" ASC, entry."createdAt" DESC
@@ -470,7 +478,7 @@ export async function findLatestWorkNotionCardsBefore(params: {
      FROM "WorkEntryNotionCard" link
      INNER JOIN latest_entry ON latest_entry."id" = link."timesheetEntryId"
      LEFT JOIN "NotionCardCache" cache ON cache."userId" = link."userId" AND cache."notionPageId" = link."notionPageId"
-     WHERE link."userId" = ?
+     WHERE link."userId" = ? AND link."source" <> 'weekday_default'
      ORDER BY link."createdAt" ASC`,
     params.userId,
     params.beforeDateKey,

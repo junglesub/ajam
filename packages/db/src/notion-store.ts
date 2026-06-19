@@ -65,6 +65,18 @@ export type NotionSyncRunRecord = {
   status: NotionSyncRunStatus;
 };
 
+export type UserNotionWeeklyDefaultCard = {
+  allocatedHours: number;
+  category: string;
+  enabled: boolean;
+  endDate: string;
+  notionPageId: string;
+  startDate: string;
+  status: string;
+  title: string;
+  weekday: number;
+};
+
 type ConnectionRow = {
   accessTokenEncrypted: string;
   ajamLastUpdatePropertyJson: string;
@@ -98,6 +110,10 @@ type NotionCardCacheRow = Omit<NotionCardCacheRecord, "archived" | "stale"> & {
 type NotionSyncRunRow = Omit<NotionSyncRunRecord, "finishedAt" | "partial"> & {
   finishedAt: unknown;
   partial: number;
+};
+
+type WeeklyDefaultCardRow = Omit<UserNotionWeeklyDefaultCard, "enabled"> & {
+  enabled: number;
 };
 
 let notionSchemaReady = false;
@@ -207,6 +223,20 @@ export async function ensureNotionSchema() {
   await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "WorkEntryNotionCard_user_entry_page_key" ON "WorkEntryNotionCard"("userId", "timesheetEntryId", "notionPageId")`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "WorkEntryNotionCard_userId_dateKey_idx" ON "WorkEntryNotionCard"("userId", "dateKey")`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "WorkEntryNotionCard_userId_notionPageId_idx" ON "WorkEntryNotionCard"("userId", "notionPageId")`);
+
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "UserNotionWeeklyDefaultCard" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
+    "weekday" INTEGER NOT NULL CHECK ("weekday" BETWEEN 1 AND 5),
+    "notionPageId" TEXT NOT NULL,
+    "allocatedHours" REAL NOT NULL DEFAULT 0 CHECK ("allocatedHours" >= 0),
+    "enabled" INTEGER NOT NULL DEFAULT 1,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "UserNotionWeeklyDefaultCard_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`);
+  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "UserNotionWeeklyDefaultCard_user_weekday_page_key" ON "UserNotionWeeklyDefaultCard"("userId", "weekday", "notionPageId")`);
+  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "UserNotionWeeklyDefaultCard_userId_weekday_idx" ON "UserNotionWeeklyDefaultCard"("userId", "weekday")`);
 
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "NotionSyncRun" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -491,6 +521,111 @@ export async function listCachedNotionCardsByPageIds(params: {
   }));
 }
 
+export async function listUserNotionWeeklyDefaultCards(userId: string): Promise<UserNotionWeeklyDefaultCard[]> {
+  await ensureNotionSchema();
+
+  const rows = await prisma.$queryRawUnsafe<WeeklyDefaultCardRow[]>(
+    `SELECT weekly."weekday", weekly."notionPageId", weekly."allocatedHours", weekly."enabled",
+            coalesce(cache."title", '') AS "title",
+            coalesce(cache."status", '') AS "status",
+            coalesce(cache."category", '') AS "category",
+            coalesce(cache."startDate", '') AS "startDate",
+            coalesce(cache."endDate", '') AS "endDate"
+     FROM "UserNotionWeeklyDefaultCard" weekly
+     LEFT JOIN "NotionCardCache" cache ON cache."userId" = weekly."userId" AND cache."notionPageId" = weekly."notionPageId"
+     WHERE weekly."userId" = ?
+     ORDER BY weekly."weekday" ASC, weekly."createdAt" ASC`,
+    userId
+  );
+
+  return rows.map(mapWeeklyDefaultCard);
+}
+
+export async function listEnabledNotionWeeklyDefaultCardsForDate(params: {
+  dateKey: string;
+  userId: string;
+}): Promise<UserNotionWeeklyDefaultCard[]> {
+  await ensureNotionSchema();
+
+  const weekday = getDateKeyWeekday(params.dateKey);
+
+  if (weekday < 1 || weekday > 5) {
+    return [];
+  }
+
+  const rows = await prisma.$queryRawUnsafe<WeeklyDefaultCardRow[]>(
+    `SELECT weekly."weekday", weekly."notionPageId", weekly."allocatedHours", weekly."enabled",
+            coalesce(cache."title", '') AS "title",
+            coalesce(cache."status", '') AS "status",
+            coalesce(cache."category", '') AS "category",
+            coalesce(cache."startDate", '') AS "startDate",
+            coalesce(cache."endDate", '') AS "endDate"
+     FROM "UserNotionWeeklyDefaultCard" weekly
+     LEFT JOIN "NotionCardCache" cache ON cache."userId" = weekly."userId" AND cache."notionPageId" = weekly."notionPageId"
+     WHERE weekly."userId" = ? AND weekly."weekday" = ? AND weekly."enabled" = 1
+     ORDER BY weekly."createdAt" ASC`,
+    params.userId,
+    weekday
+  );
+
+  return rows.map(mapWeeklyDefaultCard);
+}
+
+export async function replaceUserNotionWeeklyDefaultCards(params: {
+  cards: Array<{
+    allocatedHours: number;
+    enabled: boolean;
+    notionPageId: string;
+    weekday: number;
+  }>;
+  userId: string;
+}): Promise<UserNotionWeeklyDefaultCard[]> {
+  await ensureNotionSchema();
+
+  const normalizedCardsByKey = new Map<string, {
+    allocatedHours: number;
+    enabled: boolean;
+    notionPageId: string;
+    weekday: number;
+  }>();
+
+  for (const card of params.cards) {
+    const notionPageId = card.notionPageId.trim();
+
+    if (!notionPageId || card.weekday < 1 || card.weekday > 5 || !Number.isFinite(card.allocatedHours) || card.allocatedHours < 0) {
+      continue;
+    }
+
+    normalizedCardsByKey.set(`${card.weekday}:${notionPageId}`, {
+      allocatedHours: Math.round(card.allocatedHours * 100) / 100,
+      enabled: card.enabled,
+      notionPageId,
+      weekday: card.weekday
+    });
+  }
+
+  const normalizedCards = Array.from(normalizedCardsByKey.values());
+
+  await prisma.$transaction(async (transaction) => {
+    await transaction.$executeRawUnsafe(`DELETE FROM "UserNotionWeeklyDefaultCard" WHERE "userId" = ?`, params.userId);
+
+    for (const card of normalizedCards) {
+      await transaction.$executeRawUnsafe(
+        `INSERT INTO "UserNotionWeeklyDefaultCard" ("id", "userId", "weekday", "notionPageId", "allocatedHours", "enabled", "createdAt", "updatedAt")
+         VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        randomUUID(),
+        params.userId,
+        card.weekday,
+        card.notionPageId,
+        card.allocatedHours,
+        card.enabled ? 1 : 0
+      );
+    }
+  });
+
+  return listUserNotionWeeklyDefaultCards(params.userId);
+}
+
 export async function getLatestNotionSyncRun(params: {
   scopeEndDate: string;
   scopeStartDate: string;
@@ -723,6 +858,19 @@ function mapConnection(row: ConnectionRow): UserNotionConnection {
     workDayCountProperty: parseJson<NotionPropertyDescriptor | null>(row.workDayCountPropertyJson, null),
     workHoursProperty: parseJson<NotionPropertyDescriptor | null>(row.workHoursPropertyJson, null)
   };
+}
+
+function mapWeeklyDefaultCard(row: WeeklyDefaultCardRow): UserNotionWeeklyDefaultCard {
+  return {
+    ...row,
+    enabled: Boolean(row.enabled)
+  };
+}
+
+function getDateKeyWeekday(dateKey: string): number {
+  const [year, month, day] = dateKey.split("-").map(Number);
+
+  return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1).getDay();
 }
 
 function normalizeDateTimeString(value: unknown): string {

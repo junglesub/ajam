@@ -11,6 +11,7 @@ type NotionCardLinkSectionProps = {
   candidates: NotionCardCandidate[];
   disabled?: boolean;
   entry: TimesheetEntryDraft;
+  isAutoLoading?: boolean;
   onAllocatedHoursChange: (notionPageId: string, allocatedHours: number) => void;
   onOpenPicker: () => void;
   onRemoveCard: (notionPageId: string) => void;
@@ -22,6 +23,7 @@ export function NotionCardLinkSection({
   candidates,
   disabled = false,
   entry,
+  isAutoLoading = false,
   onAllocatedHoursChange,
   onOpenPicker,
   onRemoveCard,
@@ -84,6 +86,17 @@ export function NotionCardLinkSection({
               </div>
             );
           })}
+        </div>
+      ) : isAutoLoading ? (
+        <div className="space-y-2">
+          <div className="grid grid-cols-[minmax(0,1fr)_86px_28px] items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5">
+            <div className="min-w-0 space-y-1.5">
+              <div className="h-3 w-36 animate-pulse rounded bg-slate-200" />
+              <div className="h-2.5 w-24 animate-pulse rounded bg-slate-100" />
+            </div>
+            <div className="h-8 w-16 animate-pulse rounded-md bg-slate-100" />
+            <div className="size-7 animate-pulse rounded-md bg-slate-100" />
+          </div>
         </div>
       ) : null}
 

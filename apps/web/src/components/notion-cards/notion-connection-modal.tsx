@@ -12,7 +12,11 @@ type NotionConnectionModalProps = NotionConnectionPanelProps & {
   open: boolean;
 };
 
-export function NotionConnectionModal({ onClose, open, ...panelProps }: NotionConnectionModalProps) {
+export function NotionConnectionModal({
+  onClose,
+  open,
+  ...panelProps
+}: NotionConnectionModalProps) {
   if (!open) {
     return null;
   }

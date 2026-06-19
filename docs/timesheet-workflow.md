@@ -20,6 +20,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - The default work entry uses the previous work project's project when it can be predicted from loaded drafts.
 - If loaded drafts do not contain a previous work project, the editor asks the server for the latest saved work project before the selected date and fills it into the draft.
 - If a new unsaved `WORK` entry has no Notion cards, the editor asks the server for the latest previously saved `WORK` entry with linked Notion cards and auto-fills only cards still open on the selected date. Open-card checks use the card start/end dates and the user's configured done status values.
+- Users can configure weekday Notion defaults in a separate `요일별 자동 카드` popup on the `Notion 카드` page. When a new `WORK` entry is drafted, enabled defaults for that weekday are applied first with fixed manual hours, and previous-date Notion cards split the remaining entry hours automatically. Links created from weekday defaults use `source = weekday_default` and are excluded from future previous-date recommendations.
 - When changing months, the editor selects the first business day in the destination month and applies the same default draft and previous-project lookup behavior.
 - Future dates open with one default vacation entry because only vacation or holiday can be edited for future dates.
 - Future work creation is blocked; future vacation and holiday edits are allowed.
@@ -79,6 +80,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 
 - Notion cards are user-specific. Card metadata is read from Notion, and optional number properties are written back to Notion after timesheet saves.
 - The `Notion 카드` menu stores each user's integration token, data source ID, field mapping, done status values, optional work-hours number property mapping, optional work-day-count number property mapping, optional available-hours number property mapping, optional last-worked-date property mapping, and optional aJam-update-time date property mapping.
+- The same menu stores weekday Notion defaults for Monday through Friday. In the UI, one default row can select multiple weekdays for the same card and hour value; it is stored as weekday-specific rules with an enabled flag.
 - The Notion connection popup shows the saved field mapping immediately from stored descriptors; schema refresh is needed only when selecting changed Notion properties.
 - Notion field mappings are applied by Notion property ID first, with property name fallback for older or incomplete descriptors. Renaming a mapped Notion field does not require remapping after the latest schema is available.
 - Connection testing uses a newly entered token when present, otherwise it reuses the saved token.
@@ -176,6 +178,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - `TimesheetEntry` stores individual work, vacation, or holiday entries with `sortOrder`.
 - `Vacation` remains synchronized from vacation entries for monthly vacation totals.
 - `UserNotionConnection` stores the user-owned Notion token, data source, field mapping, done status values, and analysis config version.
+- `UserNotionWeeklyDefaultCard` stores user-owned weekday default card rules used before previous-date Notion card recommendation.
 - `NotionCardCache` stores scoped Notion card snapshots used for candidates and analysis.
 - `WorkEntryNotionCard` stores mappings between saved `WORK` entries and Notion cards, including allocated hours.
 - `NotionSyncRun` stores scope-specific sync results and partial/failure metadata.

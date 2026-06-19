@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { CalendarDays, Database, RefreshCw, Rows3 } from "lucide-react";
+import { CalendarClock, CalendarDays, Database, RefreshCw, Rows3 } from "lucide-react";
 
 import type { UserNotionConnection } from "@timesheet/db";
 import { Button, Input } from "@timesheet/ui";
@@ -11,6 +11,7 @@ import { NotionCategorySummary } from "./notion-category-summary";
 import { NotionConnectionModal } from "./notion-connection-modal";
 import { NotionDurationTotals } from "./notion-duration-totals";
 import { NotionFieldUpdateModal } from "./notion-field-update-modal";
+import { NotionWeeklyDefaultsModal } from "./notion-weekly-defaults-modal";
 import type { NotionCardWorkspaceProps, NotionFieldUpdatePrompt } from "./types";
 import { useNotionCardMonth } from "./use-notion-card-month";
 
@@ -24,14 +25,18 @@ export function NotionCardWorkspace({
   buildMonthlyAnalysisAction,
   initialConnection,
   initialMonth,
+  initialWeeklyDefaults,
   listCardsForMonthAction,
   saveConnectionAction,
+  saveWeeklyDefaultsAction,
   syncCardFieldsAction,
   syncDateCandidatesAction,
   testDataSourceAction
 }: NotionCardWorkspaceProps) {
   const [connection, setConnection] = useState<UserNotionConnection | null>(initialConnection);
+  const [weeklyDefaults, setWeeklyDefaults] = useState(initialWeeklyDefaults);
   const [isConnectionOpen, setIsConnectionOpen] = useState(false);
+  const [isWeeklyDefaultsOpen, setIsWeeklyDefaultsOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [syncDateKey, setSyncDateKey] = useState(todayKey());
   const [syncError, setSyncError] = useState("");
@@ -104,6 +109,10 @@ export function NotionCardWorkspace({
               <Database aria-hidden="true" className="size-4" />
               Notion 연결
             </Button>
+            <Button onClick={() => setIsWeeklyDefaultsOpen(true)} type="button" variant="secondary">
+              <CalendarClock aria-hidden="true" className="size-4" />
+              요일별 자동 카드
+            </Button>
             <label className="flex items-center gap-2 text-sm font-bold text-slate-600">
               <CalendarDays aria-hidden="true" className="size-4" />
               <Input className="h-9 w-[150px]" onChange={(event) => monthState.setMonth(event.target.value)} type="month" value={monthState.month} />
@@ -145,6 +154,15 @@ export function NotionCardWorkspace({
         open={isConnectionOpen}
         saveConnectionAction={saveConnectionAction}
         testDataSourceAction={testDataSourceAction}
+      />
+      <NotionWeeklyDefaultsModal
+        availableCards={monthState.availableCards}
+        defaults={weeklyDefaults}
+        onClose={() => setIsWeeklyDefaultsOpen(false)}
+        onDefaultsSaved={setWeeklyDefaults}
+        onMessage={setMessage}
+        open={isWeeklyDefaultsOpen}
+        saveWeeklyDefaultsAction={saveWeeklyDefaultsAction}
       />
       <NotionFieldUpdateModal
         error={fieldUpdateError}

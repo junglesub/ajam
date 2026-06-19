@@ -12,6 +12,7 @@ export function useNotionCardMonth(params: {
   listCardsForMonthAction: (month: string) => Promise<NotionCardCacheRecord[]>;
 }) {
   const [analysis, setAnalysis] = useState<NotionMonthlyAnalysis | null>(null);
+  const [availableCards, setAvailableCards] = useState<NotionCardCacheRecord[]>([]);
   const [cards, setCards] = useState<NotionCardCacheRecord[]>([]);
   const [month, setMonth] = useState(params.initialMonth);
   const [error, setError] = useState("");
@@ -22,13 +23,19 @@ export function useNotionCardMonth(params: {
       try {
         setError("");
         if (params.buildMonthlyAnalysisAction) {
-          const nextAnalysis = await params.buildMonthlyAnalysisAction(nextMonth);
+          const [nextAnalysis, nextAvailableCards] = await Promise.all([
+            params.buildMonthlyAnalysisAction(nextMonth),
+            params.listCardsForMonthAction(nextMonth)
+          ]);
           setAnalysis(nextAnalysis);
           setCards(nextAnalysis.cards);
+          setAvailableCards(nextAvailableCards);
           return;
         }
 
-        setCards(await params.listCardsForMonthAction(nextMonth));
+        const nextCards = await params.listCardsForMonthAction(nextMonth);
+        setCards(nextCards);
+        setAvailableCards(nextCards);
         setAnalysis(null);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : "Notion 카드 목록을 불러오지 못했습니다.");
@@ -47,6 +54,7 @@ export function useNotionCardMonth(params: {
 
   return {
     analysis,
+    availableCards,
     cards,
     error,
     isPending,

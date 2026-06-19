@@ -17,7 +17,7 @@ export type WorkEntryNotionCardLink = {
   allocatedHours: number;
   allocationMode: "auto" | "manual";
   notionPageId: string;
-  source: "manual" | "previous_business_day_default";
+  source: "manual" | "previous_business_day_default" | "weekday_default";
 };
 
 export type NotionCardEstimate = {

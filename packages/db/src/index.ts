@@ -20,9 +20,12 @@ export {
   getLatestLinkedNotionWorkDateByPage,
   getUserNotionAccessToken,
   getUserNotionConnection,
+  listEnabledNotionWeeklyDefaultCardsForDate,
   listCachedNotionCards,
   listCachedNotionCardsByPageIds,
+  listUserNotionWeeklyDefaultCards,
   recordNotionSyncRun,
+  replaceUserNotionWeeklyDefaultCards,
   replaceEntryNotionCards,
   replaceNotionCardCacheForDate,
   sumLinkedNotionHoursByPage,
@@ -37,6 +40,7 @@ export type {
   NotionSyncRunRecord,
   NotionSyncRunStatus,
   NotionSyncScopeType,
+  UserNotionWeeklyDefaultCard,
   UserNotionConnection
 } from "./notion-store";
 export { addProject, applyTimesheetAiSummaryPatches, deleteTimesheetEntry, ensureTimesheetSchema, findLatestWorkNotionCardsBefore, findLatestWorkProjectBefore, listHolidays, listProjectSummaries, listProjects, listTimesheetEntries, listVacations, renameProject, resetHolidayCache, saveTimesheetDay, saveTimesheetDays, upsertTimesheetEntry } from "./timesheet-store";

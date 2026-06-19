@@ -5,8 +5,10 @@ import { NotionCardWorkspace } from "@/components/notion-cards/notion-card-works
 import {
   buildNotionMonthlyAnalysisAction,
   getNotionConnectionAction,
+  listNotionWeeklyDefaultsAction,
   listNotionCardsForMonthAction,
   saveNotionConnectionAction,
+  saveNotionWeeklyDefaultsAction,
   syncNotionCardFieldsAction,
   syncNotionDateCandidatesAction,
   testNotionDataSourceAction
@@ -19,15 +21,20 @@ export const metadata: Metadata = {
 export default async function NotionCardsPage() {
   const today = new Date();
   const month = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
-  const connection = await getNotionConnectionAction();
+  const [connection, weeklyDefaults] = await Promise.all([
+    getNotionConnectionAction(),
+    listNotionWeeklyDefaultsAction()
+  ]);
 
   return (
     <NotionCardWorkspace
       initialConnection={connection}
       initialMonth={month}
+      initialWeeklyDefaults={weeklyDefaults}
       buildMonthlyAnalysisAction={buildNotionMonthlyAnalysisAction}
       listCardsForMonthAction={listNotionCardsForMonthAction}
       saveConnectionAction={saveNotionConnectionAction}
+      saveWeeklyDefaultsAction={saveNotionWeeklyDefaultsAction}
       syncCardFieldsAction={syncNotionCardFieldsAction}
       syncDateCandidatesAction={syncNotionDateCandidatesAction}
       testDataSourceAction={testNotionDataSourceAction}

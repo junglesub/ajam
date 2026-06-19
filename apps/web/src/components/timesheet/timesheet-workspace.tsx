@@ -403,8 +403,8 @@ function allocateDefaultNotionCards(cards: TimesheetEntryNotionCardDraft[], entr
     entryHours,
     links: cards.map((card) => ({
       ...card,
-      allocationMode: "auto",
-      source: "previous_business_day_default"
+      allocationMode: card.source === "weekday_default" ? "manual" : "auto",
+      source: card.source === "weekday_default" ? "weekday_default" : "previous_business_day_default"
     }))
   });
 }
@@ -804,6 +804,7 @@ export function TimesheetWorkspace({
   const [monthLoadState, setMonthLoadState] = useState<MonthLoadState>("idle");
   const [monthLoadError, setMonthLoadError] = useState("");
   const [isInitialMonthSyncing, setIsInitialMonthSyncing] = useState(true);
+  const [notionRecommendationLoadingKeys, setNotionRecommendationLoadingKeys] = useState<Set<string>>(() => new Set());
   const previousNotionCardRecommendationKeys = useRef(new Set<string>());
 
   useEffect(() => {
@@ -866,6 +867,7 @@ export function TimesheetWorkspace({
   const selectedEntryId = selectedEntry?.clientId ?? "";
   const selectedEditorKind: WorkRecordKind = selectedEntry?.kind ?? (selectedDay.holidayName ? "HOLIDAY" : isFutureDate ? "VACATION" : "WORK");
   const selectedNotionAllocationError = selectedEntry ? getNotionAllocationError(selectedEntry) : "";
+  const isSelectedNotionRecommendationLoading = Boolean(selectedEntry && notionRecommendationLoadingKeys.has(`${selectedDateKey}:${selectedEntry.clientId}`));
 
   const monthRows = Object.values(rows).filter((row) => row.dateKey.startsWith(`${monthCursor.year}-${String(monthCursor.monthIndex + 1).padStart(2, "0")}`));
   const businessDayCount = monthRows.filter((row) => row.status !== "HOLIDAY").length;
@@ -1084,6 +1086,10 @@ export function TimesheetWorkspace({
   }
 
   async function fillPreviousNotionCardsFromDatabase(dateKey: string, clientId: string) {
+    const loadingKey = `${dateKey}:${clientId}`;
+
+    setNotionRecommendationLoadingKeys((current) => new Set(current).add(loadingKey));
+
     try {
       const cards = await findPreviousNotionCardsAction(dateKey);
 
@@ -1119,6 +1125,14 @@ export function TimesheetWorkspace({
       });
     } catch {
       // Auto-fill is a convenience path; leave the draft editable if lookup fails.
+    } finally {
+      setNotionRecommendationLoadingKeys((current) => {
+        const next = new Set(current);
+
+        next.delete(loadingKey);
+
+        return next;
+      });
     }
   }
 
@@ -2799,6 +2813,7 @@ export function TimesheetWorkspace({
                     candidates={notionCandidates.candidatesByDate[selectedDateKey] ?? []}
                     disabled={isFutureWork}
                     entry={selectedEntry}
+                    isAutoLoading={isSelectedNotionRecommendationLoading}
                     onAllocatedHoursChange={(notionPageId, allocatedHours) => updateNotionCardAllocatedHours(selectedEntry.clientId || selectedEntry.id, notionPageId, allocatedHours)}
                     onOpenPicker={() => {
                       setIncludeDoneNotionCandidates(false);

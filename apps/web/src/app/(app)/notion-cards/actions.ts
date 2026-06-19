@@ -14,12 +14,15 @@ import {
   listCachedNotionCards,
   listHolidays,
   listTimesheetEntries,
+  listUserNotionWeeklyDefaultCards,
   listVacations,
+  replaceUserNotionWeeklyDefaultCards,
   retrieveNotionDataSourceSchema,
   syncNotionCardsForDate,
   syncNotionWorkHoursForPages,
   upsertUserNotionConnection,
   type NotionCardCacheRecord,
+  type UserNotionWeeklyDefaultCard,
   type UserNotionConnection
 } from "@timesheet/db";
 import { redirect } from "next/navigation";
@@ -76,6 +79,13 @@ export type NotionDateCandidatesSyncResult = {
   notionFieldUpdate: NotionFieldUpdatePrompt | null;
 };
 
+export type NotionWeeklyDefaultCardInput = {
+  allocatedHours: number;
+  enabled: boolean;
+  notionPageId: string;
+  weekday: number;
+};
+
 function getMonthRange(month: string) {
   const [year, monthValue] = month.split("-").map(Number);
   const startDateKey = `${year}-${String(monthValue).padStart(2, "0")}-01`;
@@ -116,6 +126,18 @@ export async function getNotionConnectionAction() {
   const user = await requireSession();
 
   return getUserNotionConnection(user.id);
+}
+
+export async function listNotionWeeklyDefaultsAction(): Promise<UserNotionWeeklyDefaultCard[]> {
+  const user = await requireSession();
+
+  return listUserNotionWeeklyDefaultCards(user.id);
+}
+
+export async function saveNotionWeeklyDefaultsAction(cards: NotionWeeklyDefaultCardInput[]): Promise<UserNotionWeeklyDefaultCard[]> {
+  const user = await requireSession();
+
+  return replaceUserNotionWeeklyDefaultCards({ cards, userId: user.id });
 }
 
 export async function saveNotionConnectionAction(params: {

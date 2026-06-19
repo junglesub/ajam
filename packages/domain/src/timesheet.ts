@@ -6,7 +6,7 @@ export type TimesheetEntryNotionCardDraft = {
   category?: string;
   endDate?: string;
   notionPageId: string;
-  source: "manual" | "previous_business_day_default";
+  source: "manual" | "previous_business_day_default" | "weekday_default";
   startDate?: string;
   status?: string;
   title?: string;
