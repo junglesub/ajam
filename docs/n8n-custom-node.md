@@ -30,7 +30,7 @@ with optional fields:
 }
 ```
 
-When `dateKey` is empty, aJam uses today's date in `Asia/Seoul`. The action scans recent saved work entries for users whose personal AI cleanup mode is `scheduled`, then fills missing English translations and short versions. Existing AI fields are overwritten only for dates where the user chose `AI도 업데이트`, which sets the per-day rewrite request in aJam. The node emits failures through the `Alerts` output so it can connect directly to Email or Slack nodes.
+When `dateKey` is empty, aJam uses today's date in `Asia/Seoul`. The action scans recent saved work entries for users whose personal AI cleanup mode is `scheduled`, plus any older per-day rewrite requests still waiting in aJam. It then fills missing English translations and short versions. Existing AI fields are overwritten only for dates where the user chose `AI도 업데이트`, which sets the per-day rewrite request in aJam. The node emits failures through the `Alerts` output so it can connect directly to Email or Slack nodes.
 
 ### Daily Reminder: List Missing Timesheet Users
 

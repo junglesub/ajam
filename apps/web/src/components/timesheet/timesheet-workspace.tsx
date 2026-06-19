@@ -429,12 +429,29 @@ function findPreviousProject(dateKey: string, records: Record<string, TimesheetD
 function allocateDefaultNotionCards(cards: TimesheetEntryNotionCardDraft[], entryHours: number): TimesheetEntryNotionCardDraft[] {
   return allocateNotionCardHours({
     entryHours,
-    links: cards.map((card) => ({
+    links: dedupeNotionCardsByPageId(cards).map((card) => ({
       ...card,
       allocationMode: card.source === "weekday_default" ? "manual" : "auto",
       source: card.source === "weekday_default" ? "weekday_default" : "previous_business_day_default"
     }))
   });
+}
+
+function dedupeNotionCardsByPageId(cards: TimesheetEntryNotionCardDraft[]): TimesheetEntryNotionCardDraft[] {
+  const cardsByPageId = new Map<string, TimesheetEntryNotionCardDraft>();
+
+  for (const card of cards) {
+    const pageId = card.notionPageId.trim();
+
+    if (pageId && !cardsByPageId.has(pageId)) {
+      cardsByPageId.set(pageId, {
+        ...card,
+        notionPageId: pageId
+      });
+    }
+  }
+
+  return Array.from(cardsByPageId.values());
 }
 
 function getDateKeyWeekday(dateKey: string): number {

@@ -3,6 +3,7 @@ import {
   clearTimesheetAiRewriteRequests,
   getUserAiSetting,
   getUserGeminiApiKey,
+  listTimesheetAiRewriteRequests,
   listManagedUsers,
   listTimesheetEntries,
   type StoredTimesheetDraft,
@@ -153,15 +154,24 @@ export async function runScheduledTimesheetAiCleanup(params: {
         continue;
       }
 
+      const rewriteRequests = await listTimesheetAiRewriteRequests(user.id);
+      const rewriteDateKeys = rewriteRequests
+        .filter((request) => request.cleanupType === "rewrite" && request.dateKey <= params.dateKey)
+        .map((request) => request.dateKey);
+      const scheduledStartDateKey = rewriteDateKeys.reduce(
+        (earliestDateKey, dateKey) => dateKey < earliestDateKey ? dateKey : earliestDateKey,
+        startDateKey
+      );
       const days = await listTimesheetEntries({
         endDateKey: params.dateKey,
-        startDateKey,
+        startDateKey: scheduledStartDateKey,
         userId: user.id
       });
-      const targetDays = days
-        .filter((day) => setting.backfillMissing ? isScheduledAiCleanupTarget(day) : day.dateKey === params.dateKey && isScheduledAiCleanupTarget(day))
-        .sort((left, right) => right.dateKey.localeCompare(left.dateKey))
-        .slice(0, setting.backfillLimit);
+      const targetDays = selectScheduledAiCleanupTargets({
+        currentDateKey: params.dateKey,
+        days,
+        setting
+      });
 
       if (targetDays.length === 0) {
         userResults.push({
@@ -282,8 +292,36 @@ function needsAiCleanup(day: StoredTimesheetDraft): boolean {
   return workEntries.length > 0 && (workEntries.some((entry) => !entry.aiTranslation.trim()) || !day.shortVersion.trim());
 }
 
-function isScheduledAiCleanupTarget(day: StoredTimesheetDraft): boolean {
-  return day.aiRewriteRequested ? hasSavedWorkContent(day) : needsAiCleanup(day);
+function selectScheduledAiCleanupTargets(params: {
+  currentDateKey: string;
+  days: StoredTimesheetDraft[];
+  setting: UserAiSetting;
+}): AiCleanupTargetDay[] {
+  const rewriteTargets = params.days
+    .filter((day) => day.aiRewriteRequested && hasSavedWorkContent(day))
+    .sort((left, right) => right.dateKey.localeCompare(left.dateKey));
+  const rewriteDateKeys = new Set(rewriteTargets.map((day) => day.dateKey));
+  const currentFillMissingTarget = params.days.find((day) =>
+    day.dateKey === params.currentDateKey &&
+    !rewriteDateKeys.has(day.dateKey) &&
+    needsAiCleanup(day)
+  );
+  const previousFillMissingTargets = params.setting.backfillMissing
+    ? params.days
+        .filter((day) =>
+          day.dateKey < params.currentDateKey &&
+          !rewriteDateKeys.has(day.dateKey) &&
+          needsAiCleanup(day)
+        )
+        .sort((left, right) => right.dateKey.localeCompare(left.dateKey))
+        .slice(0, params.setting.backfillLimit)
+    : [];
+
+  return [
+    ...rewriteTargets,
+    ...(currentFillMissingTarget ? [currentFillMissingTarget] : []),
+    ...previousFillMissingTargets
+  ];
 }
 
 function toAiCleanupBaselineDay(day: StoredTimesheetDraft) {

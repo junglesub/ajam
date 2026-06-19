@@ -1,5 +1,8 @@
 -- Adds per-user AI cleanup execution mode and per-day scheduled rewrite requests.
 -- Existing users keep the current save-time behavior through the immediate default.
+-- Runtime bootstrap also adds these columns when missing. Before applying this
+-- document manually, check PRAGMA table_info for each table and skip ALTER
+-- statements for columns that already exist.
 
 ALTER TABLE "UserAiSetting"
   ADD COLUMN "cleanupMode" TEXT NOT NULL DEFAULT 'immediate';
