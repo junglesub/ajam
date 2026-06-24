@@ -47,6 +47,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - A selected missing work draft with no content shows `작성 예정`.
 - Saved work with empty content shows `(내용 없음)`.
 - Project names are shown only when present; there is no placeholder project text.
+- When a date is saved for the first time in the current session, the calendar cell for that date shows a short confetti burst that expands around the saved cell. Editing an already saved date does not replay the animation.
 
 ## List View
 

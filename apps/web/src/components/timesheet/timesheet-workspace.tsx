@@ -17,6 +17,7 @@ import {
   useSortable,
   verticalListSortingStrategy
 } from "@dnd-kit/sortable";
+import confetti from "canvas-confetti";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from "react";
 
 import {
@@ -883,6 +884,7 @@ export function TimesheetWorkspace({
   const [records, setRecords] = useState<Record<string, TimesheetDayDraft>>(() => buildInitialDrafts(initialMonthData, todayKey));
   const [savedRecords, setSavedRecords] = useState<Record<string, TimesheetDayDraft>>(() => buildDraftsFromMonthData(initialMonthData));
   const [savedEntryDateKeys, setSavedEntryDateKeys] = useState(() => new Set(initialMonthData.entries.map((entry) => entry.dateKey)));
+  const [celebratingDateKey, setCelebratingDateKey] = useState("");
   const [selectedEntryIdByDate, setSelectedEntryIdByDate] = useState<Record<string, string>>(() => buildSelectedEntryIds(records));
   const [editingNotionEntryClientId, setEditingNotionEntryClientId] = useState<string | null>(null);
   const [includeDoneNotionCandidates, setIncludeDoneNotionCandidates] = useState(false);
@@ -993,6 +995,16 @@ export function TimesheetWorkspace({
       year: browserYear
     });
   }, [initialMonthIndex, initialTodayKey, initialYear]);
+
+  useEffect(() => {
+    if (!celebratingDateKey) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => setCelebratingDateKey(""), 1600);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [celebratingDateKey]);
 
   const calendarWeeks = useMemo(
     () => getBusinessCalendarWeeks(monthCursor.year, monthCursor.monthIndex),
@@ -2631,6 +2643,7 @@ export function TimesheetWorkspace({
     }
 
     const selectedIndexBeforeSave = selectedDay.entries.findIndex((dayEntry) => dayEntry.clientId === selectedEntryId);
+    const isNewSavedDate = !savedEntryDateKeys.has(entry.dateKey);
 
     setSaveState("saving");
     setSaveError("");
@@ -2656,6 +2669,9 @@ export function TimesheetWorkspace({
         ...current,
         [savedEntry.dateKey]: savedEntry.entries[Math.max(selectedIndexBeforeSave, 0)]?.clientId ?? savedEntry.entries[0]?.clientId ?? ""
       }));
+      if (isNewSavedDate) {
+        setCelebratingDateKey(savedEntry.dateKey);
+      }
       setIsDirty(false);
       setSaveState("saved");
       if (
@@ -3073,6 +3089,7 @@ export function TimesheetWorkspace({
 
           {viewMode === "calendar" ? (
             <CalendarView
+              celebratingDateKey={celebratingDateKey}
               rows={rows}
               selectedDateKey={selectedDateKey}
               setSelectedDateKey={selectDate}
@@ -4039,18 +4056,54 @@ function ProgressBar({ label, progress }: { label: string; progress: { completed
 }
 
 function CalendarView({
+  celebratingDateKey,
   rows,
   selectedDateKey,
   setSelectedDateKey,
   todayKey,
   weeks
 }: {
+  celebratingDateKey: string;
   rows: Record<string, TimesheetRow>;
   selectedDateKey: string;
   setSelectedDateKey: (dateKey: string) => void;
   todayKey: string;
   weeks: ReturnType<typeof getBusinessCalendarWeeks>;
 }) {
+  const dateButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+
+  useEffect(() => {
+    if (!celebratingDateKey) {
+      return;
+    }
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      return;
+    }
+
+    const element = dateButtonRefs.current.get(celebratingDateKey);
+
+    if (!element) {
+      return;
+    }
+
+    const rect = element.getBoundingClientRect();
+    const origin = {
+      x: (rect.left + rect.width / 2) / window.innerWidth,
+      y: (rect.top + rect.height / 2) / window.innerHeight
+    };
+
+    void confetti({
+      colors: ["#fb7185", "#f59e0b", "#34d399", "#38bdf8", "#e879f9", "#a3e635"],
+      origin,
+      particleCount: 85,
+      scalar: 0.85,
+      spread: 78,
+      startVelocity: 34,
+      ticks: 180
+    });
+  }, [celebratingDateKey]);
+
   return (
     <div className="p-4">
       <div className="grid grid-cols-5 border-b border-slate-200 pb-2">
@@ -4079,6 +4132,13 @@ function CalendarView({
                   )}
                   key={cell.dateKey}
                   onClick={() => setSelectedDateKey(cell.dateKey)}
+                  ref={(element) => {
+                    if (element) {
+                      dateButtonRefs.current.set(cell.dateKey, element);
+                    } else {
+                      dateButtonRefs.current.delete(cell.dateKey);
+                    }
+                  }}
                   type="button"
                 >
                   <div className="flex items-start justify-between gap-2">
