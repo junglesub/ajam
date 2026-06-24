@@ -89,12 +89,12 @@
 - Docker runner image는 컨테이너 시작 시 `pnpm db:seed`가 workspace TS source를 실행하므로, `packages/db`와 런타임 import 대상인 `packages/domain`을 함께 포함한다.
 - `docker-compose.example.yml`은 GHCR `ghcr.io/junglesub/ajam:latest` 이미지를 사용하고 SQLite 파일을 서버의 `./ajam-data`에 둔다.
 - GitHub Actions는 image 검증 성공 후 GHCR에 `latest`, commit SHA, `v<run-number>-<yymmdd>` 태그를 push한다.
-- GitHub Actions는 n8n node 검증 성공 후 `packages/n8n-nodes-ajam`을 GitHub Packages npm registry에 `@junglesub/n8n-nodes-ajam`으로 publish한다.
+- GitHub Actions는 n8n package version 변경과 n8n node 검증 성공이 함께 충족될 때 `packages/n8n-nodes-ajam`을 GitHub Packages npm registry에 `@junglesub/n8n-nodes-ajam`으로 publish한다.
 - GHCR image publish는 웹 앱, DB/domain/ui 패키지, Docker, workspace 설정이 변경된 경우에만 실행한다.
-- n8n package publish는 `packages/n8n-nodes-ajam`, root package/workspace 설정, TypeScript base config, CI workflow가 변경된 경우에만 실행한다. 앱 의존성 변경으로 인한 `pnpm-lock.yaml` 변경만으로는 n8n package publish를 실행하지 않는다.
+- n8n package publish는 `packages/n8n-nodes-ajam/package.json`의 `version` 값이 변경된 경우에만 실행한다.
 - 컨테이너 시작 시 `pnpm db:seed`로 스키마와 초기 관리자 계정을 보장한다.
 - `SESSION_SECRET`은 선택값이다. 지정하면 세션 서명에 사용하고, 지정하지 않으면 앱이 랜덤 값을 생성해 DB `AppSetting`에 저장한 뒤 재사용한다.
 
 ## CI
 
-image 검증 기준은 install, lint, typecheck, web build, Docker image build, Docker `pnpm db:seed` smoke test이다. n8n node 검증 기준은 install, n8n node typecheck, n8n node build이다. `main` 브랜치 push에서는 관련 파일 변경이 있는 publish 대상만 해당 검증 성공 후 배포한다.
+image 검증 기준은 install, lint, typecheck, web build이다. n8n node 검증 기준은 install, n8n node typecheck, n8n node build이다. `main` 브랜치 push에서는 image 관련 파일이 변경된 경우 image를 배포하고, n8n package version이 변경된 경우 n8n package를 배포한다.

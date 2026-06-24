@@ -51,6 +51,7 @@
 - scoped query에서 보이지 않았다는 이유만으로 카드 캐시를 전역 stale 처리하지 않는다.
 - CI 검증은 Docker image용 `verify-image`와 n8n package용 `verify-n8n-node`로 분리해, image/web 검증 실패가 n8n custom node publish를 막지 않게 한다.
 - n8n package publish trigger에서는 `pnpm-lock.yaml`을 제외한다. lockfile은 앱 의존성 변경에도 함께 바뀔 수 있고, paths-filter는 lockfile 내부의 패키지별 영향 범위를 판별하지 못하기 때문이다.
+- n8n package publish는 `packages/n8n-nodes-ajam/package.json`의 `version` 값이 이전 main 상태와 달라진 경우에만 실행한다. GitHub Packages는 같은 version 덮어쓰기를 허용하지 않으므로, version bump 없는 n8n 변경은 검증만 하고 publish하지 않는다.
 
 ## Pending
 
