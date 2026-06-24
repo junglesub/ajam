@@ -41,7 +41,6 @@ jobs:
             n8n_node:
               - 'packages/n8n-nodes-ajam/**'
               - 'package.json'
-              - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'tsconfig.base.json'
               - '.github/workflows/ci.yml'

@@ -91,7 +91,7 @@
 - GitHub Actions는 image 검증 성공 후 GHCR에 `latest`, commit SHA, `v<run-number>-<yymmdd>` 태그를 push한다.
 - GitHub Actions는 n8n node 검증 성공 후 `packages/n8n-nodes-ajam`을 GitHub Packages npm registry에 `@junglesub/n8n-nodes-ajam`으로 publish한다.
 - GHCR image publish는 웹 앱, DB/domain/ui 패키지, Docker, workspace 설정이 변경된 경우에만 실행한다.
-- n8n package publish는 `packages/n8n-nodes-ajam` 또는 workspace/package 설정이 변경된 경우에만 실행한다.
+- n8n package publish는 `packages/n8n-nodes-ajam`, root package/workspace 설정, TypeScript base config, CI workflow가 변경된 경우에만 실행한다. 앱 의존성 변경으로 인한 `pnpm-lock.yaml` 변경만으로는 n8n package publish를 실행하지 않는다.
 - 컨테이너 시작 시 `pnpm db:seed`로 스키마와 초기 관리자 계정을 보장한다.
 - `SESSION_SECRET`은 선택값이다. 지정하면 세션 서명에 사용하고, 지정하지 않으면 앱이 랜덤 값을 생성해 DB `AppSetting`에 저장한 뒤 재사용한다.
 
