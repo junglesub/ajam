@@ -211,6 +211,7 @@ type TimesheetWorkspaceProps = {
 };
 
 const weekdays = ["월", "화", "수", "목", "금"];
+const todayRefreshIntervalMs = 60_000;
 
 const badgeToneByStatus: Record<TimesheetStatus, "blue" | "gray" | "green" | "orange" | "white"> = {
   COMPLETED: "green",
@@ -774,6 +775,25 @@ function hasWorkContentChange(savedDay: TimesheetDayDraft | undefined, currentDa
   });
 }
 
+function isDefaultFutureVacationDraft(draft: TimesheetDayDraft | undefined): boolean {
+  if (!draft) {
+    return false;
+  }
+
+  const [entry] = draft.entries;
+
+  return (
+    draft.entries.length === 1 &&
+    entry !== undefined &&
+    entry.kind === "VACATION" &&
+    entry.hours === 8 &&
+    entry.vacationName === "휴가" &&
+    !entry.content.trim() &&
+    !entry.aiTranslation.trim() &&
+    !draft.shortVersion.trim()
+  );
+}
+
 function toAiRewriteRequest(day: TimesheetDayDraft): TimesheetAiRewriteRequest | null {
   const rewriteRequested = Boolean(day.aiRewriteRequested);
   const missingAiFields = hasMissingAiFields(day);
@@ -995,6 +1015,44 @@ export function TimesheetWorkspace({
       year: browserYear
     });
   }, [initialMonthIndex, initialTodayKey, initialYear]);
+
+  useEffect(() => {
+    function refreshTodayKey() {
+      const browserTodayKey = toBrowserDateKey(new Date());
+
+      if (browserTodayKey === todayKey) {
+        return;
+      }
+
+      setTodayKey(browserTodayKey);
+
+      if (selectedDateKey !== browserTodayKey || savedEntryDateKeys.has(browserTodayKey)) {
+        return;
+      }
+
+      setRecords((current) => {
+        if (!isDefaultFutureVacationDraft(current[browserTodayKey])) {
+          return current;
+        }
+
+        const draft = createDraftForDate(browserTodayKey, current);
+
+        setSelectedEntryIdByDate((selected) => ({
+          ...selected,
+          [browserTodayKey]: draft.entries[0]?.clientId ?? ""
+        }));
+
+        return {
+          ...current,
+          [browserTodayKey]: draft
+        };
+      });
+    }
+
+    const intervalId = window.setInterval(refreshTodayKey, todayRefreshIntervalMs);
+
+    return () => window.clearInterval(intervalId);
+  }, [savedEntryDateKeys, selectedDateKey, todayKey]);
 
   useEffect(() => {
     if (!celebratingDateKey) {

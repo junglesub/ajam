@@ -24,6 +24,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - When changing months, the editor selects the first business day in the destination month and applies the same default draft and previous-project lookup behavior.
 - Future dates open with one default vacation entry because only vacation or holiday can be edited for future dates.
 - Future work creation is blocked; future vacation and holiday edits are allowed.
+- While the page stays open, the client checks the browser-local today key about once per minute. When a future selected date becomes today, it becomes writable without a page refresh; an unsaved default future vacation placeholder is replaced by the normal work draft.
 - Drafts should not count as completed until the user saves.
 
 ## Monthly Metrics
