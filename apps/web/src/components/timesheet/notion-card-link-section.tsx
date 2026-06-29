@@ -47,6 +47,7 @@ export function NotionCardLinkSection({
             const linkedHours = link.linkedHours ?? card?.linkedHours;
             const lastWorkedDate = link.lastWorkedDate ?? card?.lastWorkedDate;
             const hasMetrics = linkedHours !== undefined || Boolean(lastWorkedDate);
+            const isWeekdayDefault = link.source === "weekday_default";
 
             return (
               <div
@@ -54,7 +55,14 @@ export function NotionCardLinkSection({
                 key={link.notionPageId}
               >
                 <div className="min-w-0">
-                  <span className="block truncate font-bold text-slate-950">{title}</span>
+                  <span className="flex min-w-0 items-center gap-1">
+                    {isWeekdayDefault ? (
+                      <span className="shrink-0 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-extrabold leading-none text-slate-500">
+                        자동
+                      </span>
+                    ) : null}
+                    <span className="min-w-0 truncate font-bold text-slate-950">{title}</span>
+                  </span>
                   <span className="block truncate font-semibold text-slate-400">
                     {card?.status || link.status || "-"} · {card?.category || link.category || "미분류"}
                   </span>

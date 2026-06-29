@@ -731,7 +731,34 @@ export async function findPreviousOpenNotionCardsAction(dateKey: string): Promis
       source: "previous_business_day_default"
     }));
 
-  return [...weeklyLinks, ...previousLinks];
+  return enrichNotionLinksWithMetrics({
+    links: [...weeklyLinks, ...previousLinks],
+    userId: user.id
+  });
+}
+
+async function enrichNotionLinksWithMetrics(params: {
+  links: TimesheetEntryNotionCardDraft[];
+  userId: string;
+}): Promise<TimesheetEntryNotionCardDraft[]> {
+  const notionPageIds = [...new Set(params.links.map((link) => link.notionPageId.trim()).filter(Boolean))];
+
+  if (notionPageIds.length === 0) {
+    return params.links;
+  }
+
+  const [linkedHoursByPage, workDayCountsByPage, lastWorkedDatesByPage] = await Promise.all([
+    sumLinkedNotionHoursByPage({ notionPageIds, userId: params.userId }),
+    countLinkedNotionWorkDaysByPage({ notionPageIds, userId: params.userId }),
+    getLatestLinkedNotionWorkDateByPage({ notionPageIds, userId: params.userId })
+  ]);
+
+  return params.links.map((link) => ({
+    ...link,
+    lastWorkedDate: lastWorkedDatesByPage.get(link.notionPageId) ?? "",
+    linkedHours: linkedHoursByPage.get(link.notionPageId) ?? 0,
+    workDayCount: workDayCountsByPage.get(link.notionPageId) ?? 0
+  }));
 }
 
 export async function addProjectAction(name: string) {

@@ -64,7 +64,7 @@ import {
 
 import { NotionCardLinkSection } from "./notion-card-link-section";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
-import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
+import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidate, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
 
 type ViewMode = "calendar" | "list";
 
@@ -478,6 +478,53 @@ function createWeekdayDefaultNotionCards(dateKey: string, defaults: NotionWeekly
       status: card.status,
       title: card.title
     }));
+}
+
+function buildNotionCardSnapshotMap(params: {
+  candidatesByDate: Record<string, NotionCardCandidate[]>;
+  savedRecords: Record<string, TimesheetDayDraft>;
+}): Map<string, Partial<TimesheetEntryNotionCardDraft>> {
+  const snapshots = new Map<string, Partial<TimesheetEntryNotionCardDraft>>();
+
+  for (const day of Object.values(params.savedRecords)) {
+    for (const link of day.entries.flatMap((entry) => entry.notionCards)) {
+      snapshots.set(link.notionPageId, link);
+    }
+  }
+
+  for (const candidate of Object.values(params.candidatesByDate).flat()) {
+    snapshots.set(candidate.notionPageId, candidate);
+  }
+
+  return snapshots;
+}
+
+function mergeNotionCardSnapshot(
+  card: TimesheetEntryNotionCardDraft,
+  snapshot: Partial<TimesheetEntryNotionCardDraft> | undefined
+): TimesheetEntryNotionCardDraft {
+  if (!snapshot) {
+    return card;
+  }
+
+  return {
+    ...card,
+    category: snapshot.category ?? card.category,
+    endDate: snapshot.endDate ?? card.endDate,
+    lastWorkedDate: snapshot.lastWorkedDate ?? card.lastWorkedDate,
+    linkedHours: snapshot.linkedHours ?? card.linkedHours,
+    startDate: snapshot.startDate ?? card.startDate,
+    status: snapshot.status ?? card.status,
+    title: snapshot.title ?? card.title,
+    workDayCount: snapshot.workDayCount ?? card.workDayCount
+  };
+}
+
+function mergeNotionCardSnapshots(
+  cards: TimesheetEntryNotionCardDraft[],
+  snapshotsByPageId: Map<string, Partial<TimesheetEntryNotionCardDraft>>
+): TimesheetEntryNotionCardDraft[] {
+  return cards.map((card) => mergeNotionCardSnapshot(card, snapshotsByPageId.get(card.notionPageId)));
 }
 
 function isNotionCardOpenForDate(card: TimesheetEntryNotionCardDraft, dateKey: string, doneStatusValues: string[]): boolean {
@@ -1333,15 +1380,11 @@ export function TimesheetWorkspace({
             return entry;
           }
 
-          const existingPageIds = new Set(entry.notionCards.map((card) => card.notionPageId));
-          const nextCards = [
-            ...entry.notionCards,
-            ...cards.filter((card) => !existingPageIds.has(card.notionPageId))
-          ];
+          const cardsByPageId = new Map(cards.map((card) => [card.notionPageId, card]));
+          const nextCards = entry.notionCards.map((card) => mergeNotionCardSnapshot(card, cardsByPageId.get(card.notionPageId)));
+          const nextPageIds = new Set(nextCards.map((card) => card.notionPageId));
 
-          if (nextCards.length === entry.notionCards.length) {
-            return entry;
-          }
+          nextCards.push(...cards.filter((card) => !nextPageIds.has(card.notionPageId)));
 
           return {
             ...entry,
@@ -1398,7 +1441,14 @@ export function TimesheetWorkspace({
 
       previousNotionCardRecommendationKeys.current.add(recommendationKey);
 
-      const weekdayCards = createWeekdayDefaultNotionCards(dateKey, initialNotionWeeklyDefaults);
+      const snapshotsByPageId = buildNotionCardSnapshotMap({
+        candidatesByDate: notionCandidates.candidatesByDate,
+        savedRecords
+      });
+      const weekdayCards = mergeNotionCardSnapshots(
+        createWeekdayDefaultNotionCards(dateKey, initialNotionWeeklyDefaults),
+        snapshotsByPageId
+      );
       const previousCards = findLocalPreviousNotionCards({
         dateKey,
         doneStatusValues: initialNotionDoneStatusValues,
