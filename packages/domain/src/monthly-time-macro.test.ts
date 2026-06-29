@@ -97,7 +97,7 @@ describe("monthly time macro export", () => {
     assert.deepEqual(exportData.categories, []);
   });
 
-  it("builds focus-based macro steps with no weekend tabs and no trailing tab after the final category", () => {
+  it("builds focus-based macro steps with weekend tabs and no trailing tab after the final category", () => {
     const exportData = buildMonthlyTimeMacroExport({
       days: [
         {
@@ -121,30 +121,24 @@ describe("monthly time macro export", () => {
     });
 
     assert.equal(steps.filter((step) => step.type === "type").length, 2);
-    assert.equal(steps.filter((step) => step.type === "tab").length, 20 + 4 + 19);
+    assert.equal(steps.filter((step) => step.type === "tab").length, 28 + 4 + 27);
     assert.deepEqual(steps.slice(0, 4), [
+      { categoryId: "work:Project B", dateKey: "2026-02-01", type: "tab" },
       { categoryId: "work:Project B", dateKey: "2026-02-02", type: "tab" },
       { categoryId: "work:Project B", dateKey: "2026-02-03", type: "type", value: "8" },
-      { categoryId: "work:Project B", dateKey: "2026-02-03", type: "tab" },
-      { categoryId: "work:Project B", dateKey: "2026-02-04", type: "tab" }
+      { categoryId: "work:Project B", dateKey: "2026-02-03", type: "tab" }
     ]);
-    assert.deepEqual(steps.slice(21, 25), [
-      { categoryId: "work:Project B", dateKey: "2026-02-27", type: "tab" },
-      { categoryId: "work:Project B", dateKey: "2026-02-27", type: "tab" },
-      { categoryId: "work:Project B", dateKey: "2026-02-27", type: "tab" },
-      { categoryId: "work:Project B", dateKey: "2026-02-27", type: "tab" }
+    assert.deepEqual(steps.slice(29, 33), [
+      { categoryId: "work:Project B", dateKey: "2026-02-28", type: "tab" },
+      { categoryId: "work:Project B", dateKey: "2026-02-28", type: "tab" },
+      { categoryId: "work:Project B", dateKey: "2026-02-28", type: "tab" },
+      { categoryId: "work:Project B", dateKey: "2026-02-28", type: "tab" }
     ]);
-    assert.equal(steps.slice(21, 25).filter((step) => step.type === "tab").length, 4);
-    assert.deepEqual(
-      [...new Set(steps.map((step) => step.dateKey))].filter(
-        (dateKey) => dateKey === "2026-02-01" || dateKey === "2026-02-07" || dateKey === "2026-02-28"
-      ),
-      []
-    );
-    assert.equal(steps[25]?.categoryId, "work:Project A");
+    assert.equal(steps.slice(29, 33).filter((step) => step.type === "tab").length, 4);
+    assert.equal(steps[33]?.categoryId, "work:Project A");
     assert.equal(steps[steps.length - 1]?.categoryId, "work:Project A");
-    assert.equal(steps[steps.length - 1]?.dateKey, "2026-02-26");
+    assert.equal(steps[steps.length - 1]?.dateKey, "2026-02-27");
     assert.equal(steps[steps.length - 1]?.type, "tab");
-    assert.equal(steps.some((step) => step.categoryId === "work:Project A" && step.dateKey === "2026-02-27"), false);
+    assert.equal(steps.some((step) => step.categoryId === "work:Project A" && step.dateKey === "2026-02-28"), false);
   });
 });

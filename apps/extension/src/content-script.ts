@@ -4,6 +4,7 @@
     | { categoryId: string; dateKey: string; type: "type"; value: string };
 
   type AjamTimeMacroState = {
+    activeRunId?: string;
     cancelWaiting?: () => void;
     progressOverlay?: OverlayController;
     listenerInstalled: boolean;
@@ -25,6 +26,7 @@
     completed?: number;
     error?: string;
     options?: unknown;
+    runId?: unknown;
     source?: string;
     steps?: unknown;
     total?: number;
@@ -66,6 +68,14 @@
 
   function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  function createRunId(): string {
+    if (typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   }
 
   function isMacroStartTarget(target: EventTarget | null): boolean {
@@ -213,16 +223,20 @@
     }
   }
 
-  function broadcastCancelWaiting(): void {
-    broadcastToFrames({ source: "ajam-time-macro", type: "AJAM_TIME_MACRO_CANCEL_WAITING" });
+  function isRunMessage(message: AjamWindowMessage, runId: string): boolean {
+    return message.runId === runId;
   }
 
-  function broadcastStopMacro(): void {
-    broadcastToFrames({ source: "ajam-time-macro", type: "AJAM_TIME_MACRO_STOP" });
+  function broadcastCancelWaiting(runId: string): void {
+    broadcastToFrames({ runId, source: "ajam-time-macro", type: "AJAM_TIME_MACRO_CANCEL_WAITING" });
   }
 
-  function notifyMacroStarted(): void {
-    postToTop({ source: "ajam-time-macro", type: "AJAM_TIME_MACRO_FRAME_STARTED" });
+  function broadcastStopMacro(runId: string): void {
+    broadcastToFrames({ runId, source: "ajam-time-macro", type: "AJAM_TIME_MACRO_STOP" });
+  }
+
+  function notifyMacroStarted(runId: string): void {
+    postToTop({ runId, source: "ajam-time-macro", type: "AJAM_TIME_MACRO_FRAME_STARTED" });
   }
 
   function requestDebuggerStop(): void {
@@ -263,11 +277,12 @@
     }
   }
 
-  async function waitForUserStart(steps: MacroStep[], options: MacroRunOptions): Promise<void> {
+  async function waitForUserStart(steps: MacroStep[], options: MacroRunOptions, runId: string): Promise<void> {
     if (state.running || state.waiting) {
       throw new Error("이미 시간 입력을 실행 중입니다.");
     }
 
+    state.activeRunId = runId;
     state.waiting = true;
     state.stopped = false;
     state.silentCancelWaiting = false;
@@ -287,6 +302,7 @@
         state.waiting = false;
 
         if (params.removeOverlay) {
+          state.activeRunId = undefined;
           overlay.remove();
         }
       }
@@ -307,7 +323,7 @@
         }
 
         settled = true;
-        notifyMacroStarted();
+        notifyMacroStarted(runId);
         cleanup({ removeOverlay: false });
         resolve();
       }
@@ -357,15 +373,16 @@
     } finally {
       state.progressOverlay = undefined;
       state.cancelWaiting = undefined;
+      state.activeRunId = undefined;
       progressOverlay.remove();
     }
   }
 
-  function runWaitingMacroFromFrame(steps: MacroStep[], options: MacroRunOptions): void {
-    void waitForUserStart(steps, options)
+  function runWaitingMacroFromFrame(steps: MacroStep[], options: MacroRunOptions, runId: string): void {
+    void waitForUserStart(steps, options, runId)
       .then(() => {
         state.silentCancelWaiting = false;
-        postToTop({ source: "ajam-time-macro", type: "AJAM_TIME_MACRO_FRAME_DONE" });
+        postToTop({ runId, source: "ajam-time-macro", type: "AJAM_TIME_MACRO_FRAME_DONE" });
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "실행 실패";
@@ -378,6 +395,7 @@
         state.silentCancelWaiting = false;
         postToTop({
           error: message,
+          runId,
           source: "ajam-time-macro",
           type: "AJAM_TIME_MACRO_FRAME_ERROR"
         });
@@ -385,8 +403,10 @@
   }
 
   function coordinateWaitingMacro(steps: MacroStep[], options: MacroRunOptions): Promise<void> {
+    const runId = createRunId();
+
     if (!isTopFrame()) {
-      return waitForUserStart(steps, options);
+      return waitForUserStart(steps, options, runId);
     }
 
     if (state.running || state.waiting) {
@@ -406,6 +426,7 @@
         state.running = false;
         state.waiting = false;
         state.cancelWaiting = undefined;
+        state.activeRunId = undefined;
 
         if (error) {
           reject(new Error(error));
@@ -420,10 +441,15 @@
           return;
         }
 
+        if (!isRunMessage(event.data, runId)) {
+          return;
+        }
+
         if (event.data.type === "AJAM_TIME_MACRO_FRAME_STARTED") {
           state.waiting = false;
           state.running = true;
-          broadcastCancelWaiting();
+          state.activeRunId = runId;
+          broadcastCancelWaiting(runId);
           return;
         }
 
@@ -438,7 +464,8 @@
       }
 
       window.addEventListener("message", handleFrameMessage);
-      broadcastToFrames({ options, source: "ajam-time-macro", steps, type: "AJAM_TIME_MACRO_START_WAITING" });
+      state.activeRunId = runId;
+      broadcastToFrames({ options, runId, source: "ajam-time-macro", steps, type: "AJAM_TIME_MACRO_START_WAITING" });
     });
   }
 
@@ -452,7 +479,9 @@
       state.stopped = true;
       state.cancelWaiting?.();
       requestDebuggerStop();
-      broadcastStopMacro();
+      if (state.activeRunId) {
+        broadcastStopMacro(state.activeRunId);
+      }
       sendResponse({ ok: true });
       return false;
     }
@@ -490,10 +519,15 @@
 
     if (event.data.type === "AJAM_TIME_MACRO_START_WAITING") {
       try {
-        runWaitingMacroFromFrame(parseSteps(event.data.steps), parseOptions(event.data.options));
+        if (typeof event.data.runId !== "string" || (!isTopFrame() && event.source !== window.parent)) {
+          return;
+        }
+
+        runWaitingMacroFromFrame(parseSteps(event.data.steps), parseOptions(event.data.options), event.data.runId);
       } catch (error) {
         postToTop({
           error: error instanceof Error ? error.message : "실행 실패",
+          runId: event.data.runId,
           source: "ajam-time-macro",
           type: "AJAM_TIME_MACRO_FRAME_ERROR"
         });
@@ -501,7 +535,7 @@
     }
 
     if (event.data.type === "AJAM_TIME_MACRO_CANCEL_WAITING") {
-      if (!state.waiting) {
+      if (!state.waiting || !state.activeRunId || !isRunMessage(event.data, state.activeRunId)) {
         return;
       }
 
@@ -510,13 +544,19 @@
     }
 
     if (event.data.type === "AJAM_TIME_MACRO_STOP") {
+      if (!state.activeRunId || !isRunMessage(event.data, state.activeRunId)) {
+        return;
+      }
+
       state.stopped = true;
       state.cancelWaiting?.();
       requestDebuggerStop();
     }
 
     if (event.data.type === "AJAM_TIME_MACRO_FRAME_STARTED") {
-      broadcastCancelWaiting();
+      if (state.activeRunId && isRunMessage(event.data, state.activeRunId)) {
+        broadcastCancelWaiting(state.activeRunId);
+      }
     }
   });
 })();

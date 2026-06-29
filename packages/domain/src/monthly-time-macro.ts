@@ -85,10 +85,6 @@ function getWeekday(dateKey: string): number {
   return new Date(`${dateKey}T00:00:00.000Z`).getUTCDay();
 }
 
-function isWeekend(weekday: number): boolean {
-  return weekday === 0 || weekday === 6;
-}
-
 function formatHours(hours: number): string {
   if (!Number.isFinite(hours) || hours <= 0) {
     return "";
@@ -243,13 +239,12 @@ export function buildMonthlyTimeMacroSteps(params: {
 
   for (const [categoryIndex, category] of categories.entries()) {
     const isLastCategory = categoryIndex === categories.length - 1;
-    const businessDays = category.days.filter((day) => !isWeekend(day.weekday));
-    let lastWeekdayDateKey: string | null = null;
+    let lastDateKey: string | null = null;
 
-    for (const [dayIndex, day] of businessDays.entries()) {
-      const isLastDay = dayIndex === businessDays.length - 1;
+    for (const [dayIndex, day] of category.days.entries()) {
+      const isLastDay = dayIndex === category.days.length - 1;
 
-      lastWeekdayDateKey = day.dateKey;
+      lastDateKey = day.dateKey;
 
       if (day.value) {
         steps.push({ categoryId: category.id, dateKey: day.dateKey, type: "type", value: day.value });
@@ -260,7 +255,7 @@ export function buildMonthlyTimeMacroSteps(params: {
       }
     }
 
-    const boundaryDateKey = lastWeekdayDateKey ?? `${params.exportData.month}-01`;
+    const boundaryDateKey = lastDateKey ?? `${params.exportData.month}-01`;
 
     if (!isLastCategory) {
       for (let index = 0; index < 4; index += 1) {

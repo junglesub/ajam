@@ -189,8 +189,6 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - The time macro runs in the active page content script. The popup queries the active tab for `GET_AJAM_TIME_MACRO_STATUS` during startup so reopening the popup while a macro is waiting or running shows the stop button again.
 - Missing content-script receivers are treated as no active macro for status restore, so normal pages without an injected macro do not show an error.
 - Refresh and run actions are guarded locally while data is loading or a macro is running. If `시간 입력 실행` needs to load monthly data first, the popup disables overlapping refresh/run clicks before that implicit load starts.
-- Content entry mode is intentionally deferred.
-
 ## Vacation Range Save
 
 - `기간 저장` is available only when the selected date has exactly one vacation entry.
