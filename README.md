@@ -45,6 +45,7 @@ docker compose up -d
 ```
 
 컨테이너 시작 시 `pnpm db:seed`로 스키마와 초기 관리자 계정을 보장한 뒤 Next.js 서버를 시작합니다. SQLite DB는 서버의 `./ajam-data` 디렉터리에 저장됩니다.
+Docker healthcheck는 Node.js 내장 `fetch`로 `GET /api/health`를 호출해 Next.js 서버가 HTTP 요청을 받을 수 있는지 확인합니다.
 
 ## 환경변수
 
@@ -59,6 +60,10 @@ docker compose up -d
 | `AJAM_SECRET` | 선택 | DB 저장값 자동 생성 | 사용자별 Gemini API key와 Notion token 암호화에 사용하는 앱 secret입니다. |
 
 공공데이터포털 서비스 키는 환경변수가 아니라 관리자 설정 화면에서 저장합니다.
+
+## 운영 확인
+
+- `GET /api/health`: Docker healthcheck용 liveness endpoint입니다. DB나 외부 API를 조회하지 않고 웹 서버 응답 가능 여부만 확인합니다.
 
 ## n8n custom node 설치
 

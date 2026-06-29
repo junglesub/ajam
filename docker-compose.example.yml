@@ -14,3 +14,14 @@ services:
       # AJAM_INTERNAL_API_TOKEN: change-this-token-for-n8n
     volumes:
       - ./ajam-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - --input-type=module
+        - -e
+        - "try { const r = await fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/api/health'); process.exit(r.ok ? 0 : 1); } catch { process.exit(1); }"
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
