@@ -2716,6 +2716,7 @@ export function TimesheetWorkspace({
       const savedEntry = withClientIds(saveResult.day);
 
       updateAiRewriteRequestsFromDays([savedEntry]);
+      notionCandidates.updateCandidatesFromDay(savedEntry);
       showNotionSyncError(saveResult.notionSyncError);
       setRecords((current) => ({
         ...current,

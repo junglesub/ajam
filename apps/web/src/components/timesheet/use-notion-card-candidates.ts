@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from "react";
 
+import type { TimesheetDayDraft } from "@timesheet/domain";
+
 export type NotionCardCandidate = {
   archived: boolean;
   availableHours?: {
@@ -76,12 +78,45 @@ export function useNotionCardCandidates(params: {
     });
   }
 
+  function updateCandidatesFromDay(day: TimesheetDayDraft) {
+    const metricsByPageId = new Map(
+      day.entries
+        .flatMap((entry) => entry.notionCards)
+        .map((link) => [
+          link.notionPageId,
+          {
+            lastWorkedDate: link.lastWorkedDate,
+            linkedHours: link.linkedHours,
+            workDayCount: link.workDayCount
+          }
+        ])
+    );
+
+    if (metricsByPageId.size === 0) {
+      return;
+    }
+
+    setCandidatesByDate((current) =>
+      Object.fromEntries(
+        Object.entries(current).map(([dateKey, candidates]) => [
+          dateKey,
+          candidates.map((candidate) => {
+            const metrics = metricsByPageId.get(candidate.notionPageId);
+
+            return metrics ? { ...candidate, ...metrics } : candidate;
+          })
+        ])
+      )
+    );
+  }
+
   return {
     candidatesByDate,
     error,
     isPending,
     loadCandidates,
     refreshCandidates,
-    syncByDate
+    syncByDate,
+    updateCandidatesFromDay
   };
 }

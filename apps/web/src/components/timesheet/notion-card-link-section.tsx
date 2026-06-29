@@ -44,8 +44,8 @@ export function NotionCardLinkSection({
           {entry.notionCards.map((link) => {
             const card = candidates.find((candidate) => candidate.notionPageId === link.notionPageId);
             const title = card?.title || link.title || link.notionPageId;
-            const linkedHours = card?.linkedHours ?? link.linkedHours;
-            const lastWorkedDate = card?.lastWorkedDate ?? link.lastWorkedDate;
+            const linkedHours = link.linkedHours ?? card?.linkedHours;
+            const lastWorkedDate = link.lastWorkedDate ?? card?.lastWorkedDate;
             const hasMetrics = linkedHours !== undefined || Boolean(lastWorkedDate);
 
             return (

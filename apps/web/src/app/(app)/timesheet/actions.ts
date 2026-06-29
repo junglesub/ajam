@@ -45,6 +45,7 @@ import {
   type TimesheetDayDraft,
   type TimesheetEntryNotionCardDraft
 } from "@timesheet/domain";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { createSession, destroySession, getSession } from "@/server/session";
@@ -311,9 +312,13 @@ export async function saveTimesheetEntryAction(day: TimesheetDayDraft): Promise<
   const savedDay = await saveTimesheetDay({ day: normalizedDay, userId: user.id });
 
   const notionSyncError = await syncNotionWorkHoursAfterTimesheetSave({ notionPageIds: affectedNotionPageIds, userId: user.id });
+  const [freshSavedDay] = await listTimesheetEntries({ endDateKey: normalizedDay.dateKey, startDateKey: normalizedDay.dateKey, userId: user.id });
+
+  revalidatePath("/notion-cards");
+  revalidatePath("/timesheet");
 
   return {
-    day: savedDay,
+    day: freshSavedDay ?? savedDay,
     notionSyncError
   };
 }
@@ -346,6 +351,9 @@ export async function deleteTimesheetEntryAction(dateKey: string): Promise<Times
 
   await deleteTimesheetEntry({ dateKey, userId: user.id });
   const notionSyncError = await syncNotionWorkHoursAfterTimesheetSave({ notionPageIds: affectedNotionPageIds, userId: user.id });
+
+  revalidatePath("/notion-cards");
+  revalidatePath("/timesheet");
 
   return {
     notionSyncError
