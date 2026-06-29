@@ -3,9 +3,15 @@ version = 1
 name = "ajam"
 
 [setup]
+script = ""
+
+[setup.win32]
 script = '''
+cp "$env:CODEX_SOURCE_TREE_PATH\packages\db\prisma\dev.db" "$env:CODEX_WORKTREE_PATH\packages\db\prisma\dev.db" -Force
+
+
 corepack enable
-pnpm install
+corepack pnpm install
 pnpm db:generate
 pnpm db:seed
 '''

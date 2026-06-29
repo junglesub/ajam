@@ -161,6 +161,36 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - If vacation range save covers a month whose holiday load previously failed, that month is retried before deciding which dates are holidays.
 - In development only, admins can delete all cached data.go.kr holidays for debugging.
 
+## Chrome Extension Time Macro
+
+- The Chrome extension stores its own aJam connection in `chrome.storage.local`, including access token, refresh token, base URL, connected username, category order, disabled category IDs, last selected month, and the optional zoom-out-before-macro toggle.
+- Starting a new extension connection opens the aJam approval tab and persists a pending connection handoff with the base URL and approval tab ID. The popup can close safely; when reopened, the same connect button asks for the copied code and exchanges it.
+- If the pending approval tab was closed before the code was copied, canceling the code prompt offers to clear the old pending handoff and open a fresh approval tab for a new code.
+- Category ordering and disabled category IDs remain stored per aJam base URL and connected username, and pending connection state does not replace the saved category preference maps.
+- The monthly export groups work by project, vacation by vacation name, and holidays under `공휴일`.
+- Zero-hour holiday entries and official holidays export as `8` hours in the `공휴일` category for time macro input.
+- Work category day exports include the saved day-level `짧은 버전`, so the extension can run content entry separately from time entry.
+- Clicking `시간 입력 실행` injects the content script, closes the popup after the run request is accepted, and shows a page overlay in a waiting state. The macro starts only after the user clicks the desired first time input, grid cell, or spreadsheet cell in the page.
+- In `내용 입력` mode, the user selects exactly one category. The macro skips dates in that category with no hours, types the date's `짧은 버전` when present, sends Tab twice, and repeats through the selected category only.
+- The content script is injected into all accessible frames so iframe-based timesheet screens can start from a clicked iframe cell.
+- Standard inputs, textareas, contenteditable elements, `td`/`th` cells, and common JavaScript grid roles such as `gridcell` or `textbox` are treated as editable macro targets.
+- After the starting click, the macro waits 1 second before input so the target page can finish focusing or opening its cell editor.
+- The extension uses Chrome Debugger keyboard input only, sending text and Tab events to the focused page target instead of directly setting DOM values.
+- If the popup option `실행 시 최대 축소 후 복구` is enabled, the debugger runner stores the current active-tab zoom, tries to zoom the tab out to Chrome's minimum zoom factor before typing, and restores the original zoom after completion, error, or stop.
+- The previous DOM/event input fallback is intentionally disabled so the time macro does not run through two input paths on compatible test pages or JavaScript grids.
+- Debugger input can start from non-editable spreadsheet surfaces such as Google Sheets-style canvas or JavaScript grid cells. Frame-level cancel-waiting signals are ignored after a frame has started so they do not appear as an immediate user stop.
+- The page overlay can cancel the waiting macro before any typing starts and can request a stop while debugger input is running.
+- During execution, the page overlay shows completed and remaining macro actions.
+- Weekend cells are assumed to exist in the external screen, so they receive Tab movement even when they have no value.
+- Unchecked categories are excluded from the preview and macro execution.
+- Date cells receive a value when the selected category has hours for that date, then move with Tab.
+- Empty date cells move with Tab only.
+- After each non-final category reaches the end of the month, the macro sends four extra Tab actions before the next category. The final category does not send the final day Tab or any extra trailing Tabs.
+- The time macro runs in the active page content script. The popup queries the active tab for `GET_AJAM_TIME_MACRO_STATUS` during startup so reopening the popup while a macro is waiting or running shows the stop button again.
+- Missing content-script receivers are treated as no active macro for status restore, so normal pages without an injected macro do not show an error.
+- Refresh and run actions are guarded locally while data is loading or a macro is running. If `시간 입력 실행` needs to load monthly data first, the popup disables overlapping refresh/run clicks before that implicit load starts.
+- Content entry mode is intentionally deferred.
+
 ## Vacation Range Save
 
 - `기간 저장` is available only when the selected date has exactly one vacation entry.

@@ -26,12 +26,12 @@
 - GHCR Docker image 자동 publish
 - Chrome extension 기반 월말 시간 입력 매크로 MVP
 - 확장 전용 aJam 연결로 월간 업무/휴가/공휴일 시간 데이터 자동 불러오기
+- Chrome extension 내용 입력 모드에서 선택한 한 카테고리의 날짜별 `짧은 버전` 매크로 입력
 
 ## Not In Current Scope
 
 - 실시간 자동 저장
 - 휴가 관리/승인 시스템 연동
-- Chrome extension 내용 입력 모드
 - Notion OAuth 연결과 webhook 기반 실시간 동기화
 - Notion 원본 카드 수정
 

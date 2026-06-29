@@ -1,0 +1,145 @@
+body {
+  margin: 0;
+  width: 360px;
+  background: #f8fafc;
+  color: #0f172a;
+  font: 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #0f172a;
+  cursor: pointer;
+  padding: 7px 10px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.popup {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.connection,
+.sectionTitle,
+.preview,
+.modes {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.modes button {
+  flex: 1;
+}
+
+.modes .active,
+.primary {
+  border-color: #0f766e;
+  background: #0f766e;
+  color: #fff;
+}
+
+.secondary {
+  border-color: #be123c;
+  background: #be123c;
+  color: #fff;
+}
+
+.field {
+  display: grid;
+  gap: 5px;
+}
+
+.field span,
+.sectionTitle strong {
+  font-weight: 700;
+}
+
+.field input {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.categoryList {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  max-height: 150px;
+  overflow: auto;
+  padding: 0;
+}
+
+.categoryList li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  padding: 7px;
+}
+
+.categoryList input[type="checkbox"] {
+  margin: 0;
+}
+
+.optionRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 10px;
+}
+
+.optionRow input {
+  margin: 0;
+}
+
+.disabledCategory span {
+  color: #64748b;
+  text-decoration: line-through;
+}
+
+.preview {
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 10px 0;
+}
+
+.preview div {
+  display: grid;
+  gap: 2px;
+  text-align: center;
+}
+
+.preview dt {
+  color: #64748b;
+}
+
+.preview dd {
+  margin: 0;
+  font-weight: 800;
+}
+
+.status {
+  min-height: 18px;
+  margin: 0;
+  color: #475569;
+}

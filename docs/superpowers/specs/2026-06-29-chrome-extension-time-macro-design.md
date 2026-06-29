@@ -10,20 +10,20 @@ The extension uses a macro model: the user places the cursor in the external pag
 
 - Provide a Chrome extension popup with two modes: time entry and content entry.
 - Fully implement time entry mode.
-- Leave content entry mode as a disabled or "coming later" entry point.
+- Implement content entry mode for one selected category at a time.
 - Load monthly category/date/hour data automatically from aJam.
 - Authenticate the extension through a dedicated aJam connection flow, not by reusing browser session cookies.
 - Run from the user's current cursor position in the target page.
-- Skip weekends without entering values.
-- Move from the end of one category to the next category with five extra Tab actions.
-- Let users control the category order.
+- Move through weekend cells without entering values.
+- Move from the end of one category to the next category with four extra Tab actions, and do not send the final day Tab or extra trailing Tabs after the final category.
+- Let users control category activation and order.
 - Document the integration and keep existing product decision documents current.
 
 ## Non-Goals
 
 - The extension will not parse or depend on the external timesheet page's DOM structure in the first release.
 - The extension will not submit the external company form.
-- The extension will not implement content entry mode in this scope.
+- The extension will not submit content entry results automatically.
 - The extension will not use aJam's normal session cookie for extension API calls.
 - The extension will not store the user's aJam password.
 
@@ -37,11 +37,13 @@ The extension uses a macro model: the user places the cursor in the external pag
 6. The extension exchanges that code for a short-lived access token and a long-lived refresh token.
 7. The user chooses the target month in the extension popup.
 8. The extension requests the monthly time macro export from aJam.
-9. The popup shows the category order and an execution preview.
-10. The user places the cursor on the external timesheet page's first time input.
-11. The user clicks `시간 입력 실행`.
-12. The content script types each value and sends Tab actions according to the macro plan.
+9. The popup shows category activation, category order, and an execution preview.
+10. The user clicks `시간 입력 실행`.
+11. The user clicks the starting input, grid cell, or spreadsheet cell on the external timesheet page.
+12. The extension sends Debugger keyboard input and Tab actions according to the macro plan.
 13. The popup reports completion, cancellation, or the first blocking error.
+
+For content entry mode, the user switches to `내용 입력`, selects one category, clicks `내용 입력 실행`, then clicks the first external content cell. The macro enters only dates in that category that have hours, skips dates without hours, and uses two Tab actions after each target date.
 
 ## Terminology
 
@@ -117,7 +119,7 @@ The export should include only the data needed by the extension:
       "kind": "work",
       "label": "Project A",
       "days": [
-        { "dateKey": "2026-06-01", "day": 1, "weekday": 1, "hours": 8, "value": "8" }
+        { "contentValue": "짧은 버전", "dateKey": "2026-06-01", "day": 1, "weekday": 1, "hours": 8, "value": "8" }
       ]
     },
     {
@@ -125,7 +127,7 @@ The export should include only the data needed by the extension:
       "kind": "vacation",
       "label": "휴가",
       "days": [
-        { "dateKey": "2026-06-12", "day": 12, "weekday": 5, "hours": 8, "value": "8" }
+        { "contentValue": "", "dateKey": "2026-06-12", "day": 12, "weekday": 5, "hours": 8, "value": "8" }
       ]
     },
     {
@@ -133,24 +135,26 @@ The export should include only the data needed by the extension:
       "kind": "holiday",
       "label": "공휴일",
       "days": [
-        { "dateKey": "2026-06-06", "day": 6, "weekday": 6, "hours": 0, "value": "" }
+        { "contentValue": "", "dateKey": "2026-06-06", "day": 6, "weekday": 6, "hours": 8, "value": "8" }
       ]
     }
   ]
 }
 ```
 
-Holidays are included as categories so users can order them consistently with the external screen. If a holiday falls on a weekend, the macro still skips the weekend field because weekends are not input targets in the external screen.
+Holidays are included as categories so users can order them consistently with the external screen. Weekend fields are treated as present in the external screen, so they receive Tab movement even when they do not receive typed values.
 
 ## Category Construction
 
 The server groups saved aJam entries into large categories:
 
 - Work entries group by project name, with blank project names grouped under `프로젝트 없음`.
+- The saved day-level `짧은 버전` is copied into each work category day with hours as `contentValue`.
 - Vacation entries group by vacation name, with blank vacation names grouped under `휴가`.
 - Holiday entries and official holidays group under `공휴일`.
+- Zero-hour holiday entries and official holidays export as `8` hours for the holiday category.
 
-For each category, the export covers day 1 through the last day of the selected month. Days without category hours are represented in the macro plan as empty weekdays that require only Tab movement. Weekend days are represented as skipped dates and do not receive input.
+For each category, the export covers day 1 through the last day of the selected month. Days without category hours, including weekends, are represented in the macro plan as empty dates that require only Tab movement.
 
 When a day has multiple work entries in the same project, the category day value is the sum of those hours. When a day has multiple projects, each project category receives its own hours for that date.
 
@@ -161,42 +165,49 @@ The popup should be compact and task-focused.
 - Top connection state: connected username, `aJam 연결`, `다시 연결`, or disconnect action.
 - Mode controls:
   - `시간 입력`: enabled.
-  - `내용 입력`: disabled with short pending state.
+  - `내용 입력`: enabled.
 - Month selector.
-- Category order list with move up/down controls.
+- Category list with activation checkboxes and move up/down controls.
 - Refresh action to reload the monthly export.
+- Optional checkbox `실행 시 최대 축소 후 복구` for targets that benefit from seeing more columns while the macro runs.
 - Preview counters:
   - categories count.
-  - filled weekday cells count.
-  - skipped weekend count.
-  - blank weekday tab count.
+  - filled cells count.
+  - weekend tab count.
+  - blank tab count.
 - Primary action: `시간 입력 실행`.
 - Stop action while running.
 
-The extension stores category order locally per aJam base URL and user connection. New categories not seen before appear after known categories in the default server order.
+In content entry mode, the category list behaves as a single-choice selector. The selected category controls the content macro; category order and activation preferences remain available for time entry mode.
+
+The extension stores category order and disabled category IDs locally per aJam base URL and user connection. New categories not seen before appear after known categories in the default server order and are active by default.
 
 ## Macro Execution Design
 
-Execution happens in a content script injected into the active tab.
+Execution is coordinated by a content script injected into the active tab and performed through Chrome Debugger keyboard input.
 
-For each category in the chosen order:
+For each active category in the chosen order:
 
 1. Iterate from day 1 through the last day of the month.
-2. If the date is Saturday or Sunday, do not type and do not Tab for that date.
-3. If the date is a weekday with a value, type the value into the currently focused editable field.
-4. Press Tab once after each weekday field, whether a value was typed or the field is blank.
-5. After the last calendar day, press Tab five additional times to move to the next category's first day.
-6. Repeat until all categories are complete.
+2. If the date has a value, type the value into the currently focused page target.
+3. Press Tab once after each date, including weekends and blank dates.
+5. After the last calendar day of a non-final category, press Tab four additional times to move to the next category's first day.
+6. For the final category, do not press Tab after its last calendar day.
+7. Repeat until all categories are complete.
 
-The content script should support standard inputs, textareas, and contenteditable fields. Typing should dispatch input/change events so common web forms notice the update.
+The content script should show the waiting/progress overlay and wait for the user's start click. The background service worker sends text and Tab key events through Chrome Debugger; the old DOM/event input fallback is intentionally disabled.
 
-The macro is intentionally based on the current focus. The extension should not attempt to find or validate the external page's table structure in the first release.
+The macro is intentionally based on the current focus. The extension should not attempt to find or validate the external page's table structure.
+
+When the zoom-out option is enabled, the background service worker records the active tab's current zoom factor, tries to set Chrome tab zoom to the minimum supported factor before Debugger typing begins, and restores the original zoom in the macro cleanup path after success, failure, or user stop.
+
+Content entry uses the same execution bridge. For the selected category only, it iterates through days that have a time value. For each target day, it types the day-level `짧은 버전` exposed as `contentValue` when non-empty, then sends two Tab actions before moving to the next target day. Days without a time value are not represented in the content macro.
 
 ## Safety And Error Handling
 
 - Before running, the popup checks that the active tab can receive content scripts.
-- Before the first input, the content script checks that an editable element is focused.
-- If there is no focused editable element, execution stops with a clear message asking the user to place the cursor in the first time input.
+- Before the first input, the content script waits for the user to click the starting input, grid cell, or spreadsheet cell.
+- If Chrome Debugger input cannot run, execution stops with a clear error instead of falling back to DOM writes.
 - The user can stop execution from the popup.
 - Macro execution should use a small delay between actions so the target page can react to key events.
 - The extension never submits the external page automatically.
@@ -228,7 +239,9 @@ The extension stores:
 - refresh token.
 - connected username.
 - category order preferences.
+- disabled category preferences.
 - last selected month.
+- zoom-out-before-macro preference.
 
 Tokens are stored in `chrome.storage.local`. The extension does not store the user's aJam password.
 
@@ -239,7 +252,7 @@ Tokens are stored in `chrome.storage.local`. The extension does not store the us
 - Build category exports from mixed work, vacation, and holiday records.
 - Sum multiple work entries in the same project/date.
 - Split multiple projects on the same date into separate category day values.
-- Exclude weekend input actions from the generated macro steps.
+- Include weekend Tab actions in the generated macro steps.
 - Reject expired and reused connection codes.
 - Reject invalid or revoked refresh tokens.
 - Require extension scope for monthly macro export.
@@ -247,11 +260,12 @@ Tokens are stored in `chrome.storage.local`. The extension does not store the us
 ### Extension Tests
 
 - Generate macro action sequences for month lengths of 28, 29, 30, and 31 days.
-- Verify weekend dates do not type or Tab.
-- Verify weekday blanks Tab once.
-- Verify category boundary adds five extra Tabs.
-- Verify content script refuses to run without an editable focused element.
-- Verify content script dispatches input/change events when setting values.
+- Generate content macro action sequences that skip no-hour dates and send two Tabs per entered date.
+- Verify weekend dates Tab once.
+- Verify blank dates Tab once.
+- Verify category boundary adds four extra Tabs only between categories and omits the final category's last-day Tab.
+- Verify content script waits for a user start click before requesting Debugger input.
+- Verify Debugger input failure does not fall back to DOM/event input.
 
 ### Manual Verification
 

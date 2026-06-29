@@ -101,7 +101,7 @@ describe("monthly time macro export", () => {
     assert.equal(exportData.categories[3]?.days.find((day) => day.dateKey === "2026-06-03")?.value, "");
   });
 
-  it("builds focus-based macro steps with no weekend tabs and five category-boundary tabs", () => {
+  it("builds focus-based macro steps with weekend tabs and four category-boundary tabs only between categories", () => {
     const exportData = buildMonthlyTimeMacroExport({
       days: [
         { dateKey: "2026-02-02", entries: [{ kind: "WORK", project: "Project A", vacationName: "", holidayName: "", hours: 8 }] },
@@ -116,7 +116,7 @@ describe("monthly time macro export", () => {
     });
 
     assert.equal(steps.filter((step) => step.type === "type").length, 2);
-    assert.equal(steps.filter((step) => step.type === "tab").length, 20 + 5 + 20 + 5);
+    assert.equal(steps.filter((step) => step.type === "tab").length, 20 + 4 + 20);
     assert.deepEqual(steps.slice(0, 3), [
       { categoryId: "work:Project A", dateKey: "2026-02-02", type: "type", value: "8" },
       { categoryId: "work:Project A", dateKey: "2026-02-02", type: "tab" },
@@ -2029,11 +2029,11 @@ Add this section to `docs/timesheet-workflow.md` before `## Verification`:
 - The Chrome extension time-entry MVP reads monthly macro data through extension-specific auth, not through the normal web session cookie.
 - Users connect the extension with `aJam 연결`, then the extension stores its own access token and refresh token locally.
 - The monthly export groups work by project, vacation by vacation name, and holidays under `공휴일`.
-- Macro execution starts from the user's current focused input in the external timesheet page.
-- Weekends do not receive values or Tab movement.
-- Weekday cells receive a value when the selected category has hours for that date, then move with Tab.
-- Empty weekday cells move with Tab only.
-- After each category reaches the end of the month, the macro sends five extra Tab actions before the next category.
+- Macro execution starts from the user's clicked input, grid cell, or spreadsheet cell in the external timesheet page.
+- Weekend cells are assumed to exist in the external screen, so they receive Tab movement even when they have no value.
+- Date cells receive a value when the selected category has hours for that date, then move with Tab.
+- Empty date cells move with Tab only.
+- After each non-final category reaches the end of the month, the macro sends four extra Tab actions before the next category; the final category omits its last-day Tab and any extra trailing Tabs.
 - Content entry mode is intentionally deferred.
 ```
 
@@ -2087,6 +2087,6 @@ Do not run `pnpm build` unless the user explicitly asks for a build.
 
 ## Plan Self-Review
 
-- Spec coverage: the plan covers extension auth, monthly export, category ordering, focus-based macro execution, weekend skipping, five boundary Tabs, disabled content mode, storage, docs, and verification.
+- Spec coverage: the plan covers extension auth, monthly export, category ordering, focus-based macro execution, weekend skipping, category-boundary Tabs, disabled content mode, storage, docs, and verification.
 - Placeholder scan: no `TBD`, `TODO`, or incomplete implementation instructions are intentionally left in this plan.
 - Type consistency: names used across tasks are consistent: `ExtensionConnection`, `monthly_time_macro:read`, `buildMonthlyTimeMacroExport`, `buildMonthlyTimeMacroSteps`, and `/api/extension/monthly-time-macro`.

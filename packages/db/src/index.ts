@@ -14,6 +14,18 @@ export type { ManagedUser, UserRole } from "./settings-store";
 export { ensureReminderSchema, listDailyTimesheetReminderTargets, markDailyTimesheetReminderSent } from "./reminder-store";
 export type { DailyTimesheetReminderResult, DailyTimesheetReminderTarget } from "./reminder-store";
 export {
+  createExtensionConnectionCode,
+  createExtensionConnectionCodeDisplay,
+  ensureExtensionAuthSchema,
+  exchangeExtensionConnectionCode,
+  getExtensionConnection,
+  getExtensionConnectionCodeForDisplay,
+  getMonthlyTimeMacroExportForUser,
+  revokeExtensionConnection,
+  rotateExtensionRefreshToken
+} from "./extension-auth-store";
+export type { ExtensionConnection, ExtensionConnectionCode, ExtensionConnectionCodeDisplay, ExtensionRefreshResult } from "./extension-auth-store";
+export {
   ensureNotionSchema,
   countLinkedNotionWorkDaysByPage,
   getLatestNotionSyncRun,

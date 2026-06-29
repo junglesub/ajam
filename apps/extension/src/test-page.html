@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>aJam macro test page</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 24px;
+      }
+
+      input,
+      td {
+        margin: 3px;
+        width: 48px;
+      }
+
+      table {
+        border-collapse: collapse;
+      }
+
+      td {
+        border: 1px solid #cbd5e1;
+        height: 24px;
+        padding: 3px;
+        text-align: right;
+      }
+
+      iframe {
+        border: 1px solid #94a3b8;
+        height: 220px;
+        width: 100%;
+      }
+
+      section {
+        margin: 16px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>aJam macro test page</h1>
+    <h2>Inputs</h2>
+    <section id="inputs"></section>
+    <h2>Script-backed cells</h2>
+    <section id="cells"></section>
+    <h2>Iframe script-backed cells</h2>
+    <iframe id="frame" title="iframe macro test"></iframe>
+    <script>
+      function appendInputGrid(root) {
+        for (let index = 1; index <= 80; index += 1) {
+          const input = document.createElement("input");
+          input.setAttribute("aria-label", `field ${index}`);
+          root.append(input);
+        }
+      }
+
+      function appendCellGrid(root) {
+        const table = document.createElement("table");
+        const tbody = document.createElement("tbody");
+
+        for (let rowIndex = 0; rowIndex < 4; rowIndex += 1) {
+          const row = document.createElement("tr");
+
+          for (let columnIndex = 0; columnIndex < 20; columnIndex += 1) {
+            const cell = document.createElement("td");
+            cell.tabIndex = 0;
+            cell.setAttribute("role", "gridcell");
+            cell.textContent = "";
+            row.append(cell);
+          }
+
+          tbody.append(row);
+        }
+
+        table.append(tbody);
+        root.append(table);
+      }
+
+      appendInputGrid(document.querySelector("#inputs"));
+      appendCellGrid(document.querySelector("#cells"));
+
+      const frame = document.querySelector("#frame");
+      frame.srcdoc = `<!doctype html>
+        <html lang="ko">
+          <head>
+            <meta charset="utf-8" />
+            <style>
+              body { font-family: system-ui, sans-serif; margin: 16px; }
+              table { border-collapse: collapse; }
+              td { border: 1px solid #cbd5e1; height: 24px; padding: 3px; text-align: right; width: 48px; }
+            </style>
+          </head>
+          <body>
+            <p>Click a cell here after pressing the extension run button.</p>
+            <section id="iframeCells"></section>
+            <script>
+              (${appendCellGrid.toString()})(document.querySelector("#iframeCells"));
+            <\/script>
+          </body>
+        </html>`;
+    </script>
+  </body>
+</html>

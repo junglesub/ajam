@@ -19,6 +19,8 @@
     "build": "pnpm db:generate && pnpm --filter @timesheet/web build",
     "lint": "pnpm db:generate && eslint .",
     "typecheck": "pnpm db:generate && pnpm -r --if-present typecheck",
+    "extension:build": "pnpm --filter @timesheet/extension build",
+    "extension:typecheck": "pnpm --filter @timesheet/extension typecheck",
     "db:generate": "pnpm --filter @timesheet/db db:generate",
     "db:seed": "pnpm --filter @timesheet/db db:seed",
     "db:deploy": "pnpm db:seed"

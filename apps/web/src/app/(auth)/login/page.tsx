@@ -31,12 +31,49 @@ const highlights = [
   }
 ];
 
-export default async function LoginPage() {
+function normalizeLoginNext(next: string | undefined): string {
+  const trimmed = next?.trim() ?? "";
+  let decoded = trimmed;
+
+  for (let index = 0; index < 3; index += 1) {
+    try {
+      const nextDecoded = decodeURIComponent(decoded);
+
+      if (nextDecoded === decoded) {
+        break;
+      }
+
+      decoded = nextDecoded;
+    } catch {
+      return "/timesheet";
+    }
+  }
+
+  if (
+    trimmed.startsWith("/") &&
+    !trimmed.startsWith("//") &&
+    decoded.startsWith("/") &&
+    !decoded.startsWith("//") &&
+    !decoded.includes("\\")
+  ) {
+    return trimmed;
+  }
+
+  return "/timesheet";
+}
+
+export default async function LoginPage({
+  searchParams
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
   const session = await getSession();
   const buildInfo = getBuildInfo();
+  const params = await searchParams;
+  const next = normalizeLoginNext(params.next);
 
   if (session) {
-    redirect("/timesheet");
+    redirect(next);
   }
 
   return (
@@ -91,7 +128,7 @@ export default async function LoginPage() {
           </div>
 
           <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/70">
-            <LoginForm />
+            <LoginForm next={next} />
           </div>
 
         </div>

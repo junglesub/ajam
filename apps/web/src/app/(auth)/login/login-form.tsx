@@ -9,7 +9,7 @@ import { loginAction, type LoginState } from "./actions";
 
 const initialState: LoginState = {};
 
-export function LoginForm() {
+export function LoginForm({ next = "/timesheet" }: { next?: string }) {
   const [state, formAction, isPending] = useActionState(loginAction, initialState);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -25,6 +25,8 @@ export function LoginForm() {
 
   return (
     <form action={formAction} className="space-y-5">
+      <input name="next" type="hidden" value={next} />
+
       <div className="space-y-2">
         <Label htmlFor="username">아이디</Label>
         <div className="relative">
