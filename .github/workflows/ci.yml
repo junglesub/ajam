@@ -167,6 +167,22 @@ jobs:
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
             ${{ env.IMAGE_NAME }}:v${{ env.BUILD_VERSION }}
 
+  request-dca-deploy:
+    runs-on: ubuntu-latest
+    needs: [changes, publish-image]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.image == 'true' && needs.publish-image.result == 'success'
+    env:
+      DCA_ADDR: ${{ secrets.DCA_ADDR }}
+      DCA_SECRET: ${{ secrets.DCA_SECRET }}
+    steps:
+      - name: Send Deploy Request to DCA
+        run: |
+          curl --fail --request POST \
+            --url "$DCA_ADDR" \
+            --header "content-type: application/json" \
+            --header "X-API-Key: $DCA_SECRET" \
+            --data "{\"gh\": {\"commitSha\": \"$GITHUB_SHA\", \"githubRepo\": \"$GITHUB_REPOSITORY\"}}"
+
   publish-n8n-node:
     runs-on: ubuntu-latest
     needs: [changes, verify-n8n-node]
