@@ -24,12 +24,14 @@
 - n8n 연동용 업무 기록 미작성 리마인더 및 예약 AI 정리 API
 - n8n custom node package
 - GHCR Docker image 자동 publish
+- Chrome extension 기반 월말 시간 입력 매크로 MVP
+- 확장 전용 aJam 연결로 월간 업무/휴가/공휴일 시간 데이터 자동 불러오기
 
 ## Not In Current Scope
 
 - 실시간 자동 저장
 - 휴가 관리/승인 시스템 연동
-- Jamis 자동 입력 Chrome extension
+- Chrome extension 내용 입력 모드
 - Notion OAuth 연결과 webhook 기반 실시간 동기화
 - Notion 원본 카드 수정
 
