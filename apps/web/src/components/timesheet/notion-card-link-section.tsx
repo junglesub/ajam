@@ -44,7 +44,9 @@ export function NotionCardLinkSection({
           {entry.notionCards.map((link) => {
             const card = candidates.find((candidate) => candidate.notionPageId === link.notionPageId);
             const title = card?.title || link.title || link.notionPageId;
-            const hasMetrics = card && (card.linkedHours !== undefined || Boolean(card.lastWorkedDate));
+            const linkedHours = card?.linkedHours ?? link.linkedHours;
+            const lastWorkedDate = card?.lastWorkedDate ?? link.lastWorkedDate;
+            const hasMetrics = linkedHours !== undefined || Boolean(lastWorkedDate);
 
             return (
               <div
@@ -58,7 +60,7 @@ export function NotionCardLinkSection({
                   </span>
                   {hasMetrics ? (
                     <span className="mt-0.5 block truncate text-[11px] font-semibold text-slate-400">
-                      업무 {formatNotionDurationCompact(card.linkedHours)} · 마지막 {formatRelativeDate(card.lastWorkedDate)}
+                      업무 {formatNotionDurationCompact(linkedHours)} · 마지막 {formatRelativeDate(lastWorkedDate)}
                     </span>
                   ) : null}
                 </div>

@@ -1864,11 +1864,14 @@ export function TimesheetWorkspace({
                 allocationMode: "auto" as const,
                 category: candidate?.category ?? "",
                 endDate: candidate?.endDate ?? "",
+                lastWorkedDate: candidate?.lastWorkedDate ?? "",
+                linkedHours: candidate?.linkedHours ?? 0,
                 notionPageId,
                 source: "manual" as const,
                 startDate: candidate?.startDate ?? "",
                 status: candidate?.status ?? "",
-                title: candidate?.title ?? ""
+                title: candidate?.title ?? "",
+                workDayCount: candidate?.workDayCount ?? 0
               }
             ];
 

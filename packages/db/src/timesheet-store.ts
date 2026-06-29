@@ -197,11 +197,14 @@ function normalizeNotionCards(links: TimesheetEntryNotionCardDraft[] | undefined
       allocationMode: link.allocationMode === "manual" ? "manual" : "auto",
       category: link.category?.trim() ?? "",
       endDate: link.endDate?.trim() ?? "",
+      lastWorkedDate: link.lastWorkedDate?.trim() ?? "",
+      linkedHours: normalizeHours(link.linkedHours ?? 0),
       notionPageId: link.notionPageId.trim(),
       source: normalizeNotionCardSource(link.source),
       startDate: link.startDate?.trim() ?? "",
       status: link.status?.trim() ?? "",
-      title: link.title?.trim() ?? ""
+      title: link.title?.trim() ?? "",
+      workDayCount: Number.isFinite(link.workDayCount) ? Math.max(0, Math.trunc(link.workDayCount ?? 0)) : 0
     }))
     .filter((link) => link.notionPageId);
 }
@@ -344,9 +347,16 @@ async function listEntryNotionCards(params: {
   const rows = await prisma.$queryRawUnsafe<WorkEntryNotionCardRow[]>(
     `SELECT link."timesheetEntryId", link."notionPageId", link."allocatedHours", link."allocationMode", link."source",
             coalesce(cache."title", '') AS "title", coalesce(cache."status", '') AS "status", coalesce(cache."category", '') AS "category",
-            coalesce(cache."startDate", '') AS "startDate", coalesce(cache."endDate", '') AS "endDate"
+            coalesce(cache."startDate", '') AS "startDate", coalesce(cache."endDate", '') AS "endDate",
+            coalesce(metrics."linkedHours", 0) AS "linkedHours", coalesce(metrics."workDayCount", 0) AS "workDayCount",
+            coalesce(metrics."lastWorkedDate", '') AS "lastWorkedDate"
      FROM "WorkEntryNotionCard" link
      LEFT JOIN "NotionCardCache" cache ON cache."userId" = link."userId" AND cache."notionPageId" = link."notionPageId"
+     LEFT JOIN (
+       SELECT "userId", "notionPageId", sum("allocatedHours") AS "linkedHours", count(DISTINCT "dateKey") AS "workDayCount", max("dateKey") AS "lastWorkedDate"
+       FROM "WorkEntryNotionCard"
+       GROUP BY "userId", "notionPageId"
+     ) metrics ON metrics."userId" = link."userId" AND metrics."notionPageId" = link."notionPageId"
      WHERE link."userId" = ? AND link."timesheetEntryId" IN (${entryIdPlaceholders})
      ORDER BY link."createdAt" ASC`,
     params.userId,
@@ -369,9 +379,16 @@ async function listEntryNotionCardsInTransaction(params: {
   const rows = await params.transaction.$queryRawUnsafe<WorkEntryNotionCardRow[]>(
     `SELECT link."timesheetEntryId", link."notionPageId", link."allocatedHours", link."allocationMode", link."source",
             coalesce(cache."title", '') AS "title", coalesce(cache."status", '') AS "status", coalesce(cache."category", '') AS "category",
-            coalesce(cache."startDate", '') AS "startDate", coalesce(cache."endDate", '') AS "endDate"
+            coalesce(cache."startDate", '') AS "startDate", coalesce(cache."endDate", '') AS "endDate",
+            coalesce(metrics."linkedHours", 0) AS "linkedHours", coalesce(metrics."workDayCount", 0) AS "workDayCount",
+            coalesce(metrics."lastWorkedDate", '') AS "lastWorkedDate"
      FROM "WorkEntryNotionCard" link
      LEFT JOIN "NotionCardCache" cache ON cache."userId" = link."userId" AND cache."notionPageId" = link."notionPageId"
+     LEFT JOIN (
+       SELECT "userId", "notionPageId", sum("allocatedHours") AS "linkedHours", count(DISTINCT "dateKey") AS "workDayCount", max("dateKey") AS "lastWorkedDate"
+       FROM "WorkEntryNotionCard"
+       GROUP BY "userId", "notionPageId"
+     ) metrics ON metrics."userId" = link."userId" AND metrics."notionPageId" = link."notionPageId"
      WHERE link."userId" = ? AND link."timesheetEntryId" IN (${entryIdPlaceholders})
      ORDER BY link."createdAt" ASC`,
     params.userId,
@@ -391,11 +408,14 @@ function mapNotionCardLinks(rows: WorkEntryNotionCardRow[]): Map<string, Timeshe
       allocationMode: row.allocationMode === "manual" ? "manual" : "auto",
       category: row.category,
       endDate: row.endDate,
+      lastWorkedDate: row.lastWorkedDate,
+      linkedHours: row.linkedHours,
       notionPageId: row.notionPageId,
       source: normalizeNotionCardSource(row.source),
       startDate: row.startDate,
       status: row.status,
-      title: row.title
+      title: row.title,
+      workDayCount: row.workDayCount
     });
     linksByEntryId.set(row.timesheetEntryId, links);
   }
@@ -503,10 +523,17 @@ export async function findLatestWorkNotionCardsBefore(params: {
      )
      SELECT link."timesheetEntryId", link."notionPageId", link."allocatedHours", link."allocationMode", link."source",
             coalesce(cache."title", '') AS "title", coalesce(cache."status", '') AS "status", coalesce(cache."category", '') AS "category",
-            coalesce(cache."startDate", '') AS "startDate", coalesce(cache."endDate", '') AS "endDate"
+            coalesce(cache."startDate", '') AS "startDate", coalesce(cache."endDate", '') AS "endDate",
+            coalesce(metrics."linkedHours", 0) AS "linkedHours", coalesce(metrics."workDayCount", 0) AS "workDayCount",
+            coalesce(metrics."lastWorkedDate", '') AS "lastWorkedDate"
      FROM "WorkEntryNotionCard" link
      INNER JOIN latest_entry ON latest_entry."id" = link."timesheetEntryId"
      LEFT JOIN "NotionCardCache" cache ON cache."userId" = link."userId" AND cache."notionPageId" = link."notionPageId"
+     LEFT JOIN (
+       SELECT "userId", "notionPageId", sum("allocatedHours") AS "linkedHours", count(DISTINCT "dateKey") AS "workDayCount", max("dateKey") AS "lastWorkedDate"
+       FROM "WorkEntryNotionCard"
+       GROUP BY "userId", "notionPageId"
+     ) metrics ON metrics."userId" = link."userId" AND metrics."notionPageId" = link."notionPageId"
      WHERE link."userId" = ? AND link."source" <> 'weekday_default'
      ORDER BY link."createdAt" ASC`,
     params.userId,

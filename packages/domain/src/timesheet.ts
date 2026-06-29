@@ -5,11 +5,14 @@ export type TimesheetEntryNotionCardDraft = {
   allocationMode: "auto" | "manual";
   category?: string;
   endDate?: string;
+  lastWorkedDate?: string;
+  linkedHours?: number;
   notionPageId: string;
   source: "manual" | "previous_business_day_default" | "weekday_default";
   startDate?: string;
   status?: string;
   title?: string;
+  workDayCount?: number;
 };
 
 export type TimesheetEntryDraft = {
