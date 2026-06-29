@@ -4,6 +4,7 @@ import { Plus, RotateCcw, X } from "lucide-react";
 
 import type { TimesheetEntryDraft } from "@timesheet/domain";
 
+import { formatNotionDurationCompact } from "../notion-cards/duration-format";
 import type { NotionCardCandidate } from "./use-notion-card-candidates";
 
 type NotionCardLinkSectionProps = {
@@ -43,10 +44,11 @@ export function NotionCardLinkSection({
           {entry.notionCards.map((link) => {
             const card = candidates.find((candidate) => candidate.notionPageId === link.notionPageId);
             const title = card?.title || link.title || link.notionPageId;
+            const hasMetrics = card && (card.linkedHours !== undefined || Boolean(card.lastWorkedDate));
 
             return (
               <div
-                className="grid grid-cols-[minmax(0,1fr)_86px_28px] items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700"
+                className="grid select-none grid-cols-[minmax(0,1fr)_86px_28px] items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700"
                 key={link.notionPageId}
               >
                 <div className="min-w-0">
@@ -54,11 +56,16 @@ export function NotionCardLinkSection({
                   <span className="block truncate font-semibold text-slate-400">
                     {card?.status || link.status || "-"} · {card?.category || link.category || "미분류"}
                   </span>
+                  {hasMetrics ? (
+                    <span className="mt-0.5 block truncate text-[11px] font-semibold text-slate-400">
+                      업무 {formatNotionDurationCompact(card.linkedHours)} · 마지막 {formatRelativeDate(card.lastWorkedDate)}
+                    </span>
+                  ) : null}
                 </div>
-                <label className="flex items-center gap-1">
+                <label className="flex items-center gap-1 select-none">
                   <input
                     aria-label={`${title} 배분 시간`}
-                    className="h-8 w-16 rounded-md border border-slate-200 bg-white px-2 text-right text-xs font-bold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                    className="h-8 w-16 select-text rounded-md border border-slate-200 bg-white px-2 text-right text-xs font-bold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
                     disabled={disabled}
                     min={0}
                     onChange={(event) => {
@@ -76,7 +83,7 @@ export function NotionCardLinkSection({
                 </label>
                 <button
                   aria-label={`${title} 연결 해제`}
-                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="inline-flex size-7 shrink-0 select-none items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
                   disabled={disabled}
                   onClick={() => onRemoveCard(link.notionPageId)}
                   type="button"
@@ -103,7 +110,7 @@ export function NotionCardLinkSection({
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <button
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-600 transition hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-8 select-none items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-600 transition hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={disabled}
             onClick={onOpenPicker}
             type="button"
@@ -113,7 +120,7 @@ export function NotionCardLinkSection({
           </button>
           {hasManualAllocation ? (
             <button
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 transition hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-8 select-none items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-500 transition hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={disabled}
               onClick={onResetAutoAllocation}
               type="button"
@@ -124,7 +131,7 @@ export function NotionCardLinkSection({
           ) : null}
         </div>
         {entry.notionCards.length > 0 ? (
-          <span className={allocationError ? "text-xs font-bold text-red-600" : "text-xs font-bold text-slate-400"}>
+          <span className={allocationError ? "select-none text-xs font-bold text-red-600" : "select-none text-xs font-bold text-slate-400"}>
             {allocationError || `${allocationTotal}h / ${entry.hours}h`}
           </span>
         ) : null}
@@ -135,4 +142,18 @@ export function NotionCardLinkSection({
 
 function roundHours(value: number): number {
   return Number(value.toFixed(2));
+}
+
+function formatRelativeDate(dateKey: string | undefined): string {
+  if (!dateKey) {
+    return "-";
+  }
+
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const target = new Date(year ?? 0, (month ?? 1) - 1, day ?? 1);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = Math.round((target.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+
+  return new Intl.RelativeTimeFormat("ko", { numeric: "auto" }).format(diffDays, "day");
 }

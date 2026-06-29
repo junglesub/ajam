@@ -4,9 +4,16 @@ import { useState, useTransition } from "react";
 
 export type NotionCardCandidate = {
   archived: boolean;
+  availableHours?: {
+    availableDays: number;
+    availableHours: number;
+    unavailableReason?: "missing_start_date";
+  };
   category: string;
   endDate: string;
   lastEditedTime: string;
+  lastWorkedDate?: string;
+  linkedHours?: number;
   notionPageId: string;
   rawPropertiesJson: string;
   stale: boolean;
@@ -14,6 +21,7 @@ export type NotionCardCandidate = {
   status: string;
   title: string;
   url: string;
+  workDayCount?: number;
 };
 
 export type NotionCardCandidateSyncMeta = {

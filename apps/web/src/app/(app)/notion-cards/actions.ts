@@ -9,6 +9,7 @@ import {
 } from "@timesheet/domain";
 import {
   getManagedUser,
+  getLatestLinkedNotionWorkDateByPage,
   getUserNotionAccessToken,
   getUserNotionConnection,
   listCachedNotionCards,
@@ -59,6 +60,7 @@ export type NotionMonthlyAnalysisCard = NotionCardCacheRecord & {
     totalBusinessDays: number;
     unavailableReason?: "missing_start_date" | "done_without_end_date";
   };
+  lastWorkedDate: string;
   linkedHours: number;
   workDayCount: number;
 };
@@ -292,6 +294,7 @@ export async function buildNotionMonthlyAnalysisAction(month: string): Promise<N
   );
   const linkedPageIds = new Set(days.flatMap((day) => day.entries.flatMap((entry) => entry.notionCards.map((link) => link.notionPageId))));
   const mappedCards = cards.filter((card) => linkedPageIds.has(card.notionPageId));
+  const mappedPageIds = mappedCards.map((card) => card.notionPageId);
   const holidayDateKeys = holidays.map((holiday) => holiday.dateKey);
   const vacationDateKeys = vacations.map((vacation) => vacation.dateKey);
   const doneStatusValues = connection?.doneStatusValues ?? [];
@@ -305,6 +308,10 @@ export async function buildNotionMonthlyAnalysisAction(month: string): Promise<N
     : [[], []];
   const availabilityHolidayDateKeys = availabilityHolidays.map((holiday) => holiday.dateKey);
   const availabilityVacationDateKeys = availabilityVacations.map((vacation) => vacation.dateKey);
+  const latestWorkedDatesByPage = await getLatestLinkedNotionWorkDateByPage({
+    notionPageIds: mappedPageIds,
+    userId: user.id
+  });
   const analysisCards = mappedCards.map((card) => {
     const availableHours = buildNotionCardAvailableHours({
       card,
@@ -339,8 +346,9 @@ export async function buildNotionMonthlyAnalysisAction(month: string): Promise<N
         (entry) => entry.kind === "WORK" && entry.notionCards.some((link) => link.notionPageId === card.notionPageId)
       )
     ).length;
+    const lastWorkedDate = latestWorkedDatesByPage.get(card.notionPageId) ?? "";
 
-    return { ...card, availableHours, estimate, linkedHours, workDayCount };
+    return { ...card, availableHours, estimate, lastWorkedDate, linkedHours, workDayCount };
   });
 
   return {

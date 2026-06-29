@@ -2,10 +2,12 @@
 
 import {
   addProject,
+  countLinkedNotionWorkDaysByPage,
   createManagedUser,
   deleteTimesheetEntry,
   findLatestWorkNotionCardsBefore,
   findLatestWorkProjectBefore,
+  getLatestLinkedNotionWorkDateByPage,
   getLatestNotionSyncRun,
   getUserGeminiApiKey,
   getUserNotionConnection,
@@ -20,6 +22,7 @@ import {
   listVacations,
   resetHolidayCache,
   setAppSetting,
+  sumLinkedNotionHoursByPage,
   syncNotionCardsForDate,
   syncNotionWorkHoursForPages,
   updateManagedUser,
@@ -35,7 +38,13 @@ import {
   type TimesheetAiRewriteRequest,
   type UserRole
 } from "@timesheet/db";
-import { filterOpenNotionCardCandidates, type TimesheetDayDraft, type TimesheetEntryNotionCardDraft } from "@timesheet/domain";
+import {
+  buildNotionCardAvailableHours,
+  filterOpenNotionCardCandidates,
+  toBrowserDateKey,
+  type TimesheetDayDraft,
+  type TimesheetEntryNotionCardDraft
+} from "@timesheet/domain";
 import { redirect } from "next/navigation";
 
 import { createSession, destroySession, getSession } from "@/server/session";
@@ -85,8 +94,19 @@ export type NotionCardCandidateSyncMeta = {
 };
 
 export type NotionCardCandidatesResult = {
-  candidates: NotionCardCacheRecord[];
+  candidates: NotionCardCandidateRecord[];
   sync: NotionCardCandidateSyncMeta;
+};
+
+export type NotionCardCandidateRecord = NotionCardCacheRecord & {
+  availableHours: {
+    availableDays: number;
+    availableHours: number;
+    unavailableReason?: "missing_start_date";
+  };
+  lastWorkedDate: string;
+  linkedHours: number;
+  workDayCount: number;
 };
 
 export type LoadNotionCardCandidatesInput =
@@ -392,7 +412,8 @@ export async function loadNotionCardCandidatesAction(input: LoadNotionCardCandid
       latestRun,
       latestSuccess,
       linkedPageIds,
-      source: "cache"
+      source: "cache",
+      userId: user.id
     });
   }
 
@@ -440,7 +461,8 @@ async function syncNotionCardCandidatesForDate(params: {
       linkedPageIds: params.linkedPageIds ?? [],
       latestRun: latestSuccess,
       latestSuccess,
-      source: "notion"
+      source: "notion",
+      userId: params.userId
     });
   } catch (error) {
     const [candidates, latestRun, latestSuccess] = await Promise.all([
@@ -461,7 +483,8 @@ async function syncNotionCardCandidatesForDate(params: {
       latestRun,
       latestSuccess,
       linkedPageIds: params.linkedPageIds ?? [],
-      source: "cache"
+      source: "cache",
+      userId: params.userId
     });
   }
 }
@@ -538,7 +561,7 @@ function getDateNotionSyncRun(params: {
   });
 }
 
-function buildNotionCardCandidatesResult(params: {
+async function buildNotionCardCandidatesResult(params: {
   candidates: NotionCardCacheRecord[];
   dateKey: string;
   doneStatusValues: string[];
@@ -547,7 +570,8 @@ function buildNotionCardCandidatesResult(params: {
   latestSuccess: NotionSyncRunRecord | null;
   linkedPageIds: string[];
   source: "cache" | "notion";
-}): NotionCardCandidatesResult {
+  userId: string;
+}): Promise<NotionCardCandidatesResult> {
   const filteredCandidates = filterOpenNotionCardCandidates({
     cards: params.candidates,
     dateKey: params.dateKey,
@@ -555,9 +579,13 @@ function buildNotionCardCandidatesResult(params: {
     linkedPageIds: params.linkedPageIds
   });
   const filteredPageIds = new Set(filteredCandidates.map((candidate) => candidate.notionPageId));
+  const candidates = await buildNotionCardCandidateMetrics({
+    candidates: params.candidates.filter((candidate) => filteredPageIds.has(candidate.notionPageId)),
+    userId: params.userId
+  });
 
   return {
-    candidates: params.candidates.filter((candidate) => filteredPageIds.has(candidate.notionPageId)),
+    candidates,
     sync: {
       cardsFetched: params.latestSuccess?.cardsFetched ?? 0,
       errorMessage: params.errorMessage ?? "",
@@ -567,6 +595,69 @@ function buildNotionCardCandidatesResult(params: {
       source: params.source,
       status: params.latestRun?.status ?? ""
     }
+  };
+}
+
+async function buildNotionCardCandidateMetrics(params: {
+  candidates: NotionCardCacheRecord[];
+  userId: string;
+}): Promise<NotionCardCandidateRecord[]> {
+  const notionPageIds = params.candidates.map((candidate) => candidate.notionPageId);
+
+  if (notionPageIds.length === 0) {
+    return [];
+  }
+
+  const todayDateKey = toBrowserDateKey(new Date());
+  const availabilityRange = getAvailabilityRange(params.candidates, todayDateKey);
+  const [
+    linkedHoursByPage,
+    workDayCountsByPage,
+    lastWorkedDatesByPage,
+    availabilityHolidays,
+    availabilityVacations
+  ] = await Promise.all([
+    sumLinkedNotionHoursByPage({ notionPageIds, userId: params.userId }),
+    countLinkedNotionWorkDaysByPage({ notionPageIds, userId: params.userId }),
+    getLatestLinkedNotionWorkDateByPage({ notionPageIds, userId: params.userId }),
+    availabilityRange ? listHolidays(availabilityRange).catch(() => []) : Promise.resolve([]),
+    availabilityRange ? listVacations({ ...availabilityRange, userId: params.userId }) : Promise.resolve([])
+  ]);
+  const holidayDateKeys = availabilityHolidays.map((holiday) => holiday.dateKey);
+  const vacationDateKeys = availabilityVacations.map((vacation) => vacation.dateKey);
+
+  return params.candidates.map((candidate) => ({
+    ...candidate,
+    availableHours: buildNotionCardAvailableHours({
+      card: candidate,
+      holidayDateKeys,
+      todayDateKey,
+      vacationDateKeys
+    }),
+    lastWorkedDate: lastWorkedDatesByPage.get(candidate.notionPageId) ?? "",
+    linkedHours: linkedHoursByPage.get(candidate.notionPageId) ?? 0,
+    workDayCount: workDayCountsByPage.get(candidate.notionPageId) ?? 0
+  }));
+}
+
+function getAvailabilityRange(cards: NotionCardCacheRecord[], todayDateKey: string): {
+  endDateKey: string;
+  startDateKey: string;
+} | null {
+  const ranges = cards
+    .filter((card) => card.startDate)
+    .map((card) => ({
+      endDateKey: card.endDate || todayDateKey,
+      startDateKey: card.startDate
+    }));
+
+  if (ranges.length === 0) {
+    return null;
+  }
+
+  return {
+    endDateKey: ranges.reduce((latest, range) => range.endDateKey > latest ? range.endDateKey : latest, ranges[0]!.endDateKey),
+    startDateKey: ranges.reduce((earliest, range) => range.startDateKey < earliest ? range.startDateKey : earliest, ranges[0]!.startDateKey)
   };
 }
 

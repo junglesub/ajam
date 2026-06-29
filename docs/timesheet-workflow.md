@@ -99,6 +99,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - The Notion card picker shows candidate loading beside the popup title and uses skeleton rows when no candidate data is available yet.
 - The Notion card picker can refresh the selected date's candidates without closing the popup, and each candidate with a Notion URL can be opened from the list.
 - The Notion card picker shows linked candidates with a checkbox-style selection mark at the start of each row, and the full row padding area toggles selection except for the Notion external-link control.
+- The Notion card picker can sort candidates by latest worked date, linked work duration, work day count, available hours, or title. Candidate rows and linked-card pills show compact card metrics in smaller secondary text: linked work duration such as `1d 4h` and the last linked work date as a normal relative label such as `132일 전`.
 - Opening the Notion card picker is cache-first for the selected date. If that date has no successful date-scope sync record yet, the app syncs from Notion once; the picker refresh button always performs a fresh Notion sync.
 - The Notion card picker shows the selected date's last successful sync as relative time, such as `방금 전` or `5분 전`.
 - Notion sync timestamps are read from SQLite as UTC ISO strings before relative-time formatting, so the picker label is independent of the user's local timezone.
@@ -115,7 +116,9 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - When a saved work date has no explicit work hours for the estimate, the default fallback remains `8h = 1 day`.
 - The monthly Notion view shows work day count, available hours, period-based estimated hours, and work-entry linked hours.
 - In the monthly Notion view, clicking a card title opens the Notion page in a new tab when the cached card has a URL.
-- Notion duration columns use `8h = 1d` display, such as `2d (16h)` or `1.5d (12h)`.
+- Notion duration columns use `8h = 1d` mixed display, such as `2d (16h)` or `1d 4h (12h)`.
+- The Notion card table shows `작업일수`, `가용 시간`, `업무 기간`, `마지막 작업 날짜`, and `기간 추정` as separate columns. `가용 시간` and `업무 기간` use detailed duration text such as `1d 4h (12h)`. `마지막 작업 날짜` is the latest saved `WORK` date linked to the card, displays only a normal relative label such as `132일 전`, and reveals the exact date on hover.
+- The Notion card table defaults to sorting by latest worked date, and the user's last selected sort is preserved in the browser.
 - The monthly Notion view also shows total linked work day count, total available duration, total linked work duration, and total calculable period estimate duration for the selected month.
 - The Notion connection form opens in a popup from the Notion card view, while the card table uses the full page width.
 

@@ -69,6 +69,7 @@ export type NotionAnalysisCard = NotionCardCacheRecord & {
     totalBusinessDays: number;
     unavailableReason?: "missing_start_date" | "done_without_end_date";
   };
+  lastWorkedDate?: string;
   linkedHours?: number;
   workDayCount?: number;
 };
