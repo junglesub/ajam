@@ -90,7 +90,7 @@
 - `Dockerfile`은 Next.js standalone output을 생성하여 production 서버를 실행한다.
 - Docker runner image는 Next.js standalone output과 정적 파일만 포함한다. 런타임에는 전체 workspace와 전체 `node_modules`를 포함하지 않는다.
 - 컨테이너 시작 명령은 `node apps/web/server.js`로 production 서버만 실행한다.
-- 데이터베이스 초기화와 seed는 애플리케이션 시작 과정과 분리한다. seed는 최초 설치 또는 운영자가 명시적으로 실행하는 초기화 작업으로 수행한다.
+- 데이터베이스 초기화와 seed는 애플리케이션 시작 과정과 분리한다. seed는 최초 설치 또는 운영자가 명시적으로 실행하는 초기화 작업으로 수행하며, 최초 ADMIN 계정 생성도 이 seed의 책임이다.
 - 애플리케이션은 런타임에서 필요한 테이블과 컬럼을 `CREATE TABLE IF NOT EXISTS` 및 보정 쿼리로 보장한다.
 - `docker-compose.example.yml`은 GHCR `ghcr.io/junglesub/ajam:latest` 이미지를 사용하고 SQLite 파일을 서버의 `./ajam-data`에 둔다.
 - Docker image와 compose 예시는 `GET /api/health`를 Node.js 내장 `fetch`로 호출하는 healthcheck를 포함한다. 이 endpoint는 DB와 외부 API를 조회하지 않고 Next.js 서버가 요청을 받을 수 있는지만 확인한다.
@@ -103,4 +103,4 @@
 
 ## CI
 
-image 검증 기준은 install, lint, typecheck, web build이다. n8n node 검증 기준은 install, n8n node typecheck, n8n node build이다. `main` 브랜치 push에서는 image 관련 파일이 변경된 경우 GHCR image를 publish한 뒤 DCA deploy request를 보내고, n8n package version이 변경된 경우 n8n package를 배포한다.
+image 검증 기준은 install, lint, typecheck, workspace seed, web build, Docker image build, Docker web server smoke test이다. seed 검증은 CI workspace에서 `pnpm db:seed`로 수행하고, Docker smoke test는 production image를 컨테이너로 실행한 뒤 `GET /api/health` 응답만 확인한다. production runner image에는 workspace와 pnpm 실행 환경이 없으므로 CI는 Docker image 안에서 workspace script를 실행하지 않는다. n8n node 검증 기준은 install, n8n node typecheck, n8n node build이다. `main` 브랜치 push에서는 image 관련 파일이 변경된 경우 GHCR image를 publish한 뒤 DCA deploy request를 보내고, n8n package version이 변경된 경우 n8n package를 배포한다.

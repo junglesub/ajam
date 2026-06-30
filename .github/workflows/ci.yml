@@ -95,14 +95,40 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Seed database
+        run: pnpm db:seed
+
       - name: Build
         run: pnpm build
 
       - name: Build Docker image
         run: docker build --build-arg BUILD_VERSION=ci -t ajam-ci .
 
-      - name: Smoke test Docker database seed
-        run: docker run --rm --entrypoint sh ajam-ci -c "pnpm db:seed"
+      - name: Smoke test Docker web server
+        shell: bash
+        run: |
+          container_id="$(docker run -d -p 127.0.0.1:3000:3000 ajam-ci)"
+
+          cleanup() {
+            docker rm -f "$container_id" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/api/health >/dev/null; then
+              exit 0
+            fi
+
+            if ! docker ps --quiet --filter "id=$container_id" | grep --quiet .; then
+              docker logs "$container_id"
+              exit 1
+            fi
+
+            sleep 1
+          done
+
+          docker logs "$container_id"
+          exit 1
 
   verify-n8n-node:
     runs-on: ubuntu-latest
