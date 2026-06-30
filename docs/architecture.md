@@ -89,6 +89,7 @@
 
 - `Dockerfile`은 Next.js 앱을 빌드하고 production 서버를 실행한다.
 - Docker runner image는 컨테이너 시작 시 `pnpm db:seed`가 workspace TS source를 실행하므로, `packages/db`와 런타임 import 대상인 `packages/domain`을 함께 포함한다.
+- Docker image는 Corepack으로 `pnpm@10.20.0`을 미리 활성화하고, install 후 `better-sqlite3` native binding을 rebuild해 SQLite Prisma adapter가 컨테이너 시작 시 바로 로드되게 한다.
 - `docker-compose.example.yml`은 GHCR `ghcr.io/junglesub/ajam:latest` 이미지를 사용하고 SQLite 파일을 서버의 `./ajam-data`에 둔다.
 - Docker image와 compose 예시는 `GET /api/health`를 Node.js 내장 `fetch`로 호출하는 healthcheck를 포함한다. 이 endpoint는 DB와 외부 API를 조회하지 않고 Next.js 서버가 요청을 받을 수 있는지만 확인한다.
 - GitHub Actions는 image 검증 성공 후 GHCR에 `latest`, commit SHA, `v<run-number>-<yymmdd>` 태그를 push한다.

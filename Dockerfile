@@ -7,7 +7,8 @@ ENV PNPM_HOME=/pnpm \
     NEXT_TELEMETRY_DISABLED=1
 WORKDIR /app
 
-RUN corepack enable
+RUN corepack enable \
+  && corepack prepare pnpm@10.20.0 --activate
 
 FROM base AS deps
 
@@ -23,6 +24,8 @@ COPY packages/ui/package.json packages/ui/package.json
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   pnpm install --frozen-lockfile
+
+RUN pnpm --filter @timesheet/db rebuild better-sqlite3
 
 FROM deps AS build
 
