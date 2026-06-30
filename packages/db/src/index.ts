@@ -55,5 +55,35 @@ export type {
   UserNotionWeeklyDefaultCard,
   UserNotionConnection
 } from "./notion-store";
-export { addProject, applyTimesheetAiSummaryPatches, clearTimesheetAiRewriteRequests, deleteTimesheetEntry, ensureTimesheetSchema, findLatestWorkNotionCardsBefore, findLatestWorkProjectBefore, listHolidays, listProjectSummaries, listProjects, listTimesheetAiRewriteRequests, listTimesheetEntries, listVacations, renameProject, resetHolidayCache, saveTimesheetDay, saveTimesheetDays, upsertTimesheetEntry } from "./timesheet-store";
-export type { HolidayRecord, ProjectSummary, StoredTimesheetDay, StoredTimesheetDraft, StoredTimesheetEntry, TimesheetAiRewriteRequest, VacationRecord } from "./timesheet-store";
+export {
+  addProject,
+  applyTimesheetAiSummaryPatches,
+  clearTimesheetAiRewriteRequests,
+  deleteTimesheetEntry,
+  ensureTimesheetSchema,
+  findLatestWorkNotionCardsBefore,
+  findLatestWorkProjectBefore,
+  getVacationAllowance,
+  listHolidays,
+  listProjectSummaries,
+  listProjects,
+  listTimesheetAiRewriteRequests,
+  listTimesheetEntries,
+  listVacations,
+  renameProject,
+  resetHolidayCache,
+  saveTimesheetDay,
+  saveTimesheetDays,
+  upsertTimesheetEntry,
+  upsertVacationAllowance
+} from "./timesheet-store";
+export type {
+  HolidayRecord,
+  ProjectSummary,
+  StoredTimesheetDay,
+  StoredTimesheetDraft,
+  StoredTimesheetEntry,
+  TimesheetAiRewriteRequest,
+  VacationAllowanceRecord,
+  VacationRecord
+} from "./timesheet-store";

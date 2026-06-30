@@ -207,12 +207,14 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 
 ## Connected Vacation Updates
 
-- Connected vacation detection uses business-day continuity.
+- Connected vacation detection uses business-day continuity and matches the selected vacation's status and original vacation name.
 - Saved holiday dates are skipped while scanning, so `휴가 - 공휴일 - 휴가` is treated as connected.
-- Missing, draft-only, work, or mixed-entry dates break the connection.
-- A connected vacation date must have exactly one saved vacation entry.
-- When a single vacation is saved and connected vacation days are found, the user can cancel, save only the selected date, or save the same vacation type and hours to all connected vacation dates.
-- When a single vacation is deleted and connected vacation days are found, the user can cancel, delete only the selected date, or delete all connected vacation dates.
+- Missing or draft-only dates break the connection.
+- Mixed-entry dates connect when the selected vacation entry touches the adjacent boundary, so `WORK -> VACATION` can connect forward and `VACATION -> WORK` can connect backward.
+- Temporary and confirmed vacation entries do not connect to each other.
+- Connected vacation save/delete targets the selected vacation's original status and name.
+- When a single vacation is saved and connected vacation days are found, the user can cancel, save only the selected date, or save the same vacation type and status to all connected vacation dates while preserving each date's existing vacation hours.
+- When a single vacation is deleted and connected vacation days are found, the user can cancel, delete only the selected date, or delete the matching connected vacation entries.
 - Together save and together delete both show a progress bar with completed and total date counts.
 
 ## Persistence Notes

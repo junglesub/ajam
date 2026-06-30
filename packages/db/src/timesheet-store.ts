@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { allocateNotionCardHours, type TimesheetEntryNotionCardDraft } from "@timesheet/domain";
+import { allocateNotionCardHours, type TimesheetEntryNotionCardDraft, type VacationStatus } from "@timesheet/domain";
 
 import { prisma } from "./client";
 import { ensureNotionSchema } from "./notion-store";
@@ -18,6 +18,7 @@ export type StoredTimesheetEntry = {
   project: string;
   sortOrder: number;
   vacationName: string;
+  vacationStatus: VacationStatus;
 };
 
 export type StoredTimesheetDay = {
@@ -39,6 +40,13 @@ export type VacationRecord = {
   dateKey: string;
   hours: number;
   name: string;
+  status: VacationStatus;
+};
+
+export type VacationAllowanceRecord = {
+  days: number;
+  userId: string;
+  year: number;
 };
 
 export type TimesheetAiRewriteRequest = {
@@ -63,6 +71,7 @@ type TimesheetEntryRow = {
   sortOrder: number;
   userId: string;
   vacationName: string;
+  vacationStatus: string;
 };
 
 type TimesheetDayRow = {
@@ -81,6 +90,7 @@ type VacationRow = {
   dateKey: string;
   hours: number;
   name: string;
+  status: string;
 };
 
 type ProjectRow = {
@@ -170,8 +180,13 @@ function normalizeEntry(entry: StoredTimesheetEntry, sortOrder: number): StoredT
     notionCards,
     project: isWork ? entry.project.trim() : "",
     sortOrder,
-    vacationName: isVacation ? entry.vacationName.trim() : ""
+    vacationName: isVacation ? entry.vacationName.trim() : "",
+    vacationStatus: isVacation ? normalizeVacationStatus(entry.vacationStatus) : "CONFIRMED"
   };
+}
+
+function normalizeVacationStatus(value: string | undefined): VacationStatus {
+  return value === "TEMPORARY" ? "TEMPORARY" : "CONFIRMED";
 }
 
 function normalizeHours(value: number): number {
@@ -261,6 +276,7 @@ export async function ensureTimesheetSchema() {
     "aiTranslation" TEXT NOT NULL DEFAULT '',
     "shortVersion" TEXT NOT NULL DEFAULT '',
     "vacationName" TEXT NOT NULL DEFAULT '',
+    "vacationStatus" TEXT NOT NULL DEFAULT 'CONFIRMED',
     "holidayName" TEXT NOT NULL DEFAULT '',
     "sortOrder" INTEGER NOT NULL DEFAULT 0,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -269,6 +285,9 @@ export async function ensureTimesheetSchema() {
   )`);
   if (!(await hasColumn("TimesheetEntry", "sortOrder"))) {
     await prisma.$executeRawUnsafe(`ALTER TABLE "TimesheetEntry" ADD COLUMN "sortOrder" INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!(await hasColumn("TimesheetEntry", "vacationStatus"))) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "TimesheetEntry" ADD COLUMN "vacationStatus" TEXT NOT NULL DEFAULT 'CONFIRMED'`);
   }
   await prisma.$executeRawUnsafe(`DROP INDEX IF EXISTS "TimesheetEntry_userId_dateKey_key"`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "TimesheetEntry_userId_dateKey_idx" ON "TimesheetEntry"("userId", "dateKey")`);
@@ -307,11 +326,26 @@ export async function ensureTimesheetSchema() {
     "dateKey" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "hours" REAL NOT NULL DEFAULT 0,
+    "status" TEXT NOT NULL DEFAULT 'CONFIRMED',
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "Vacation_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
   )`);
+  if (!(await hasColumn("Vacation", "status"))) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Vacation" ADD COLUMN "status" TEXT NOT NULL DEFAULT 'CONFIRMED'`);
+  }
   await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "Vacation_userId_dateKey_key" ON "Vacation"("userId", "dateKey")`);
+
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "VacationAllowance" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
+    "year" INTEGER NOT NULL,
+    "days" REAL NOT NULL DEFAULT 0,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "VacationAllowance_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`);
+  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "VacationAllowance_userId_year_key" ON "VacationAllowance"("userId", "year")`);
 
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Project" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -428,7 +462,7 @@ export async function listTimesheetEntries(params: { endDateKey: string; startDa
 
   const [entries, dayRows] = await Promise.all([
     prisma.$queryRawUnsafe<TimesheetEntryRow[]>(
-      `SELECT "id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "sortOrder", "vacationName", "holidayName"
+      `SELECT "id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "sortOrder", "vacationName", "vacationStatus", "holidayName"
        FROM "TimesheetEntry"
        WHERE "userId" = ? AND "dateKey" BETWEEN ? AND ?
        ORDER BY "dateKey" ASC, "sortOrder" ASC, "createdAt" ASC`,
@@ -481,7 +515,8 @@ export async function listTimesheetEntries(params: { endDateKey: string; startDa
       notionCards: notionCardsByEntryId.get(entry.id) ?? [],
       project: entry.kind === "WORK" ? entry.project : "",
       sortOrder: entry.sortOrder,
-      vacationName: entry.kind === "VACATION" ? entry.vacationName : ""
+      vacationName: entry.kind === "VACATION" ? entry.vacationName : "",
+      vacationStatus: entry.kind === "VACATION" ? normalizeVacationStatus(entry.vacationStatus) : "CONFIRMED"
     });
     days.set(entry.dateKey, day);
   }
@@ -709,12 +744,65 @@ export async function listHolidays(params: { endDateKey: string; startDateKey: s
 export async function listVacations(params: { endDateKey: string; startDateKey: string; userId: string }) {
   await ensureTimesheetSchema();
 
-  return prisma.$queryRawUnsafe<VacationRow[]>(
-    `SELECT "dateKey", "name", "hours" FROM "Vacation" WHERE "userId" = ? AND "dateKey" BETWEEN ? AND ? ORDER BY "dateKey" ASC`,
+  const [entryRows, legacyRows] = await Promise.all([
+    prisma.$queryRawUnsafe<VacationRow[]>(
+      `SELECT "dateKey", "vacationName" AS "name", sum("hours") AS "hours", "vacationStatus" AS "status"
+       FROM "TimesheetEntry"
+       WHERE "userId" = ? AND "dateKey" BETWEEN ? AND ? AND "kind" = 'VACATION'
+       GROUP BY "dateKey", "vacationName", "vacationStatus"
+       ORDER BY "dateKey" ASC, "vacationStatus" ASC, "vacationName" ASC`,
+      params.userId,
+      params.startDateKey,
+      params.endDateKey
+    ),
+    prisma.$queryRawUnsafe<VacationRow[]>(
+      `SELECT "dateKey", "name", "hours", "status"
+       FROM "Vacation"
+       WHERE "userId" = ? AND "dateKey" BETWEEN ? AND ?
+       ORDER BY "dateKey" ASC`,
+      params.userId,
+      params.startDateKey,
+      params.endDateKey
+    )
+  ]);
+  const entryDateKeys = new Set(entryRows.map((row) => row.dateKey));
+  const rows = [...entryRows, ...legacyRows.filter((row) => !entryDateKeys.has(row.dateKey))];
+
+  return rows.map((row) => ({ ...row, status: normalizeVacationStatus(row.status) })).sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+}
+
+export async function getVacationAllowance(params: { userId: string; year: number }): Promise<VacationAllowanceRecord | null> {
+  await ensureTimesheetSchema();
+
+  const rows = await prisma.$queryRawUnsafe<VacationAllowanceRecord[]>(
+    `SELECT "userId", "year", "days" FROM "VacationAllowance" WHERE "userId" = ? AND "year" = ? LIMIT 1`,
     params.userId,
-    params.startDateKey,
-    params.endDateKey
+    params.year
   );
+
+  return rows[0] ?? null;
+}
+
+export async function upsertVacationAllowance(params: { days: number; userId: string; year: number }): Promise<VacationAllowanceRecord> {
+  await ensureTimesheetSchema();
+
+  const id = randomUUID();
+
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO "VacationAllowance" ("id", "userId", "year", "days", "createdAt", "updatedAt")
+     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT("userId", "year") DO UPDATE SET "days" = excluded."days", "updatedAt" = CURRENT_TIMESTAMP`,
+    id,
+    params.userId,
+    params.year,
+    params.days
+  );
+
+  return {
+    days: params.days,
+    userId: params.userId,
+    year: params.year
+  };
 }
 
 export async function saveTimesheetDay(params: { day: StoredTimesheetDay; userId: string }) {
@@ -825,7 +913,7 @@ async function listTimesheetDaysInTransaction(params: {
   const dateKeyPlaceholders = dateKeys.map(() => "?").join(", ");
   const [entries, dayRows] = await Promise.all([
     params.transaction.$queryRawUnsafe<TimesheetEntryRow[]>(
-      `SELECT "id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "sortOrder", "vacationName", "holidayName"
+      `SELECT "id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "sortOrder", "vacationName", "vacationStatus", "holidayName"
        FROM "TimesheetEntry"
        WHERE "userId" = ? AND "dateKey" IN (${dateKeyPlaceholders})
        ORDER BY "dateKey" ASC, "sortOrder" ASC, "createdAt" ASC`,
@@ -877,7 +965,8 @@ async function listTimesheetDaysInTransaction(params: {
       notionCards: notionCardsByEntryId.get(entry.id) ?? [],
       project: entry.kind === "WORK" ? entry.project : "",
       sortOrder: entry.sortOrder,
-      vacationName: entry.kind === "VACATION" ? entry.vacationName : ""
+      vacationName: entry.kind === "VACATION" ? entry.vacationName : "",
+      vacationStatus: entry.kind === "VACATION" ? normalizeVacationStatus(entry.vacationStatus) : "CONFIRMED"
     });
     days.set(entry.dateKey, day);
   }
@@ -911,8 +1000,8 @@ async function saveTimesheetDayInTransaction(params: {
     const entryId = entry.id || randomUUID();
 
     await params.transaction.$executeRawUnsafe(
-      `INSERT INTO "TimesheetEntry" ("id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "shortVersion", "sortOrder", "vacationName", "holidayName", "createdAt", "updatedAt")
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      `INSERT INTO "TimesheetEntry" ("id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "shortVersion", "sortOrder", "vacationName", "vacationStatus", "holidayName", "createdAt", "updatedAt")
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       entryId,
       params.userId,
       params.day.dateKey,
@@ -923,6 +1012,7 @@ async function saveTimesheetDayInTransaction(params: {
       entry.aiTranslation,
       entry.sortOrder,
       entry.vacationName,
+      entry.vacationStatus,
       entry.holidayName
     );
 
@@ -950,17 +1040,19 @@ async function saveTimesheetDayInTransaction(params: {
   }
 
   const totalHours = vacationEntries.reduce((sum, entry) => sum + entry.hours, 0);
-  const name = vacationEntries.map((entry) => entry.vacationName.trim()).filter(Boolean).join(", ") || "휴가";
+  const name = vacationEntries.map((entry) => entry.vacationName.trim()).filter(Boolean).join(", ");
+  const status = vacationEntries.some((entry) => entry.vacationStatus === "TEMPORARY") ? "TEMPORARY" : "CONFIRMED";
 
   await params.transaction.$executeRawUnsafe(
-    `INSERT INTO "Vacation" ("id", "userId", "dateKey", "name", "hours", "createdAt", "updatedAt")
-     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-     ON CONFLICT("userId", "dateKey") DO UPDATE SET "name" = excluded."name", "hours" = excluded."hours", "updatedAt" = CURRENT_TIMESTAMP`,
+    `INSERT INTO "Vacation" ("id", "userId", "dateKey", "name", "hours", "status", "createdAt", "updatedAt")
+     VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT("userId", "dateKey") DO UPDATE SET "name" = excluded."name", "hours" = excluded."hours", "status" = excluded."status", "updatedAt" = CURRENT_TIMESTAMP`,
     randomUUID(),
     params.userId,
     params.day.dateKey,
     name,
-    totalHours
+    totalHours,
+    status
   );
 }
 

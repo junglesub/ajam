@@ -76,11 +76,13 @@ export function getBusinessCalendarWeeks(year: number, monthIndex: number): Cale
 export function getBusinessDateKeysUntil(year: number, monthIndex: number, todayKey: string): string[] {
   const dateKeys: string[] = [];
   const cursor = new Date(year, monthIndex, 1);
+  const today = parseDateKey(todayKey);
+  const todayTime = today.getTime();
 
   while (cursor.getMonth() === monthIndex) {
     const dateKey = toBrowserDateKey(cursor);
 
-    if (!isWeekendDateKey(dateKey) && dateKey <= todayKey) {
+    if (!isWeekendDateKey(dateKey) && cursor.getTime() <= todayTime) {
       dateKeys.push(dateKey);
     }
 
@@ -88,6 +90,50 @@ export function getBusinessDateKeysUntil(year: number, monthIndex: number, today
   }
 
   return dateKeys;
+}
+
+export function addDays(dateKey: string, days: number): string {
+  const date = parseDateKey(dateKey);
+  date.setDate(date.getDate() + days);
+  return toBrowserDateKey(date);
+}
+
+export function addBusinessDays(dateKey: string, direction: -1 | 1): string {
+  let next = addDays(dateKey, direction);
+
+  while (isWeekendDateKey(next)) {
+    next = addDays(next, direction);
+  }
+
+  return next;
+}
+
+export function getBusinessDateKeysInRange(startDateKey: string, endDateKey: string): string[] {
+  const startDate = parseDateKey(startDateKey);
+  const endDate = parseDateKey(endDateKey);
+  const start = startDate.getTime() <= endDate.getTime() ? startDate : endDate;
+  const end = startDate.getTime() <= endDate.getTime() ? endDate : startDate;
+  const dateKeys: string[] = [];
+  const cursor = new Date(start.getTime());
+
+  while (cursor.getTime() <= end.getTime()) {
+    const dateKey = toBrowserDateKey(cursor);
+
+    if (!isWeekendDateKey(dateKey)) {
+      dateKeys.push(dateKey);
+    }
+
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return dateKeys;
+}
+
+export function getYearRange(year: number): { endDateKey: string; startDateKey: string } {
+  return {
+    endDateKey: `${year}-12-31`,
+    startDateKey: `${year}-01-01`
+  };
 }
 
 export function getMonthLabel(year: number, monthIndex: number): string {

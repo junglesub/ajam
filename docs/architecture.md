@@ -32,11 +32,12 @@
 
 ## Data Model
 
-- `TimesheetEntry`: 사용자별 날짜 기록을 저장한다. `userId + dateKey`가 유일하다.
+- `TimesheetEntry`: 사용자별 날짜의 개별 업무/휴가/공휴일 entry를 저장한다. 한 날짜에 여러 entry가 있을 수 있고 `sortOrder`로 표시 순서를 유지한다.
 - `Project`: 사용자별 프로젝트 목록을 저장한다. 새 프로젝트는 사용자가 직접 등록한다.
 - `Holiday`: 공휴일 날짜와 이름을 저장한다.
 - `HolidayFetchLog`: `getRestDeInfo` 월별 조회 여부를 저장해 같은 월을 반복 fetch하지 않게 한다.
 - `Vacation`: 사용자별 휴가 날짜, 이름, 시간을 저장한다. 업무 기록을 휴가로 저장하면 같은 날짜의 휴가 레코드가 동기화된다.
+- `VacationAllowance`: 사용자별 연도별 연차 총량을 저장한다. 휴가 사용량은 기존 `Vacation` 기록의 시간을 8시간 기준 일수로 환산한다.
 - `AppSetting`: 공공데이터포털 서비스 키 같은 앱 설정값을 저장한다.
 - `UserAiSetting`: 사용자별 Gemini API key, 모델, 자동 정리 여부, 실행 방식, 참고할 이전 저장 WORK 날짜 수, 과거 미작성 AI 필드 보정 설정을 저장한다. API key는 앱 secret으로 암호화해 저장한다.
 - `TimesheetDay.aiRewriteRequested`: n8n 예약 AI 정리가 해당 날짜의 기존 영문 번역본과 짧은 버전을 한 번 다시 작성해도 되는지 저장한다. 이 값은 전역 설정이 아니라 `AI도 업데이트`를 선택한 날짜에만 켜진다.
@@ -70,6 +71,7 @@
 ## Data Flow
 
 - `/timesheet` 서버 컴포넌트가 서버 기준 현재 월의 기록, 공휴일, 프로젝트, 휴가, 사용자/설정 데이터를 조회해 클라이언트 작업 공간에 전달하고, 클라이언트는 브라우저 기준 현재 월과 다르면 해당 월을 추가 조회한다.
+- `/vacations`는 선택 연도의 `VacationAllowance`, `Vacation`, `Holiday` 데이터를 조회해 연간 휴가 캘린더와 유형별 요약을 표시한다. 휴가 입력/수정/삭제는 기존 timesheet 저장 경로를 사용하되 같은 날짜의 업무/공휴일 기록은 보존한다.
 - 월 이동 시 클라이언트가 server action으로 해당 월 데이터를 추가 조회한다.
 - 오른쪽 패널에서 저장을 누르면 `saveTimesheetEntryAction`이 `TimesheetEntry`를 upsert한다.
 - save-time AI cleanup은 저장 성공 후 별도 server action으로 실행한다. 일반 저장 결과와 AI 결과는 분리하며, AI 실패는 저장 성공을 되돌리지 않는다.

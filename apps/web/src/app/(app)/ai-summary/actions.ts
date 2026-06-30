@@ -68,7 +68,7 @@ async function requireSession() {
   return user;
 }
 
-function mergeLegacyVacations(entries: StoredTimesheetDraft[], vacations: Array<{ dateKey: string; hours: number; name: string }>): StoredTimesheetDraft[] {
+function mergeLegacyVacations(entries: StoredTimesheetDraft[], vacations: Array<{ dateKey: string; hours: number; name: string; status: "CONFIRMED" | "TEMPORARY" }>): StoredTimesheetDraft[] {
   const days = new Map(entries.map((entry) => [entry.dateKey, { ...entry, entries: [...entry.entries] }]));
 
   for (const vacation of vacations) {
@@ -96,7 +96,8 @@ function mergeLegacyVacations(entries: StoredTimesheetDraft[], vacations: Array<
       notionCards: [],
       project: "",
       sortOrder: day.entries.length,
-      vacationName: vacation.name
+      vacationName: vacation.name,
+      vacationStatus: vacation.status
     };
 
     day.entries.push(vacationEntry);

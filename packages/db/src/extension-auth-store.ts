@@ -470,7 +470,8 @@ function mergeLegacyVacations(days: StoredTimesheetDay[], vacations: VacationRec
       notionCards: [],
       project: "",
       sortOrder: day.entries.length,
-      vacationName: vacation.name
+      vacationName: vacation.name,
+      vacationStatus: vacation.status
     };
 
     day.entries.push(vacationEntry);

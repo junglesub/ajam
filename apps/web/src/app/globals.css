@@ -38,3 +38,9 @@ select {
 body:has([data-footer-scope="auth"]) .site-footer {
   display: none;
 }
+
+.vacation-connected-date {
+  box-shadow: 0 0 0 4px rgb(15 23 42 / 8%), 0 4px 10px rgb(15 23 42 / 10%);
+  outline: 1.5px solid rgb(15 23 42 / 78%);
+  outline-offset: 1px;
+}

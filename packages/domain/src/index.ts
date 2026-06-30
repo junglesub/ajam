@@ -1,8 +1,12 @@
 export {
+  addBusinessDays,
+  addDays,
   formatKoreanDate,
   getBusinessCalendarWeeks,
+  getBusinessDateKeysInRange,
   getBusinessDateKeysUntil,
   getMonthLabel,
+  getYearRange,
   isWeekendDateKey,
   parseDateKey,
   toBrowserDateKey
@@ -56,7 +60,7 @@ export type {
   MonthlyTimeMacroStep
 } from "./monthly-time-macro";
 export { resolveStatus, statusLabel, statusTone } from "./status";
-export type { TimesheetStatus, WorkRecordKind } from "./status";
+export type { TimesheetStatus, VacationStatus, WorkRecordKind } from "./status";
 export { createEmptyDraft, createEmptyEntryDraft, getDisplayContent } from "./timesheet";
 export type {
   TimesheetDayDraft,
@@ -64,3 +68,21 @@ export type {
   TimesheetEntryNotionCardDraft,
   TimesheetRow
 } from "./timesheet";
+export {
+  buildVacationYearMetricSummary,
+  buildVacationYearMetrics,
+  clampVacationFillRatio,
+  findConnectedVacationDateKeys,
+  findConnectedVacationDateKeysInDirection,
+  groupVacationRecordsByName,
+  isTemporaryVacationStatus,
+  normalizeVacationName
+} from "./vacation-year";
+export type {
+  ConnectedVacationDatePredicateParams,
+  VacationYearColorClass,
+  VacationYearGroup,
+  VacationYearMetricSummary,
+  VacationYearMetrics,
+  VacationYearRecord
+} from "./vacation-year";

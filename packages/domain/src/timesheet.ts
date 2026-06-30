@@ -1,4 +1,4 @@
-import type { TimesheetStatus, WorkRecordKind } from "./status";
+import type { TimesheetStatus, VacationStatus, WorkRecordKind } from "./status";
 
 export type TimesheetEntryNotionCardDraft = {
   allocatedHours: number;
@@ -28,6 +28,7 @@ export type TimesheetEntryDraft = {
   project: string;
   sortOrder: number;
   vacationName: string;
+  vacationStatus: VacationStatus;
 };
 
 export type TimesheetDayDraft = {
@@ -52,6 +53,7 @@ export type TimesheetRow = TimesheetDayDraft & {
   projectCount: number;
   status: TimesheetStatus;
   vacationName: string;
+  vacationStatus: VacationStatus;
 };
 
 export function createEmptyEntryDraft(sortOrder = 0): TimesheetEntryDraft {
@@ -67,7 +69,8 @@ export function createEmptyEntryDraft(sortOrder = 0): TimesheetEntryDraft {
     notionCards: [],
     project: "",
     sortOrder,
-    vacationName: ""
+    vacationName: "",
+    vacationStatus: "CONFIRMED"
   };
 }
 

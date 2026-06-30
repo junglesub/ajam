@@ -30,7 +30,8 @@ const days: TimesheetDayDraft[] = [
         notionCards: [],
         project: "aJam",
         sortOrder: 0,
-        vacationName: ""
+        vacationName: "",
+        vacationStatus: "CONFIRMED"
       },
       {
         aiTranslation: "must be cleared",
@@ -43,7 +44,8 @@ const days: TimesheetDayDraft[] = [
         notionCards: [],
         project: "must be cleared",
         sortOrder: 1,
-        vacationName: "반차"
+        vacationName: "반차",
+        vacationStatus: "CONFIRMED"
       }
     ]
   },
@@ -63,7 +65,8 @@ const days: TimesheetDayDraft[] = [
         notionCards: [],
         project: "must be cleared",
         sortOrder: 0,
-        vacationName: "must be cleared"
+        vacationName: "must be cleared",
+        vacationStatus: "CONFIRMED"
       }
     ]
   }

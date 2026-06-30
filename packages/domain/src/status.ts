@@ -1,6 +1,7 @@
 export type TimesheetStatus = "HOLIDAY" | "VACATION" | "COMPLETED" | "MISSING" | "FUTURE";
 
 export type WorkRecordKind = "WORK" | "VACATION" | "HOLIDAY";
+export type VacationStatus = "CONFIRMED" | "TEMPORARY";
 
 export const statusLabel: Record<TimesheetStatus, string> = {
   COMPLETED: "완료",

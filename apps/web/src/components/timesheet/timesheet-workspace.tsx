@@ -22,6 +22,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEv
 
 import {
   allocateNotionCardHours,
+  clampVacationFillRatio,
   createEmptyDraft,
   createEmptyEntryDraft,
   formatKoreanDate,
@@ -39,6 +40,7 @@ import {
   type TimesheetDayDraft,
   type TimesheetEntryDraft,
   type TimesheetEntryNotionCardDraft,
+  type VacationStatus,
   type WorkRecordKind
 } from "@timesheet/domain";
 import { Badge, Button, Input, Label, SegmentedControl, Textarea, cn } from "@timesheet/ui";
@@ -172,11 +174,19 @@ type PendingNavigation =
   | { kind: "today" };
 
 type ConnectedVacationPrompt = {
+  actionLabel: string;
   dateKeys: string[];
-  hours: number;
+  matchVacationName: string;
+  matchVacationStatus: VacationStatus;
   vacationName: string;
+  vacationStatus: VacationStatus;
 };
 type ConnectedVacationAction = "delete" | "save";
+type VacationSaveAction = {
+  label: string;
+  status: VacationStatus;
+  variant: "primary" | "secondary" | "ghost";
+};
 
 type TimesheetWorkspaceProps = {
   addProjectAction: (name: string) => Promise<string>;
@@ -229,6 +239,11 @@ const cellToneByStatus: Record<TimesheetStatus, string> = {
   VACATION: "border-blue-200 bg-blue-50/80 hover:border-blue-300"
 };
 
+const vacationMixColor = "rgba(59, 130, 246, 0.18)";
+const temporaryVacationHatchBackground =
+  "linear-gradient(rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.38)), repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.62) 0 5px, rgba(59, 130, 246, 0.06) 5px 10px)";
+const fullDayHours = 8;
+
 const newProjectOptionValue = "__new_project__";
 
 const kindOptions: Array<{ label: string; value: WorkRecordKind }> = [
@@ -236,6 +251,133 @@ const kindOptions: Array<{ label: string; value: WorkRecordKind }> = [
   { label: "휴가", value: "VACATION" },
   { label: "공휴일", value: "HOLIDAY" }
 ];
+
+function getVacationSaveActions(mode: "create" | "edit", status: VacationStatus): VacationSaveAction[] {
+  if (mode === "create") {
+    return [
+      { label: "저장", status: "CONFIRMED", variant: "primary" },
+      { label: "임시저장", status: "TEMPORARY", variant: "secondary" }
+    ];
+  }
+
+  if (status === "TEMPORARY") {
+    return [
+      { label: "임시저장", status: "TEMPORARY", variant: "primary" },
+      { label: "등록", status: "CONFIRMED", variant: "secondary" }
+    ];
+  }
+
+  return [
+    { label: "저장", status: "CONFIRMED", variant: "primary" },
+    { label: "임시로 변경", status: "TEMPORARY", variant: "ghost" }
+  ];
+}
+
+function getWorkVacationMixVacationClipPath(row: TimesheetRow): string | undefined {
+  const orderedKinds: Array<"VACATION" | "WORK"> = [];
+
+  for (const entry of row.entries) {
+    if ((entry.kind === "WORK" || entry.kind === "VACATION") && !orderedKinds.includes(entry.kind)) {
+      orderedKinds.push(entry.kind);
+    }
+  }
+
+  if (!orderedKinds.includes("WORK") || !orderedKinds.includes("VACATION")) {
+    return undefined;
+  }
+
+  if (orderedKinds.length < 2) {
+    return undefined;
+  }
+
+  return orderedKinds[0] === "VACATION"
+    ? "polygon(0 0, 100% 0, 0 100%)"
+    : "polygon(100% 0, 100% 100%, 0 100%)";
+}
+
+function getCalendarCellStyle(row: TimesheetRow | undefined) {
+  if (!row) {
+    return undefined;
+  }
+
+  const vacationClipPath = getWorkVacationMixVacationClipPath(row);
+  const isTemporaryVacation = row.hasVacation && row.vacationStatus === "TEMPORARY";
+
+  if (vacationClipPath) {
+    return undefined;
+  }
+
+  if (isPartialVacationOnlyCell(row)) {
+    return undefined;
+  }
+
+  if (isTemporaryVacation) {
+    return { backgroundImage: temporaryVacationHatchBackground };
+  }
+
+  return undefined;
+}
+
+function getVacationOnlyEntry(row: TimesheetRow | undefined): TimesheetEntryDraft | undefined {
+  if (!row || row.entries.length !== 1) {
+    return undefined;
+  }
+
+  const [entry] = row.entries;
+
+  return entry?.kind === "VACATION" ? entry : undefined;
+}
+
+function isPartialVacationOnlyCell(row: TimesheetRow | undefined): boolean {
+  const vacation = getVacationOnlyEntry(row);
+
+  return Boolean(vacation && clampVacationFillRatio(vacation.hours) < 1);
+}
+
+function getPartialVacationOnlyOverlayStyle(row: TimesheetRow | undefined) {
+  const vacation = getVacationOnlyEntry(row);
+
+  if (!vacation) {
+    return undefined;
+  }
+
+  const fillRatio = clampVacationFillRatio(vacation.hours);
+
+  if (fillRatio <= 0 || fillRatio >= 1) {
+    return undefined;
+  }
+
+  const fillStop = `${Math.round(fillRatio * 100)}%`;
+  const fillMask = `linear-gradient(135deg, #000 0 ${fillStop}, transparent ${fillStop} 100%)`;
+  const isTemporaryVacation = vacation.vacationStatus === "TEMPORARY";
+
+  return {
+    backgroundColor: vacationMixColor,
+    backgroundImage: isTemporaryVacation ? temporaryVacationHatchBackground : undefined,
+    WebkitMaskImage: fillMask,
+    maskImage: fillMask
+  };
+}
+
+function getVacationMixOverlayStyle(row: TimesheetRow | undefined) {
+  if (!row) {
+    return undefined;
+  }
+
+  const vacationClipPath = getWorkVacationMixVacationClipPath(row);
+
+  if (!vacationClipPath) {
+    return undefined;
+  }
+
+  const isTemporaryVacation = row.vacationStatus === "TEMPORARY";
+
+  return {
+    backgroundColor: vacationMixColor,
+    backgroundImage: isTemporaryVacation ? temporaryVacationHatchBackground : undefined,
+    clipPath: vacationClipPath
+  };
+}
 
 const aiModelPresets = [
   { label: "빠름/저렴 - gemini-3.1-flash-lite", value: "gemini-3.1-flash-lite" },
@@ -327,7 +469,7 @@ function getDefaultSelectedDateForMonth(year: number, monthIndex: number): strin
   return toBrowserDateKey(new Date(year, monthIndex, 1));
 }
 
-function createVacationDay(dateKey: string, vacationName: string, hours: number): TimesheetDayDraft {
+function createVacationDay(dateKey: string, vacationName: string, hours: number, vacationStatus: VacationStatus = "CONFIRMED"): TimesheetDayDraft {
   return {
     ...createEmptyDraft(dateKey),
     entries: [
@@ -336,7 +478,8 @@ function createVacationDay(dateKey: string, vacationName: string, hours: number)
         clientId: createClientId(),
         hours,
         kind: "VACATION",
-        vacationName
+        vacationName,
+        vacationStatus
       }
     ]
   };
@@ -658,6 +801,10 @@ function firstHolidayEntry(day: TimesheetDayDraft): TimesheetEntryDraft | undefi
   return day.entries.find((entry) => entry.kind === "HOLIDAY");
 }
 
+function effectiveEntryHours(entry: TimesheetEntryDraft): number {
+  return entry.kind === "HOLIDAY" && entry.hours === 0 ? fullDayHours : entry.hours;
+}
+
 function hasHolidayMarker(day: TimesheetDayDraft | undefined): boolean {
   return Boolean(day?.holidayName || day?.entries.some((entry) => entry.kind === "HOLIDAY"));
 }
@@ -672,7 +819,8 @@ function rowFromDraft(dateKey: string, todayKey: string, draft: TimesheetDayDraf
   const firstHoliday = firstHolidayEntry(row);
   const previewContent = firstWork ? row.shortVersion || firstWork.content : "";
   const hasContent = isSaved && row.entries.length > 0;
-  const hasVacation = row.entries.some((entry) => entry.kind === "VACATION");
+  const firstVacation = row.entries.find((entry) => entry.kind === "VACATION");
+  const hasVacation = Boolean(firstVacation);
   const hasHoliday = Boolean(firstHoliday || row.holidayName);
   const isVacationOnly = hasVacation && !firstWork && !hasHoliday;
   const shouldWarnForMissingNotionCards = isSaved || !isAutoProjectOnlyDraft(row);
@@ -687,7 +835,7 @@ function rowFromDraft(dateKey: string, todayKey: string, draft: TimesheetDayDraf
     hasNotionCardWarning,
     hasUnlinkedNotionWork,
     hasVacation,
-    hours: row.entries.reduce((sum, entry) => sum + entry.hours, 0),
+    hours: row.entries.reduce((sum, entry) => sum + effectiveEntryHours(entry), 0),
     kind: firstWork?.kind ?? (hasHoliday ? "HOLIDAY" : hasVacation ? "VACATION" : "WORK"),
     previewContent,
     project: firstWork?.project ?? "",
@@ -701,7 +849,8 @@ function rowFromDraft(dateKey: string, todayKey: string, draft: TimesheetDayDraf
           todayKey
         }),
     holidayName: row.holidayName || firstHoliday?.holidayName || "",
-    vacationName: row.entries.find((entry) => entry.kind === "VACATION")?.vacationName ?? ""
+    vacationName: firstVacation?.vacationName ?? "",
+    vacationStatus: firstVacation?.vacationStatus ?? "CONFIRMED"
   };
 }
 
@@ -1020,8 +1169,9 @@ export function TimesheetWorkspace({
   const [isVacationRangeOpen, setIsVacationRangeOpen] = useState(false);
   const [vacationRangeStart, setVacationRangeStart] = useState(todayKey);
   const [vacationRangeEnd, setVacationRangeEnd] = useState(todayKey);
-  const [vacationRangeName, setVacationRangeName] = useState("휴가");
+  const [vacationRangeName, setVacationRangeName] = useState("");
   const [vacationRangeHours, setVacationRangeHours] = useState(8);
+  const [vacationRangeStatus, setVacationRangeStatus] = useState<VacationStatus>("CONFIRMED");
   const [canEditVacationRangeStart, setCanEditVacationRangeStart] = useState(false);
   const [vacationRangeState, setVacationRangeState] = useState<VacationRangeSaveState>("idle");
   const [vacationRangeError, setVacationRangeError] = useState("");
@@ -1176,6 +1326,16 @@ export function TimesheetWorkspace({
   const selectedHasWork = selectedDay.entries.some((entry) => entry.kind === "WORK");
   const selectedIsHoliday = selectedEditorKind === "HOLIDAY";
   const selectedIsSingleVacation = selectedDay.entries.length === 1 && selectedEntry?.kind === "VACATION";
+  const savedSelectedVacation = selectedEntry?.kind === "VACATION"
+    ? savedRecords[selectedDateKey]?.entries.find((entry) => entry.kind === "VACATION" && (entry.id === selectedEntry.id || entry.clientId === selectedEntry.clientId))
+    : undefined;
+  const selectedVacationMode: "create" | "edit" = savedSelectedVacation ? "edit" : "create";
+  const selectedVacationSaveActions = selectedEntry?.kind === "VACATION" ? getVacationSaveActions(selectedVacationMode, selectedEntry.vacationStatus) : [];
+  const primarySelectedVacationSaveAction = selectedVacationSaveActions.find((action) => action.variant === "primary");
+  const secondarySelectedVacationSaveActions = selectedVacationSaveActions.filter((action) => action.variant !== "primary");
+  const vacationRangeSaveActions = getVacationSaveActions(selectedVacationMode, vacationRangeStatus);
+  const primaryVacationRangeSaveAction = vacationRangeSaveActions.find((action) => action.variant === "primary");
+  const secondaryVacationRangeSaveActions = vacationRangeSaveActions.filter((action) => action.variant !== "primary");
   const isDevelopment = process.env.NODE_ENV === "development";
   const entryDragSensors = useSensors(
     useSensor(PointerSensor, {
@@ -1731,19 +1891,84 @@ export function TimesheetWorkspace({
     return Boolean(draft?.holidayName || draft?.entries.some((entry) => entry.kind === "HOLIDAY"));
   }
 
-  function isSavedVacationOnlyDate(dateKey: string, loadedDrafts: Record<string, TimesheetDayDraft> = {}): boolean {
-    const draft = getSavedDraftForVacationDate(dateKey, loadedDrafts);
+  function getVacationEntryIndex(draft: TimesheetDayDraft | undefined, vacationStatus?: VacationStatus, vacationName?: string): number {
+    const hasVacationNameFilter = vacationName !== undefined;
+    const trimmedVacationName = vacationName?.trim() ?? "";
 
-    return Boolean(draft?.entries.length === 1 && draft.entries[0]?.kind === "VACATION");
+    return (
+      draft?.entries.findIndex(
+        (entry) =>
+          entry.kind === "VACATION" &&
+          (!vacationStatus || entry.vacationStatus === vacationStatus) &&
+          (!hasVacationNameFilter || entry.vacationName.trim() === trimmedVacationName)
+      ) ?? -1
+    );
   }
 
-  function findConnectedVacationDateKeysInDirection(dateKey: string, direction: -1 | 1, loadedDrafts: Record<string, TimesheetDayDraft>): string[] {
+  function getVacationBoundary(draft: TimesheetDayDraft | undefined, vacationStatus?: VacationStatus, vacationName?: string) {
+    const vacationIndex = getVacationEntryIndex(draft, vacationStatus, vacationName);
+
+    if (!draft || vacationIndex < 0) {
+      return null;
+    }
+
+    return {
+      endsDay: vacationIndex === draft.entries.length - 1,
+      startsDay: vacationIndex === 0
+    };
+  }
+
+  function selectedVacationBoundary() {
+    if (selectedEntry?.kind !== "VACATION") {
+      return null;
+    }
+
+    const vacationIndex = selectedDay.entries.findIndex((entry) => entry.clientId === selectedEntry.clientId);
+
+    if (vacationIndex < 0) {
+      return null;
+    }
+
+    return {
+      endsDay: vacationIndex === selectedDay.entries.length - 1,
+      startsDay: vacationIndex === 0
+    };
+  }
+
+  function findConnectedVacationDateKeysInDirection(
+    dateKey: string,
+    direction: -1 | 1,
+    loadedDrafts: Record<string, TimesheetDayDraft>,
+    vacationStatus?: VacationStatus,
+    vacationName?: string
+  ): string[] {
     const dateKeys: string[] = [];
     let cursor = addBusinessDays(dateKey, direction);
 
-    while (isSavedHolidayDate(cursor, loadedDrafts) || isSavedVacationOnlyDate(cursor, loadedDrafts)) {
-      if (isSavedVacationOnlyDate(cursor, loadedDrafts)) {
-        dateKeys.push(cursor);
+    while (true) {
+      if (isSavedHolidayDate(cursor, loadedDrafts)) {
+        cursor = addBusinessDays(cursor, direction);
+        continue;
+      }
+
+      const boundary = getVacationBoundary(getSavedDraftForVacationDate(cursor, loadedDrafts), vacationStatus, vacationName);
+
+      if (!boundary) {
+        break;
+      }
+
+      const connectsToCursor = direction === 1 ? boundary.startsDay : boundary.endsDay;
+
+      if (!connectsToCursor) {
+        break;
+      }
+
+      dateKeys.push(cursor);
+
+      const continuesPastCursor = direction === 1 ? boundary.endsDay : boundary.startsDay;
+
+      if (!continuesPastCursor) {
+        break;
       }
 
       cursor = addBusinessDays(cursor, direction);
@@ -1758,12 +1983,12 @@ export function TimesheetWorkspace({
     return Boolean(savedEntryDateKeys.has(dateKey) || draft?.entries.length || draft?.shortVersion.trim());
   }
 
-  async function saveVacationDays(dateKeys: string[], vacationName: string, hours: number, onProgress?: (completed: number, total: number) => void): Promise<TimesheetDayDraft[]> {
+  async function saveVacationDays(dateKeys: string[], vacationName: string, hours: number, vacationStatus: VacationStatus = "CONFIRMED", onProgress?: (completed: number, total: number) => void): Promise<TimesheetDayDraft[]> {
     const savedDays: TimesheetDayDraft[] = [];
     const total = dateKeys.length;
 
     for (const dateKey of dateKeys) {
-      const saveResult = await saveEntryAction(sanitizeDayForSave(createVacationDay(dateKey, vacationName || "휴가", hours)));
+      const saveResult = await saveEntryAction(sanitizeDayForSave(createVacationDay(dateKey, vacationName, hours, vacationStatus)));
       const savedDay = withClientIds(saveResult.day);
 
       showNotionSyncError(saveResult.notionSyncError);
@@ -1782,6 +2007,53 @@ export function TimesheetWorkspace({
       setSelectedEntryIdByDate((current) => ({
         ...current,
         [savedDay.dateKey]: savedDay.entries[0]?.clientId ?? ""
+      }));
+    }
+
+    return savedDays;
+  }
+
+  function updateVacationEntryForConnectedSave(day: TimesheetDayDraft, vacationName: string, matchVacationName: string, matchVacationStatus: VacationStatus, vacationStatus: VacationStatus): TimesheetDayDraft {
+    return {
+      ...day,
+      entries: day.entries.map((entry) =>
+        entry.kind === "VACATION" && entry.vacationStatus === matchVacationStatus && entry.vacationName.trim() === matchVacationName.trim()
+          ? { ...entry, vacationName, vacationStatus }
+          : entry
+      )
+    };
+  }
+
+  async function saveConnectedVacationDaysPreservingHours(dateKeys: string[], vacationName: string, matchVacationName: string, matchVacationStatus: VacationStatus, vacationStatus: VacationStatus, loadedDrafts: Record<string, TimesheetDayDraft>, onProgress?: (completed: number, total: number) => void): Promise<TimesheetDayDraft[]> {
+    const savedDays: TimesheetDayDraft[] = [];
+    const total = dateKeys.length;
+
+    for (const dateKey of dateKeys) {
+      const sourceDay = dateKey === selectedDateKey ? selectedDay : getSavedDraftForVacationDate(dateKey, loadedDrafts);
+
+      if (!sourceDay?.entries.some((entry) => entry.kind === "VACATION" && entry.vacationStatus === matchVacationStatus && entry.vacationName.trim() === matchVacationName.trim())) {
+        continue;
+      }
+
+      const saveResult = await saveEntryAction(sanitizeDayForSave(updateVacationEntryForConnectedSave(sourceDay, vacationName, matchVacationName, matchVacationStatus, vacationStatus)));
+      const savedDay = withClientIds(saveResult.day);
+
+      showNotionSyncError(saveResult.notionSyncError);
+      savedDays.push(savedDay);
+      onProgress?.(savedDays.length, total);
+
+      setRecords((current) => ({
+        ...current,
+        [savedDay.dateKey]: savedDay
+      }));
+      setSavedRecords((current) => ({
+        ...current,
+        [savedDay.dateKey]: savedDay
+      }));
+      setSavedEntryDateKeys((current) => new Set(current).add(savedDay.dateKey));
+      setSelectedEntryIdByDate((current) => ({
+        ...current,
+        [savedDay.dateKey]: savedDay.entries.find((entry) => entry.kind === "VACATION")?.clientId ?? savedDay.entries[0]?.clientId ?? ""
       }));
     }
 
@@ -2074,8 +2346,9 @@ export function TimesheetWorkspace({
 
     setVacationRangeStart(selectedDateKey);
     setVacationRangeEnd(selectedDateKey);
-    setVacationRangeName(selectedEntry?.kind === "VACATION" ? selectedEntry.vacationName || "휴가" : "휴가");
+    setVacationRangeName(selectedEntry?.kind === "VACATION" ? selectedEntry.vacationName : "");
     setVacationRangeHours(selectedEntry?.kind === "VACATION" ? selectedEntry.hours || 8 : 8);
+    setVacationRangeStatus(selectedEntry?.kind === "VACATION" ? selectedEntry.vacationStatus : "CONFIRMED");
     setCanEditVacationRangeStart(false);
     setVacationRangeState("idle");
     setVacationRangeError("");
@@ -2087,8 +2360,11 @@ export function TimesheetWorkspace({
     try {
       const windowKeys = getBusinessDateKeysInRange(addDays(selectedDateKey, -45), addDays(selectedDateKey, 45));
       const loadedDrafts = await loadDateKeysForVacation(windowKeys);
-      const leftVacationKeys = findConnectedVacationDateKeysInDirection(selectedDateKey, -1, loadedDrafts);
-      const rightVacationKeys = findConnectedVacationDateKeysInDirection(selectedDateKey, 1, loadedDrafts);
+      const baseVacationStatus = selectedEntry?.kind === "VACATION" ? selectedEntry.vacationStatus : "CONFIRMED";
+      const baseVacationName = selectedEntry?.kind === "VACATION" ? savedSelectedVacation?.vacationName ?? selectedEntry.vacationName : undefined;
+      const boundary = selectedVacationBoundary();
+      const leftVacationKeys = boundary?.startsDay ? findConnectedVacationDateKeysInDirection(selectedDateKey, -1, loadedDrafts, baseVacationStatus, baseVacationName) : [];
+      const rightVacationKeys = boundary?.endsDay ? findConnectedVacationDateKeysInDirection(selectedDateKey, 1, loadedDrafts, baseVacationStatus, baseVacationName) : [];
 
       if (leftVacationKeys.length === 0 && rightVacationKeys.length === 0) {
         return;
@@ -2120,7 +2396,7 @@ export function TimesheetWorkspace({
     setVacationRangeProgress({ completed: 0, total: 0 });
   }
 
-  async function applyVacationRange(confirmReplace = false) {
+  async function applyVacationRange(confirmReplace = false, vacationStatus: VacationStatus = vacationRangeStatus) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(vacationRangeStart) || !/^\d{4}-\d{2}-\d{2}$/.test(vacationRangeEnd)) {
       setVacationRangeState("error");
       setVacationRangeError("시작날짜와 끝날짜를 선택해 주세요.");
@@ -2167,7 +2443,7 @@ export function TimesheetWorkspace({
       }
 
       setVacationRangeProgress({ completed: 0, total: targetDateKeys.length });
-      const savedDays = await saveVacationDays(targetDateKeys, vacationRangeName, vacationRangeHours, (completed, total) => {
+      const savedDays = await saveVacationDays(targetDateKeys, vacationRangeName, vacationRangeHours, vacationStatus, (completed, total) => {
         setVacationRangeProgress({ completed, total });
       });
       const selectedSavedDay = savedDays.find((day) => day.dateKey === selectedDateKey);
@@ -2191,7 +2467,11 @@ export function TimesheetWorkspace({
     }
   }
 
-  async function findConnectedVacationPrompt(): Promise<ConnectedVacationPrompt | null> {
+  async function findConnectedVacationPrompt(
+    matchVacationStatus: VacationStatus = selectedEntry?.vacationStatus ?? "CONFIRMED",
+    actionLabel = "저장",
+    nextVacationStatus: VacationStatus = matchVacationStatus
+  ): Promise<ConnectedVacationPrompt | null> {
     if (selectedEntry?.kind !== "VACATION") {
       return null;
     }
@@ -2199,8 +2479,10 @@ export function TimesheetWorkspace({
     const windowKeys = getBusinessDateKeysInRange(addDays(selectedDateKey, -45), addDays(selectedDateKey, 45));
     const loadedDrafts = await loadDateKeysForVacation(windowKeys);
     const savedWasVacation = savedRecords[selectedDateKey]?.entries.some((entry) => entry.kind === "VACATION") ?? false;
-    const leftVacationKeys = findConnectedVacationDateKeysInDirection(selectedDateKey, -1, loadedDrafts);
-    const rightVacationKeys = findConnectedVacationDateKeysInDirection(selectedDateKey, 1, loadedDrafts);
+    const matchVacationName = savedSelectedVacation?.vacationName ?? selectedEntry.vacationName;
+    const boundary = selectedVacationBoundary();
+    const leftVacationKeys = boundary?.startsDay ? findConnectedVacationDateKeysInDirection(selectedDateKey, -1, loadedDrafts, matchVacationStatus, matchVacationName) : [];
+    const rightVacationKeys = boundary?.endsDay ? findConnectedVacationDateKeysInDirection(selectedDateKey, 1, loadedDrafts, matchVacationStatus, matchVacationName) : [];
     const hasLeftVacation = leftVacationKeys.length > 0;
     const hasRightVacation = rightVacationKeys.length > 0;
 
@@ -2229,9 +2511,12 @@ export function TimesheetWorkspace({
     }
 
     return {
+      actionLabel,
       dateKeys: sortedDateKeys,
-      hours: selectedEntry.hours || 8,
-      vacationName: selectedEntry.vacationName || "휴가"
+      matchVacationName,
+      matchVacationStatus,
+      vacationName: selectedEntry.vacationName,
+      vacationStatus: nextVacationStatus
     };
   }
 
@@ -2248,7 +2533,7 @@ export function TimesheetWorkspace({
       const loadedDrafts = await loadDateKeysForVacation(connectedVacationPrompt.dateKeys);
       const targetDateKeys = connectedVacationPrompt.dateKeys.filter((dateKey) => !isHolidayVacationDate(dateKey, loadedDrafts));
       setConnectedVacationProgress({ completed: 0, total: targetDateKeys.length });
-      await saveVacationDays(targetDateKeys, connectedVacationPrompt.vacationName, connectedVacationPrompt.hours, (completed, total) => {
+      await saveConnectedVacationDaysPreservingHours(targetDateKeys, connectedVacationPrompt.vacationName, connectedVacationPrompt.matchVacationName, connectedVacationPrompt.matchVacationStatus, connectedVacationPrompt.vacationStatus, loadedDrafts, (completed, total) => {
         setConnectedVacationProgress({ completed, total });
       });
       setConnectedVacationPrompt(null);
@@ -2321,16 +2606,50 @@ export function TimesheetWorkspace({
       const targetDateKeys = connectedVacationPrompt.dateKeys.filter((dateKey) => !isSavedHolidayDate(dateKey, loadedDrafts));
       setConnectedVacationProgress({ completed: 0, total: targetDateKeys.length });
       let completed = 0;
+      const removedDateKeys: string[] = [];
 
       for (const dateKey of targetDateKeys) {
-        const deleteResult = await deleteEntryAction(dateKey);
+        const sourceDay = dateKey === selectedDateKey ? selectedDay : getSavedDraftForVacationDate(dateKey, loadedDrafts);
+        const preservedEntries =
+          sourceDay?.entries.filter(
+            (entry) =>
+              entry.kind !== "VACATION" ||
+              entry.vacationStatus !== connectedVacationPrompt.matchVacationStatus ||
+              entry.vacationName.trim() !== connectedVacationPrompt.matchVacationName.trim()
+          ) ?? [];
 
-        showNotionSyncError(deleteResult.notionSyncError);
+        if (sourceDay && preservedEntries.length > 0) {
+          const saveResult = await saveEntryAction(sanitizeDayForSave({
+            ...sourceDay,
+            entries: preservedEntries.map((entry, index) => ({ ...entry, sortOrder: index }))
+          }));
+          const savedDay = withClientIds(saveResult.day);
+
+          showNotionSyncError(saveResult.notionSyncError);
+          setRecords((current) => ({
+            ...current,
+            [savedDay.dateKey]: savedDay
+          }));
+          setSavedRecords((current) => ({
+            ...current,
+            [savedDay.dateKey]: savedDay
+          }));
+          setSelectedEntryIdByDate((current) => ({
+            ...current,
+            [savedDay.dateKey]: savedDay.entries[0]?.clientId ?? ""
+          }));
+        } else {
+          const deleteResult = await deleteEntryAction(dateKey);
+
+          showNotionSyncError(deleteResult.notionSyncError);
+          removedDateKeys.push(dateKey);
+        }
+
         completed += 1;
         setConnectedVacationProgress({ completed, total: targetDateKeys.length });
       }
 
-      removeDeletedDates(targetDateKeys);
+      removeDeletedDates(removedDateKeys);
       setConnectedVacationPrompt(null);
       setConnectedVacationProgress({ completed: 0, total: 0 });
       setIsDirty(false);
@@ -2363,7 +2682,8 @@ export function TimesheetWorkspace({
       hoursTouched: kind === "HOLIDAY" ? false : selectedEntry.hoursTouched,
       kind,
       project: kind === "WORK" ? selectedEntry.project || findPreviousProject(selectedDateKey, records) : "",
-      vacationName: kind === "VACATION" ? selectedEntry.vacationName : ""
+      vacationName: kind === "VACATION" ? selectedEntry.vacationName : "",
+      vacationStatus: kind === "VACATION" ? selectedEntry.vacationStatus : "CONFIRMED"
     });
 
     recommendPreviousNotionCardsForDraft(selectedDateKey, {
@@ -2720,10 +3040,10 @@ export function TimesheetWorkspace({
     }
   }
 
-  async function saveSelectedDraft(options: { forceImmediateAiAfterSave?: boolean; overwriteAiAfterSave?: boolean; skipAiRewritePrompt?: boolean; skipConnectedVacation?: boolean } = {}) {
-    if (selectedIsSingleVacation && !options.skipConnectedVacation) {
+  async function saveSelectedDraft(options: { forceImmediateAiAfterSave?: boolean; overwriteAiAfterSave?: boolean; skipAiRewritePrompt?: boolean; skipConnectedVacation?: boolean; vacationActionLabel?: string; vacationStatus?: VacationStatus } = {}) {
+    if (selectedEntry?.kind === "VACATION" && !options.skipConnectedVacation) {
       try {
-        const prompt = await findConnectedVacationPrompt();
+        const prompt = await findConnectedVacationPrompt(selectedEntry.vacationStatus, options.vacationActionLabel, options.vacationStatus ?? selectedEntry.vacationStatus);
 
         if (prompt) {
           setConnectedVacationProgress({ completed: 0, total: 0 });
@@ -2738,7 +3058,14 @@ export function TimesheetWorkspace({
       }
     }
 
-    const sanitizedEntry = sanitizeDayForSave(selectedDay);
+    const dayToSave =
+      selectedEntry?.kind === "VACATION" && options.vacationStatus
+        ? {
+            ...selectedDay,
+            entries: selectedDay.entries.map((entry) => (entry.clientId === selectedEntry.clientId ? { ...entry, vacationStatus: options.vacationStatus! } : entry))
+          }
+        : selectedDay;
+    const sanitizedEntry = sanitizeDayForSave(dayToSave);
     const shouldScheduleAiRewrite =
       Boolean(options.overwriteAiAfterSave) &&
       aiSetting.cleanupMode === "scheduled" &&
@@ -3364,6 +3691,18 @@ export function TimesheetWorkspace({
                   <span>저장 클릭으로 즉시 정리</span>
                 </p>
               ) : null}
+              {selectedIsSingleVacation ? (
+                <div className="mb-3 flex justify-end">
+                  <button
+                    className="text-sm font-semibold text-slate-600 underline-offset-4 transition hover:text-slate-950 hover:underline disabled:cursor-not-allowed disabled:text-slate-300"
+                    disabled={saveState === "saving" || deleteState === "deleting" || vacationRangeState === "saving"}
+                    onClick={() => void openVacationRangeModal()}
+                    type="button"
+                  >
+                    기간 설정
+                  </button>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between gap-3">
                 <div>
                   {canDeleteSelected ? (
@@ -3384,15 +3723,33 @@ export function TimesheetWorkspace({
                       {deleteState === "error" ? deleteError : saveState === "saved" ? "저장됨" : saveState === "saving" ? "저장 중" : saveError}
                     </p>
                   </div>
-                  {selectedIsSingleVacation ? (
-                    <Button className="h-10 px-4" disabled={saveState === "saving" || deleteState === "deleting" || vacationRangeState === "saving"} onClick={() => void openVacationRangeModal()} type="button" variant="secondary">
-                      기간 설정
+                  {selectedEntry?.kind === "VACATION" ? (
+                    <>
+                      {secondarySelectedVacationSaveActions.map((action) => (
+                        <Button
+                          className={cn("h-10", action.variant === "ghost" ? "px-2" : "px-4")}
+                          disabled={isSaveDisabled()}
+                          key={action.status}
+                          onClick={() => void saveSelectedDraft({ vacationActionLabel: action.label, vacationStatus: action.status })}
+                          type="button"
+                          variant={action.variant}
+                        >
+                          {action.label}
+                        </Button>
+                      ))}
+                      {primarySelectedVacationSaveAction ? (
+                        <Button className="h-10 px-4" disabled={isSaveDisabled()} onClick={() => void saveSelectedDraft({ vacationActionLabel: primarySelectedVacationSaveAction.label, vacationStatus: primarySelectedVacationSaveAction.status })} type="button">
+                          {saveState === "saving" ? "저장 중" : primarySelectedVacationSaveAction.label}
+                          <ShortcutHint keys={[shortcutModifierKey, "↵"]} />
+                        </Button>
+                      ) : null}
+                    </>
+                  ) : (
+                    <Button className="h-10 px-4" disabled={isSaveDisabled()} onClick={(event) => void saveSelectedDraft({ forceImmediateAiAfterSave: event.ctrlKey || event.metaKey })}>
+                      {saveState === "saving" ? "저장 중" : "저장"}
+                      <ShortcutHint keys={[shortcutModifierKey, "↵"]} />
                     </Button>
-                  ) : null}
-                  <Button className="h-10 px-4" disabled={isSaveDisabled()} onClick={(event) => void saveSelectedDraft({ forceImmediateAiAfterSave: event.ctrlKey || event.metaKey })}>
-                    {saveState === "saving" ? "저장 중" : "저장"}
-                    <ShortcutHint keys={[shortcutModifierKey, "↵"]} />
-                  </Button>
+                  )}
                 </div>
               </div>
               {aiCleanupDateKey === selectedDateKey && aiCleanupState !== "idle" ? (
@@ -3802,7 +4159,7 @@ export function TimesheetWorkspace({
       ) : null}
 
       {isVacationRangeOpen ? (
-        <ModalShell onClose={closeVacationRangeModal} onConfirm={() => void applyVacationRange(vacationRangeConflictKeys.length > 0)} title="휴가 기간 설정">
+        <ModalShell onClose={closeVacationRangeModal} onConfirm={() => void applyVacationRange(vacationRangeConflictKeys.length > 0, primaryVacationRangeSaveAction?.status ?? vacationRangeStatus)} title="휴가 기간 설정">
           <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
               {canEditVacationRangeStart ? (
@@ -3854,10 +4211,24 @@ export function TimesheetWorkspace({
                 취소
                 <ShortcutHint keys={["Esc"]} />
               </Button>
-              <Button disabled={vacationRangeState === "saving"} onClick={() => void applyVacationRange(vacationRangeConflictKeys.length > 0)} type="button">
-                {vacationRangeState === "saving" ? "저장 중" : vacationRangeConflictKeys.length > 0 ? "교체하고 기간 저장" : "기간 저장"}
-                <ShortcutHint keys={["↵"]} />
-              </Button>
+              {secondaryVacationRangeSaveActions.map((action) => (
+                <Button
+                  className={cn(action.variant === "ghost" && "px-2")}
+                  disabled={vacationRangeState === "saving"}
+                  key={action.status}
+                  onClick={() => void applyVacationRange(vacationRangeConflictKeys.length > 0, action.status)}
+                  type="button"
+                  variant={action.variant}
+                >
+                  {action.label}
+                </Button>
+              ))}
+              {primaryVacationRangeSaveAction ? (
+                <Button disabled={vacationRangeState === "saving"} onClick={() => void applyVacationRange(vacationRangeConflictKeys.length > 0, primaryVacationRangeSaveAction.status)} type="button">
+                  {vacationRangeState === "saving" ? "저장 중" : vacationRangeConflictKeys.length > 0 ? `교체하고 ${primaryVacationRangeSaveAction.label}` : primaryVacationRangeSaveAction.label}
+                  <ShortcutHint keys={["↵"]} />
+                </Button>
+              ) : null}
             </div>
           </div>
         </ModalShell>
@@ -3894,7 +4265,7 @@ export function TimesheetWorkspace({
         <ModalShell onClose={() => setConnectedVacationPrompt(null)} onConfirm={() => void saveConnectedVacationPrompt()} title="연결된 휴가 수정">
           <div className="space-y-4">
             <p className="text-sm leading-6 text-slate-600">
-              붙어있는 휴가 {connectedVacationPrompt.dateKeys.length}일이 있습니다. 현재 휴가 유형과 시간을 연결된 휴가에 함께 적용할까요?
+              붙어있는 휴가 {connectedVacationPrompt.dateKeys.length}일이 있습니다. 현재 휴가 유형과 상태를 연결된 휴가에 함께 적용할까요? 각 날짜의 휴가 시간은 유지됩니다.
             </p>
             <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600">
               {formatKoreanDate(connectedVacationPrompt.dateKeys[0]!)} - {formatKoreanDate(connectedVacationPrompt.dateKeys[connectedVacationPrompt.dateKeys.length - 1]!)}
@@ -3905,11 +4276,11 @@ export function TimesheetWorkspace({
                 취소
                 <ShortcutHint keys={["Esc"]} />
               </Button>
-              <Button disabled={isConnectedVacationSaving} onClick={() => { setConnectedVacationPrompt(null); void saveSelectedDraft({ skipConnectedVacation: true }); }} type="button" variant="secondary">
-                현재 날짜만 저장
+              <Button disabled={isConnectedVacationSaving} onClick={() => { setConnectedVacationPrompt(null); void saveSelectedDraft({ skipConnectedVacation: true, vacationStatus: connectedVacationPrompt.vacationStatus }); }} type="button" variant="secondary">
+                현재 날짜만 {connectedVacationPrompt.actionLabel}
               </Button>
               <Button disabled={isConnectedVacationSaving} onClick={() => void saveConnectedVacationPrompt()} type="button">
-                {isConnectedVacationSaving ? "저장 중" : "함께 저장"}
+                {isConnectedVacationSaving ? "저장 중" : `함께 ${connectedVacationPrompt.actionLabel}`}
                 <ShortcutHint keys={["↵"]} />
               </Button>
             </div>
@@ -4085,23 +4456,35 @@ function Metric({
   );
 }
 
-function StatusBadge({ status }: { status: TimesheetStatus }) {
+function vacationBadgeLabel(status: TimesheetStatus, vacationStatus: VacationStatus) {
+  if (status === "VACATION" && vacationStatus === "TEMPORARY") {
+    return "임시";
+  }
+
+  return statusLabel[status];
+}
+
+function StatusBadge({ status, vacationStatus = "CONFIRMED" }: { status: TimesheetStatus; vacationStatus?: VacationStatus }) {
   if (status === "FUTURE") {
     return null;
   }
 
+  const usesOutlineDot = status === "VACATION" && vacationStatus === "TEMPORARY";
+
   return (
     <Badge tone={badgeToneByStatus[status]}>
-      <span className="mr-1 size-1.5 rounded-full bg-current" />
-      {statusLabel[status]}
+      <span className={cn("mr-1 size-1.5 rounded-full", usesOutlineDot ? "border border-current bg-transparent" : "bg-current")} />
+      {vacationBadgeLabel(status, vacationStatus)}
     </Badge>
   );
 }
 
-function VacationDotBadge() {
+function VacationDotBadge({ vacationStatus }: { vacationStatus: VacationStatus }) {
+  const usesOutlineDot = vacationStatus === "TEMPORARY";
+
   return (
     <Badge tone="blue">
-      <span className="size-1.5 rounded-full bg-current" />
+      <span className={cn("size-1.5 rounded-full", usesOutlineDot ? "border border-current bg-transparent" : "bg-current")} />
     </Badge>
   );
 }
@@ -4110,12 +4493,12 @@ function CalendarStatusBadges({ row }: { row: TimesheetRow }) {
   const isVacationOnly = row.hasVacation && row.status === "VACATION";
 
   if (isVacationOnly) {
-    return <StatusBadge status="VACATION" />;
+    return <StatusBadge status="VACATION" vacationStatus={row.vacationStatus} />;
   }
 
   return (
     <div className="flex items-center gap-1">
-      {row.hasVacation ? <VacationDotBadge /> : null}
+      {row.hasVacation ? <VacationDotBadge vacationStatus={row.vacationStatus} /> : null}
       <StatusBadge status={row.status} />
     </div>
   );
@@ -4234,12 +4617,19 @@ function CalendarView({
               }
 
               const row = rows[cell.dateKey];
+              const vacationMixOverlayStyle = getVacationMixOverlayStyle(row);
+              const partialVacationOnlyOverlayStyle = getPartialVacationOnlyOverlayStyle(row);
+              const isPartialVacationOnly = isPartialVacationOnlyCell(row);
 
               return (
                 <button
                   className={cn(
-                    "relative flex min-h-32 flex-col justify-between rounded-md border p-3 text-left transition",
-                    row && cellToneByStatus[row.status],
+                    "relative flex min-h-32 flex-col justify-between overflow-hidden rounded-md border p-3 text-left transition",
+                    row && (isPartialVacationOnly
+                      ? cell.dateKey > todayKey
+                        ? "border-blue-200 bg-slate-100 text-slate-400 hover:border-blue-300"
+                        : "border-blue-200 bg-white hover:border-blue-300"
+                      : cellToneByStatus[row.status]),
                     selectedDateKey === cell.dateKey && "ring-2 ring-slate-950 ring-offset-2"
                   )}
                   key={cell.dateKey}
@@ -4251,9 +4641,12 @@ function CalendarView({
                       dateButtonRefs.current.delete(cell.dateKey);
                     }
                   }}
+                  style={getCalendarCellStyle(row)}
                   type="button"
                 >
-                  <div className="flex items-start justify-between gap-2">
+                  {vacationMixOverlayStyle ? <span aria-hidden="true" className="pointer-events-none absolute inset-0 z-0" style={vacationMixOverlayStyle} /> : null}
+                  {partialVacationOnlyOverlayStyle ? <span aria-hidden="true" className="pointer-events-none absolute inset-0 z-0" style={partialVacationOnlyOverlayStyle} /> : null}
+                  <div className="relative z-10 flex items-start justify-between gap-2">
                     <span className="flex items-center gap-0.5">
                       <span
                         className={cn(
@@ -4268,7 +4661,7 @@ function CalendarView({
                     </span>
                     {row ? <CalendarStatusBadges row={row} /> : null}
                   </div>
-                  <div className="mt-3 min-w-0 space-y-1">
+                  <div className="relative z-10 mt-3 min-w-0 space-y-1">
                     {row?.kind === "WORK" && row.project ? (
                       <div className="flex min-w-0 items-center gap-1">
                         <p className="min-w-0 truncate text-xs font-bold text-slate-950">{row.project}</p>
@@ -4279,7 +4672,7 @@ function CalendarView({
                       {row ? calendarStatusText(row, selectedDateKey === cell.dateKey) : ""}
                     </p>
                   </div>
-                  {row && row.entryCount > 1 ? <span className="absolute bottom-3 right-3 rounded-full bg-slate-900 px-2 py-0.5 text-xs font-bold text-white">{row.entryCount}</span> : null}
+                  {row && row.entryCount > 1 ? <span className="absolute bottom-3 right-3 z-20 rounded-full bg-slate-900 px-2 py-0.5 text-xs font-bold text-white">{row.entryCount}</span> : null}
                 </button>
               );
             })}
@@ -4318,7 +4711,7 @@ function ListView({
       <div className="divide-y divide-slate-100">
         {dateKeys.map((dateKey) => {
           const row = rows[dateKey]!;
-          const emptyStatusLabel = row.status === "MISSING" ? "입력안됨" : row.kind === "HOLIDAY" ? "공휴일" : row.kind === "VACATION" ? "휴가" : "업무";
+          const emptyStatusLabel = row.status === "MISSING" ? "입력안됨" : row.kind === "HOLIDAY" ? "공휴일" : row.kind === "VACATION" && row.vacationStatus === "TEMPORARY" ? "임시" : row.kind === "VACATION" ? "휴가" : "업무";
           const emptyStatusTone: "blue" | "green" | "orange" | "white" = row.status === "MISSING" ? "white" : row.kind === "HOLIDAY" ? "orange" : row.kind === "VACATION" ? "blue" : "green";
 
           if (row.status === "MISSING" || row.entries.length === 0) {
@@ -4379,7 +4772,7 @@ function ListView({
                     {hasEntryNotionWarning ? <NotionCardWarningIcon /> : null}
                   </span>
                 </span>
-                <span className="font-semibold text-slate-700">{entry.hours}h</span>
+                <span className="font-semibold text-slate-700">{effectiveEntryHours(entry)}h</span>
                 <span className="truncate font-medium text-slate-700">{entryTitle(entry)}</span>
                 <span className="line-clamp-2 min-w-0 break-words text-slate-600">{entryContent}</span>
                 <span className="line-clamp-2 min-w-0 break-words text-slate-500">{entryTranslation}</span>
@@ -4406,6 +4799,10 @@ function entryTitle(entry: TimesheetEntryDraft): string {
 
 function entryKindLabel(entry: TimesheetEntryDraft): string {
   if (entry.kind === "VACATION") {
+    if (entry.vacationStatus === "TEMPORARY") {
+      return "임시";
+    }
+
     return "휴가";
   }
 
@@ -4474,7 +4871,7 @@ function SortableEntryItem({
           <div className="flex items-center gap-2">
             <Badge tone={entryKindTone(entry)}>{entryKindLabel(entry)}</Badge>
             <span className="min-w-0 truncate text-sm font-semibold text-slate-800">{entryTitle(entry)}</span>
-            <span className="text-sm font-bold text-slate-950">{entry.hours}h</span>
+            <span className="text-sm font-bold text-slate-950">{effectiveEntryHours(entry)}h</span>
             {notionCardWarning ? <NotionCardWarningIcon /> : null}
           </div>
           {entry.kind === "WORK" && entryContentPreview(entry) ? <p className="mt-1 line-clamp-2 text-xs font-medium leading-4 text-slate-500">{entryContentPreview(entry)}</p> : null}
