@@ -5,8 +5,8 @@ FROM node:24.15.0-bookworm-slim AS base
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     NEXT_TELEMETRY_DISABLED=1
-WORKDIR /app
 
+WORKDIR /app
 RUN corepack enable
 
 FROM base AS deps
@@ -47,19 +47,17 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates openssl \
   && rm -rf /var/lib/apt/lists/* \
   && mkdir -p /data \
-  && chown -R node:node /data
+  && chown -R node:node /data /app
 
 COPY --from=build --chown=node:node /app/apps/web/.next/standalone ./
-COPY --from=deps --chown=node:node /app/node_modules ./node_modules
-COPY --from=build --chown=node:node /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
 COPY --from=build --chown=node:node /app/apps/web/.next/static ./apps/web/.next/static
-COPY --from=build --chown=node:node /app/packages/db ./packages/db
-COPY --from=build --chown=node:node /app/packages/domain ./packages/domain
+# COPY --from=build --chown=node:node /app/apps/web/public ./apps/web/public
 
 USER node
 
 EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD node --input-type=module -e "try { const r = await fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/api/health'); process.exit(r.ok ? 0 : 1); } catch { process.exit(1); }"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD node --input-type=module -e "try { const r = await fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/api/health'); process.exit(r.ok ? 0 : 1); } catch { process.exit(1); }"
 
-CMD ["sh", "-c", "pnpm db:seed && node apps/web/server.js"]
+CMD ["node", "apps/web/server.js"]

@@ -87,8 +87,11 @@
 
 ## Deployment
 
-- `Dockerfile`은 Next.js 앱을 빌드하고 production 서버를 실행한다.
-- Docker runner image는 컨테이너 시작 시 `pnpm db:seed`가 workspace TS source를 실행하므로, `packages/db`와 런타임 import 대상인 `packages/domain`을 함께 포함한다.
+- `Dockerfile`은 Next.js standalone output을 생성하여 production 서버를 실행한다.
+- Docker runner image는 Next.js standalone output과 정적 파일만 포함한다. 런타임에는 전체 workspace와 전체 `node_modules`를 포함하지 않는다.
+- 컨테이너 시작 명령은 `node apps/web/server.js`로 production 서버만 실행한다.
+- 데이터베이스 초기화와 seed는 애플리케이션 시작 과정과 분리한다. seed는 최초 설치 또는 운영자가 명시적으로 실행하는 초기화 작업으로 수행한다.
+- 애플리케이션은 런타임에서 필요한 테이블과 컬럼을 `CREATE TABLE IF NOT EXISTS` 및 보정 쿼리로 보장한다.
 - `docker-compose.example.yml`은 GHCR `ghcr.io/junglesub/ajam:latest` 이미지를 사용하고 SQLite 파일을 서버의 `./ajam-data`에 둔다.
 - Docker image와 compose 예시는 `GET /api/health`를 Node.js 내장 `fetch`로 호출하는 healthcheck를 포함한다. 이 endpoint는 DB와 외부 API를 조회하지 않고 Next.js 서버가 요청을 받을 수 있는지만 확인한다.
 - GitHub Actions는 image 검증 성공 후 GHCR에 `latest`, commit SHA, `v<run-number>-<yymmdd>` 태그를 push한다.
@@ -96,7 +99,6 @@
 - GitHub Actions는 n8n package version 변경과 n8n node 검증 성공이 함께 충족될 때 `packages/n8n-nodes-ajam`을 GitHub Packages npm registry에 `@junglesub/n8n-nodes-ajam`으로 publish한다.
 - GHCR image publish는 웹 앱, DB/domain/ui 패키지, Docker, workspace 설정이 변경된 경우에만 실행한다.
 - n8n package publish는 `packages/n8n-nodes-ajam/package.json`의 `version` 값이 변경된 경우에만 실행한다.
-- 컨테이너 시작 시 `pnpm db:seed`로 스키마와 초기 관리자 계정을 보장한다.
 - `SESSION_SECRET`은 선택값이다. 지정하면 세션 서명에 사용하고, 지정하지 않으면 앱이 랜덤 값을 생성해 DB `AppSetting`에 저장한 뒤 재사용한다.
 
 ## CI
