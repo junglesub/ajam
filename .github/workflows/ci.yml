@@ -215,6 +215,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.n8n_node_version == 'true'
     permissions:
       contents: read
+      id-token: write
     defaults:
       run:
         working-directory: packages/n8n-nodes-ajam
@@ -242,5 +243,3 @@ jobs:
 
       - name: Publish to npm
         run: pnpm publish --no-git-checks --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

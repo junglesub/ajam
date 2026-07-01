@@ -178,7 +178,7 @@ docker compose restart n8n
 
 ## npm Publish
 
-Automatic publish happens from GitHub Actions when `packages/n8n-nodes-ajam/package.json` has a new `version` on `main` and n8n node verification passes. The repository must have an npm automation token stored as `NPM_TOKEN`.
+Automatic publish happens from GitHub Actions when `packages/n8n-nodes-ajam/package.json` has a new `version` on `main` and n8n node verification passes. npm Trusted Publishing must be configured for this repository and workflow on npmjs.com, and the workflow uses GitHub Actions OIDC with `id-token: write`.
 
 Manual publish, if needed:
 

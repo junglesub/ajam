@@ -38,7 +38,7 @@ pnpm add @junglesub/n8n-nodes-ajam
 
 ## Publish
 
-The package publishes to the public npm registry. GitHub Actions publishes automatically when the package `version` changes on `main` and n8n node verification passes. The repository secret `NPM_TOKEN` must contain an npm automation token.
+The package publishes to the public npm registry. GitHub Actions publishes automatically when the package `version` changes on `main` and n8n node verification passes. npm Trusted Publishing must be configured for this repository and workflow on npmjs.com.
 
 Manual publish, if needed:
 
