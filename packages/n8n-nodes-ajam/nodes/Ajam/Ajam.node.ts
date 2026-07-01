@@ -214,7 +214,7 @@ export class Ajam implements INodeType {
         options: [
           {
             action: "Run daily Notion maintenance",
-            description: "Sync today's open Notion cards and update mapped Notion fields for active cards",
+            description: "Sync recent open or newly closed Notion cards and update mapped Notion fields",
             name: "Run Daily Maintenance",
             value: "runDailyMaintenance"
           }
@@ -241,6 +241,24 @@ export class Ajam implements INodeType {
           }
         },
         name: "lookbackDays",
+        type: "number",
+        typeOptions: {
+          maxValue: 31,
+          minValue: 1,
+          numberPrecision: 0
+        }
+      },
+      {
+        default: 2,
+        description: "How many recent dates to sync, including the date key. Use 2 to catch cards that ended yesterday.",
+        displayName: "Lookback Days",
+        displayOptions: {
+          show: {
+            operation: ["runDailyMaintenance"],
+            resource: ["notion"]
+          }
+        },
+        name: "notionLookbackDays",
         type: "number",
         typeOptions: {
           maxValue: 31,
@@ -323,6 +341,8 @@ export class Ajam implements INodeType {
           : `${baseUrl}/api/internal/reminders/daily-timesheet`;
 
       if (resource === "notion") {
+        body.lookbackDays = this.getNodeParameter("notionLookbackDays", itemIndex, 2) as number;
+
         if (dateKey) {
           body.dateKey = dateKey;
         }

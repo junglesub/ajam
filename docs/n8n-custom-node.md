@@ -73,15 +73,16 @@ Calls:
 POST /api/internal/notion/daily-maintenance
 ```
 
-with an optional date:
+with optional fields:
 
 ```json
 {
-  "dateKey": "2026-06-16"
+  "dateKey": "2026-06-16",
+  "lookbackDays": 2
 }
 ```
 
-When `dateKey` is empty, aJam uses today's date in `Asia/Seoul`. The action checks each user's Notion connection, syncs Notion cards open on that date into the aJam cache, and updates mapped Notion fields for active cards that have no end date and are not in the user's configured done statuses. This keeps fields such as `가용 시간`, `업무 기간 시간`, `작업일수`, and mapped `aJam 업데이트 시간` fresh without blocking normal timesheet entry. `마지막 작업일` is intentionally updated by aJam timesheet save/delete and manual field update flows, not by daily maintenance.
+When `dateKey` is empty, aJam uses today's date in `Asia/Seoul`. `lookbackDays` defaults to `2`, which scans today and yesterday. The action checks each user's Notion connection, syncs Notion cards open during the lookback dates into the aJam cache, and updates mapped Notion fields for active cards without an end date plus cards whose end date falls inside the lookback window. This catches cards that ended yesterday while still keeping active no-end cards fresh for fields such as `가용 시간`, `업무 기간 시간`, `작업일수`, and mapped `aJam 업데이트 시간`. Done cards without an end date are excluded so their available hours do not keep growing. `마지막 작업일` is intentionally updated by aJam timesheet save/delete and manual field update flows, not by daily maintenance.
 
 The `aJam` node has two outputs:
 
@@ -121,7 +122,7 @@ Install the package into n8n's custom extensions directory. This is a local inst
 ```powershell
 New-Item -ItemType Directory -Force $env:USERPROFILE\.n8n\custom
 Set-Location $env:USERPROFILE\.n8n\custom
-pnpm add C:\path\to\ajam\dist\junglesub-n8n-nodes-ajam-0.4.0.tgz
+pnpm add C:\path\to\ajam\dist\junglesub-n8n-nodes-ajam-0.4.1.tgz
 ```
 
 Restart n8n after installation.
@@ -132,15 +133,15 @@ For a self-hosted n8n container, mount or copy the tarball into the container an
 
 ```bash
 mkdir -p ./n8n-custom
-cp ./dist/junglesub-n8n-nodes-ajam-0.4.0.tgz ./n8n-custom/
-docker compose exec -u node n8n sh -lc "mkdir -p /home/node/.n8n/custom && cd /home/node/.n8n/custom && pnpm add /home/node/.n8n/custom/junglesub-n8n-nodes-ajam-0.4.0.tgz"
+cp ./dist/junglesub-n8n-nodes-ajam-0.4.1.tgz ./n8n-custom/
+docker compose exec -u node n8n sh -lc "mkdir -p /home/node/.n8n/custom && cd /home/node/.n8n/custom && pnpm add /home/node/.n8n/custom/junglesub-n8n-nodes-ajam-0.4.1.tgz"
 docker compose restart n8n
 ```
 
 If the n8n image does not include `pnpm`, enable it inside the container with Corepack before running the install:
 
 ```bash
-docker compose exec -u node n8n sh -lc "corepack enable && cd /home/node/.n8n/custom && pnpm add /home/node/.n8n/custom/junglesub-n8n-nodes-ajam-0.4.0.tgz"
+docker compose exec -u node n8n sh -lc "corepack enable && cd /home/node/.n8n/custom && pnpm add /home/node/.n8n/custom/junglesub-n8n-nodes-ajam-0.4.1.tgz"
 ```
 
 ## GitHub Packages Install

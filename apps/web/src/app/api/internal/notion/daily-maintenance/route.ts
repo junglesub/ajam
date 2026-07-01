@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 type DailyMaintenanceRequestBody = {
   dateKey?: string;
+  lookbackDays?: number;
 };
 
 function getSeoulDateKey(date = new Date()): string {
@@ -61,7 +62,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid dateKey" }, { status: 400 });
   }
 
-  const result = await runNotionDailyMaintenance({ dateKey });
+  const result = await runNotionDailyMaintenance({
+    dateKey,
+    lookbackDays: body.lookbackDays
+  });
 
   return NextResponse.json({
     ...result,

@@ -25,12 +25,17 @@ export type NotionDailyMaintenanceResult = {
   usersChecked: number;
   usersSkipped: number;
   usersUpdated: number;
+  lookbackDays: number;
 };
 
 export async function runNotionDailyMaintenance(params: {
   dateKey: string;
+  lookbackDays?: number;
 }): Promise<NotionDailyMaintenanceResult> {
   const users = await listManagedUsers();
+  const lookbackDays = normalizeLookbackDays(params.lookbackDays);
+  const syncDateKeys = buildLookbackDateKeys(params.dateKey, lookbackDays);
+  const lookbackStartDateKey = syncDateKeys[0] ?? params.dateKey;
   const userResults: NotionDailyMaintenanceUserResult[] = [];
   let cardsSynced = 0;
   let cardsUpdated = 0;
@@ -54,25 +59,32 @@ export async function runNotionDailyMaintenance(params: {
     }
 
     try {
-      const cards = await syncNotionCardsForDate({
-        dateKey: params.dateKey,
-        userId: user.id
-      });
-      const activePageIds = cards
-        .filter((card) =>
-          !card.archived &&
-          !card.stale &&
-          !card.endDate &&
-          !connection.doneStatusValues.includes(card.status)
-        )
-        .map((card) => card.notionPageId);
+      const syncedCards: Awaited<ReturnType<typeof syncNotionCardsForDate>> = [];
+
+      for (const dateKey of syncDateKeys) {
+        syncedCards.push(...await syncNotionCardsForDate({
+          dateKey,
+          userId: user.id
+        }));
+      }
+
+      const updatePageIds = Array.from(new Map(
+        syncedCards
+          .filter((card) => shouldUpdateCardDuringMaintenance({
+            card,
+            currentDateKey: params.dateKey,
+            doneStatusValues: connection.doneStatusValues,
+            lookbackStartDateKey
+          }))
+          .map((card) => [card.notionPageId, card.notionPageId])
+      ).values());
       const syncResult = await syncNotionWorkHoursForPages({
         includeLastWorkedDate: false,
-        notionPageIds: activePageIds,
+        notionPageIds: updatePageIds,
         userId: user.id
       });
 
-      cardsSynced += cards.length;
+      cardsSynced += syncedCards.length;
       cardsUpdated += syncResult.updated;
 
       if (syncResult.updated > 0) {
@@ -84,7 +96,7 @@ export async function runNotionDailyMaintenance(params: {
       }
 
       userResults.push({
-        cardsSynced: cards.length,
+        cardsSynced: syncedCards.length,
         cardsUpdated: syncResult.updated,
         error: syncResult.errors.map((error) => `${error.notionPageId}: ${error.message}`).join("\n"),
         skippedReason: syncResult.skippedReason ?? "",
@@ -117,9 +129,48 @@ export async function runNotionDailyMaintenance(params: {
           }]
         : []
     ),
+    lookbackDays,
     userResults,
     usersChecked: users.length,
     usersSkipped,
     usersUpdated
   };
+}
+
+function shouldUpdateCardDuringMaintenance(params: {
+  card: Awaited<ReturnType<typeof syncNotionCardsForDate>>[number];
+  currentDateKey: string;
+  doneStatusValues: string[];
+  lookbackStartDateKey: string;
+}): boolean {
+  if (params.card.archived || params.card.stale) {
+    return false;
+  }
+
+  const isDone = params.doneStatusValues.includes(params.card.status);
+
+  if (!params.card.endDate) {
+    return !isDone;
+  }
+
+  return params.card.endDate >= params.lookbackStartDateKey && params.card.endDate <= params.currentDateKey;
+}
+
+function buildLookbackDateKeys(dateKey: string, lookbackDays: number): string[] {
+  return Array.from({ length: lookbackDays }, (_, index) => addDays(dateKey, index - (lookbackDays - 1)));
+}
+
+function addDays(dateKey: string, days: number): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, (day ?? 1) + days));
+
+  return date.toISOString().slice(0, 10);
+}
+
+function normalizeLookbackDays(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 2;
+  }
+
+  return Math.min(Math.max(Math.trunc(value), 1), 31);
 }
