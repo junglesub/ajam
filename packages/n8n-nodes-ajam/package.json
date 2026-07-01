@@ -3,6 +3,11 @@
   "version": "0.4.1",
   "description": "n8n community nodes for aJam automation.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/junglesub/ajam.git",
+    "directory": "packages/n8n-nodes-ajam"
+  },
   "type": "commonjs",
   "main": "dist/nodes/Ajam/Ajam.node.js",
   "publishConfig": {
