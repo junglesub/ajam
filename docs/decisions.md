@@ -20,7 +20,7 @@
 
 - 업무 기록 미작성 리마인더는 aJam 백엔드가 대상 계산 API를 제공하고 n8n custom node가 해당 API를 action으로 노출한다.
 - 개인 AI 정리는 사용자별 실행 방식으로 관리하고, 예약 모드에서는 n8n custom node가 내부 scheduled cleanup API를 호출해 일괄 처리한다.
-- n8n custom node package는 GitHub Packages에 `@junglesub/n8n-nodes-ajam`으로 publish한다.
+- n8n custom node package는 public npm registry에 `@junglesub/n8n-nodes-ajam`으로 publish한다.
 - GHCR image와 n8n package publish는 관련 파일 변경이 있을 때만 실행한다.
 - 내부 리마인더 API는 `AJAM_INTERNAL_API_TOKEN` bearer token으로 보호한다.
 - 사용자 이메일은 `User.email`에 저장하고, 이메일이 없는 사용자는 리마인더 대상에서 제외한다.
@@ -51,7 +51,7 @@
 - scoped query에서 보이지 않았다는 이유만으로 카드 캐시를 전역 stale 처리하지 않는다.
 - CI 검증은 Docker image용 `verify-image`와 n8n package용 `verify-n8n-node`로 분리해, image/web 검증 실패가 n8n custom node publish를 막지 않게 한다.
 - n8n package publish trigger에서는 `pnpm-lock.yaml`을 제외한다. lockfile은 앱 의존성 변경에도 함께 바뀔 수 있고, paths-filter는 lockfile 내부의 패키지별 영향 범위를 판별하지 못하기 때문이다.
-- n8n package publish는 `packages/n8n-nodes-ajam/package.json`의 `version` 값이 이전 main 상태와 달라진 경우에만 실행한다. GitHub Packages는 같은 version 덮어쓰기를 허용하지 않으므로, version bump 없는 n8n 변경은 검증만 하고 publish하지 않는다.
+- n8n package publish는 `packages/n8n-nodes-ajam/package.json`의 `version` 값이 이전 main 상태와 달라진 경우에만 실행한다. npm registry는 같은 version 덮어쓰기를 허용하지 않으므로, version bump 없는 n8n 변경은 검증만 하고 publish하지 않는다.
 
 ## Pending
 

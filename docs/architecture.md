@@ -96,7 +96,7 @@
 - Docker image와 compose 예시는 `GET /api/health`를 Node.js 내장 `fetch`로 호출하는 healthcheck를 포함한다. 이 endpoint는 DB와 외부 API를 조회하지 않고 Next.js 서버가 요청을 받을 수 있는지만 확인한다.
 - GitHub Actions는 image 검증 성공 후 GHCR에 `latest`, commit SHA, `v<run-number>-<yymmdd>` 태그를 push한다.
 - GitHub Actions는 GHCR image publish 성공 후 `DCA_ADDR`, `DCA_SECRET` repository secrets로 DCA deploy request를 보내며, payload에는 `GITHUB_SHA`와 `GITHUB_REPOSITORY`를 포함한다.
-- GitHub Actions는 n8n package version 변경과 n8n node 검증 성공이 함께 충족될 때 `packages/n8n-nodes-ajam`을 GitHub Packages npm registry에 `@junglesub/n8n-nodes-ajam`으로 publish한다.
+- GitHub Actions는 n8n package version 변경과 n8n node 검증 성공이 함께 충족될 때 `packages/n8n-nodes-ajam`을 public npm registry에 `@junglesub/n8n-nodes-ajam`으로 publish한다. Publish 인증은 repository secret `NPM_TOKEN`을 사용한다.
 - GHCR image publish는 웹 앱, DB/domain/ui 패키지, Docker, workspace 설정이 변경된 경우에만 실행한다.
 - n8n package publish는 `packages/n8n-nodes-ajam/package.json`의 `version` 값이 변경된 경우에만 실행한다.
 - `SESSION_SECRET`은 선택값이다. 지정하면 세션 서명에 사용하고, 지정하지 않으면 앱이 랜덤 값을 생성해 DB `AppSetting`에 저장한 뒤 재사용한다.

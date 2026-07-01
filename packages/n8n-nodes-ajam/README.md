@@ -30,8 +30,20 @@ Build the package from the repository root:
 pnpm --filter @junglesub/n8n-nodes-ajam build
 ```
 
-Install from GitHub Packages:
+Install from the public npm registry:
 
 ```bash
 pnpm add @junglesub/n8n-nodes-ajam
+```
+
+## Publish
+
+The package publishes to the public npm registry. GitHub Actions publishes automatically when the package `version` changes on `main` and n8n node verification passes. The repository secret `NPM_TOKEN` must contain an npm automation token.
+
+Manual publish, if needed:
+
+```bash
+pnpm --filter @junglesub/n8n-nodes-ajam build
+cd packages/n8n-nodes-ajam
+pnpm publish --access public
 ```

@@ -215,7 +215,6 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.n8n_node_version == 'true'
     permissions:
       contents: read
-      packages: write
     defaults:
       run:
         working-directory: packages/n8n-nodes-ajam
@@ -232,8 +231,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24.15.0
-          registry-url: https://npm.pkg.github.com
-          scope: "@junglesub"
+          registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -242,7 +240,7 @@ jobs:
       - name: Build n8n node
         run: pnpm build
 
-      - name: Publish to GitHub Packages
-        run: pnpm publish --no-git-checks
+      - name: Publish to npm
+        run: pnpm publish --no-git-checks --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

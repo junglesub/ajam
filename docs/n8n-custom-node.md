@@ -2,7 +2,7 @@
 
 ## Package
 
-The custom node package lives at `packages/n8n-nodes-ajam` and publishes to GitHub Packages as `@junglesub/n8n-nodes-ajam`.
+The custom node package lives at `packages/n8n-nodes-ajam` and publishes to the public npm registry as `@junglesub/n8n-nodes-ajam`.
 
 It follows n8n's community node package shape:
 
@@ -144,16 +144,11 @@ If the n8n image does not include `pnpm`, enable it inside the container with Co
 docker compose exec -u node n8n sh -lc "corepack enable && cd /home/node/.n8n/custom && pnpm add /home/node/.n8n/custom/junglesub-n8n-nodes-ajam-0.4.1.tgz"
 ```
 
-## GitHub Packages Install
+## npm Registry Install
 
-Create or edit `.npmrc` in n8n's custom extensions directory:
+The package is public on npm, so n8n servers do not need a registry token for normal installation.
 
-```ini
-@junglesub:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PACKAGES_TOKEN
-```
-
-Then install the package:
+Install with pnpm:
 
 ```bash
 cd ~/.n8n/custom
@@ -167,28 +162,33 @@ cd ~/.n8n/custom
 npm install @junglesub/n8n-nodes-ajam
 ```
 
-GitHub Packages npm registry requires an access token even when installing public packages. You can also install without creating an `.npmrc` file by passing registry and token as one-time CLI options:
-
-```bash
-pnpm add @junglesub/n8n-nodes-ajam \
-  --registry=https://npm.pkg.github.com \
-  --//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PACKAGES_TOKEN
-```
-
-```bash
-npm install @junglesub/n8n-nodes-ajam \
-  --registry=https://npm.pkg.github.com \
-  --//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PACKAGES_TOKEN
-```
-
-Because shell support for special characters in CLI options varies, the `.npmrc` method is the most stable option for servers.
-
 For a Docker n8n container:
 
 ```bash
-docker compose exec -u node n8n sh -lc "mkdir -p /home/node/.n8n/custom && cd /home/node/.n8n/custom && printf '@junglesub:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=%s\n' '$GITHUB_PACKAGES_TOKEN' > .npmrc && pnpm add @junglesub/n8n-nodes-ajam"
+docker compose exec -u node n8n sh -lc "mkdir -p /home/node/.n8n/custom && cd /home/node/.n8n/custom && pnpm add @junglesub/n8n-nodes-ajam"
 docker compose restart n8n
 ```
+
+If the n8n image does not include `pnpm`, enable it inside the container with Corepack before running the install:
+
+```bash
+docker compose exec -u node n8n sh -lc "corepack enable && cd /home/node/.n8n/custom && pnpm add @junglesub/n8n-nodes-ajam"
+docker compose restart n8n
+```
+
+## npm Publish
+
+Automatic publish happens from GitHub Actions when `packages/n8n-nodes-ajam/package.json` has a new `version` on `main` and n8n node verification passes. The repository must have an npm automation token stored as `NPM_TOKEN`.
+
+Manual publish, if needed:
+
+```bash
+cd packages/n8n-nodes-ajam
+pnpm build
+pnpm publish --access public
+```
+
+The package uses `publishConfig.registry = https://registry.npmjs.org` and `publishConfig.access = public`. npm rejects re-publishing an existing package version, so bump the package version for every n8n node deployment.
 
 ## In n8n
 
