@@ -1214,7 +1214,9 @@ export function TimesheetWorkspace({
   }, [initialMonthIndex, initialTodayKey, initialYear]);
 
   useEffect(() => {
-    function refreshTodayKey() {
+    let isActive = true;
+
+    async function refreshTodayKey() {
       const browserTodayKey = toBrowserDateKey(new Date());
 
       if (browserTodayKey === todayKey) {
@@ -1222,6 +1224,57 @@ export function TimesheetWorkspace({
       }
 
       setTodayKey(browserTodayKey);
+
+      try {
+        const monthKey = getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
+        const monthData = await loadMonthAction(monthCursor.year, monthCursor.monthIndex);
+
+        if (!isActive) {
+          return;
+        }
+
+        const monthDrafts = buildDraftsFromMonthData(monthData);
+        const selectedDirtyDateKey = isDirty ? selectedDateKey : "";
+
+        setRecords((current) => ({
+          ...current,
+          ...Object.fromEntries(Object.entries(monthDrafts).filter(([dateKey]) => dateKey !== selectedDirtyDateKey))
+        }));
+        setSavedRecords((current) => ({
+          ...current,
+          ...monthDrafts
+        }));
+        setSelectedEntryIdByDate((current) => ({
+          ...current,
+          ...Object.fromEntries(Object.values(monthDrafts).flatMap((day) => day.dateKey !== selectedDirtyDateKey && day.entries[0] ? [[day.dateKey, day.entries[0].clientId]] : []))
+        }));
+        setProjects((current) => mergeProjects(current, monthData.projects));
+        setHolidayWarning(monthData.holidayWarning ?? "");
+        setHolidayWarningMonthKeys((current) => {
+          const next = new Set(current);
+
+          if (monthData.holidayWarning) {
+            next.add(monthKey);
+          } else {
+            next.delete(monthKey);
+          }
+
+          return next;
+        });
+        setSavedEntryDateKeys((current) => {
+          const next = new Set(current);
+
+          for (const entry of monthData.entries) {
+            next.add(entry.dateKey);
+          }
+
+          return next;
+        });
+        setLoadedMonthKeys((current) => new Set(current).add(monthKey));
+        updateAiRewriteRequestsFromDays(monthData.entries);
+      } catch {
+        // Midnight refresh is opportunistic; normal month navigation still reports load errors.
+      }
 
       if (selectedDateKey !== browserTodayKey || savedEntryDateKeys.has(browserTodayKey)) {
         return;
@@ -1246,10 +1299,13 @@ export function TimesheetWorkspace({
       });
     }
 
-    const intervalId = window.setInterval(refreshTodayKey, todayRefreshIntervalMs);
+    const intervalId = window.setInterval(() => void refreshTodayKey(), todayRefreshIntervalMs);
 
-    return () => window.clearInterval(intervalId);
-  }, [savedEntryDateKeys, selectedDateKey, todayKey]);
+    return () => {
+      isActive = false;
+      window.clearInterval(intervalId);
+    };
+  }, [isDirty, loadMonthAction, monthCursor.monthIndex, monthCursor.year, savedEntryDateKeys, selectedDateKey, todayKey]);
 
   useEffect(() => {
     if (!celebratingDateKey) {
