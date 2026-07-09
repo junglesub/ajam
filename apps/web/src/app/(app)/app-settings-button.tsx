@@ -2,7 +2,7 @@
 
 import type { AiCleanupMode, ManagedUser, TimesheetAiRewriteRequest, UserAiSetting, UserRole } from "@timesheet/db";
 import { formatKoreanDate } from "@timesheet/domain";
-import { Badge, Button, Input, Label, cn } from "@timesheet/ui";
+import { Badge, Button, Input, cn } from "@timesheet/ui";
 import { Plus, RotateCcw, Settings, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { createPortal } from "react-dom";
