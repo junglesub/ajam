@@ -15,6 +15,7 @@ import {
 import { Button } from "@timesheet/ui";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
+import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
 import type { VacationBoundary, VacationDateInput, VacationWorkDay, VacationYearData } from "./types";
 import { VacationEditModal, type VacationEditDraft, type VacationEditOption } from "./vacation-edit-modal";
 import { VacationSummaryPanel } from "./vacation-summary-panel";
@@ -305,6 +306,28 @@ export function VacationYearWorkspace({
     }
   }
 
+  async function loadCurrentYearData() {
+    setYearLoadState("loading");
+
+    try {
+      return await loadVacationYearAction(year);
+    } catch (error) {
+      setYearLoadState("error");
+      throw error;
+    }
+  }
+
+  useSharedViewRefresh<VacationYearData>({
+    apply: (data) => {
+      applyVacationYearData(data);
+      setHoveredDateKey("");
+      setYearLoadState("idle");
+    },
+    getKey: () => String(year),
+    load: loadCurrentYearData,
+    scope: "vacations"
+  });
+
   async function saveAllowance() {
     const days = Number(allowanceDraft);
 
@@ -322,6 +345,7 @@ export function VacationYearWorkspace({
       setAllowanceDays(saved);
       setAllowanceDraft(String(saved || ""));
       setAllowanceState("saved");
+      broadcastViewRefresh("vacations", "mutation");
     } catch {
       setAllowanceState("error");
       setAllowanceError("연차 개수를 저장하지 못했습니다.");
@@ -427,6 +451,7 @@ export function VacationYearWorkspace({
         applyVacationYearData(nextData, { preserveAllowanceDraft: true });
       }
       setModalDraft(null);
+      broadcastViewRefresh(["vacations", "timesheet", "ai-summary", "projects"], "mutation");
     } catch {
       setModalError("휴가를 저장하지 못했습니다.");
     } finally {
@@ -495,6 +520,7 @@ export function VacationYearWorkspace({
         applyVacationYearData(nextData, { preserveAllowanceDraft: true });
       }
       setModalDraft(null);
+      broadcastViewRefresh(["vacations", "timesheet", "ai-summary", "projects"], "mutation");
     } catch {
       setModalError("휴가를 삭제하지 못했습니다.");
     } finally {
@@ -515,6 +541,7 @@ export function VacationYearWorkspace({
       const data = await deleteVacationWorkDateAction(dateKey);
       applyVacationYearData(data);
       setWorkPreview(null);
+      broadcastViewRefresh(["vacations", "timesheet", "ai-summary", "projects"], "mutation");
       setModalMode("create");
       setModalDraft({
         dateKey,

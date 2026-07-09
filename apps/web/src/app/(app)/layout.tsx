@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import { destroySession, getSession } from "@/server/session";
 
 import { AppNav } from "./app-nav";
+import { AppRefreshButton } from "./app-refresh-button";
 import { logoutAction } from "./actions";
 
 export default async function AppLayout({ children }: Readonly<{ children: ReactNode }>) {
@@ -42,8 +43,9 @@ export default async function AppLayout({ children }: Readonly<{ children: React
           </div>
 
           <div className="flex items-center gap-2">
+            <AppRefreshButton />
             <div className="hidden rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 sm:block">
-              <span className="font-semibold text-slate-950">{currentUser.username}</span> 계정
+              <span className="font-semibold text-slate-950">{currentUser.username}</span>
             </div>
             <form action={logoutAction}>
               <Button className="h-9 px-3" type="submit" variant="secondary">

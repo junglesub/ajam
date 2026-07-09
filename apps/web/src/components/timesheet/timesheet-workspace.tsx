@@ -67,6 +67,7 @@ import {
 import { NotionCardLinkSection } from "./notion-card-link-section";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
 import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidate, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
+import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
 
 type ViewMode = "calendar" | "list";
 
@@ -1404,6 +1405,95 @@ export function TimesheetWorkspace({
     })
   );
 
+  function getVisibleMonthKey() {
+    return getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
+  }
+
+  function applyVisibleMonthData(monthData: TimesheetMonthData) {
+    const monthKey = getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
+    const monthDrafts = buildDraftsFromMonthData(monthData);
+    const selectedDirtyDateKey = isDirty ? selectedDateKey : "";
+
+    setHolidayWarning(monthData.holidayWarning ?? "");
+    setHolidayWarningMonthKeys((current) => {
+      const next = new Set(current);
+
+      if (monthData.holidayWarning) {
+        next.add(monthKey);
+      } else {
+        next.delete(monthKey);
+      }
+
+      return next;
+    });
+    setRecords((current) => {
+      const next = Object.fromEntries(Object.entries(current).filter(([dateKey]) => !dateKey.startsWith(monthKey)));
+
+      if (selectedDirtyDateKey && current[selectedDirtyDateKey]) {
+        next[selectedDirtyDateKey] = current[selectedDirtyDateKey];
+      }
+
+      return {
+        ...next,
+        ...Object.fromEntries(Object.entries(monthDrafts).filter(([dateKey]) => dateKey !== selectedDirtyDateKey))
+      };
+    });
+    setSavedRecords((current) => ({
+      ...Object.fromEntries(Object.entries(current).filter(([dateKey]) => !dateKey.startsWith(monthKey))),
+      ...monthDrafts
+    }));
+    setSelectedEntryIdByDate((current) => ({
+      ...Object.fromEntries(Object.entries(current).filter(([dateKey]) => !dateKey.startsWith(monthKey))),
+      ...Object.fromEntries(Object.values(monthDrafts).flatMap((day) => day.dateKey !== selectedDirtyDateKey && day.entries[0] ? [[day.dateKey, day.entries[0].clientId]] : []))
+    }));
+    setProjects((current) => mergeProjects(current, monthData.projects));
+    setSavedEntryDateKeys((current) => {
+      const next = new Set(Array.from(current).filter((dateKey) => !dateKey.startsWith(monthKey)));
+
+      for (const entry of monthData.entries) {
+        next.add(entry.dateKey);
+      }
+
+      return next;
+    });
+    setLoadedMonthKeys((current) => new Set(current).add(monthKey));
+    setMonthLoadState("idle");
+    setIsInitialMonthSyncing(false);
+  }
+
+  async function loadVisibleMonthData() {
+    setMonthLoadState("loading");
+    setMonthLoadError("");
+
+    try {
+      return await loadMonthAction(monthCursor.year, monthCursor.monthIndex);
+    } catch (error) {
+      setMonthLoadState("error");
+      setMonthLoadError(error instanceof Error ? error.message : "월 데이터를 불러오지 못했습니다.");
+      setIsInitialMonthSyncing(false);
+      throw error;
+    }
+  }
+
+  async function saveEntryAndNotify(entry: TimesheetDayDraft): Promise<TimesheetSaveResult> {
+    const result = await saveEntryAction(entry);
+    broadcastViewRefresh(["timesheet", "vacations", "notion-cards", "ai-summary", "projects"], "mutation");
+    return result;
+  }
+
+  async function deleteEntryAndNotify(dateKey: string): Promise<TimesheetDeleteResult> {
+    const result = await deleteEntryAction(dateKey);
+    broadcastViewRefresh(["timesheet", "vacations", "notion-cards", "ai-summary", "projects"], "mutation");
+    return result;
+  }
+
+  useSharedViewRefresh<TimesheetMonthData>({
+    apply: applyVisibleMonthData,
+    getKey: getVisibleMonthKey,
+    load: loadVisibleMonthData,
+    scope: "timesheet"
+  });
+
   useEffect(() => {
     const monthKey = getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
 
@@ -2043,27 +2133,33 @@ export function TimesheetWorkspace({
     const savedDays: TimesheetDayDraft[] = [];
     const total = dateKeys.length;
 
-    for (const dateKey of dateKeys) {
-      const saveResult = await saveEntryAction(sanitizeDayForSave(createVacationDay(dateKey, vacationName, hours, vacationStatus)));
-      const savedDay = withClientIds(saveResult.day);
+    try {
+      for (const dateKey of dateKeys) {
+        const saveResult = await saveEntryAction(sanitizeDayForSave(createVacationDay(dateKey, vacationName, hours, vacationStatus)));
+        const savedDay = withClientIds(saveResult.day);
 
-      showNotionSyncError(saveResult.notionSyncError);
-      savedDays.push(savedDay);
-      onProgress?.(savedDays.length, total);
+        showNotionSyncError(saveResult.notionSyncError);
+        savedDays.push(savedDay);
+        onProgress?.(savedDays.length, total);
 
-      setRecords((current) => ({
-        ...current,
-        [savedDay.dateKey]: savedDay
-      }));
-      setSavedRecords((current) => ({
-        ...current,
-        [savedDay.dateKey]: savedDay
-      }));
-      setSavedEntryDateKeys((current) => new Set(current).add(savedDay.dateKey));
-      setSelectedEntryIdByDate((current) => ({
-        ...current,
-        [savedDay.dateKey]: savedDay.entries[0]?.clientId ?? ""
-      }));
+        setRecords((current) => ({
+          ...current,
+          [savedDay.dateKey]: savedDay
+        }));
+        setSavedRecords((current) => ({
+          ...current,
+          [savedDay.dateKey]: savedDay
+        }));
+        setSavedEntryDateKeys((current) => new Set(current).add(savedDay.dateKey));
+        setSelectedEntryIdByDate((current) => ({
+          ...current,
+          [savedDay.dateKey]: savedDay.entries[0]?.clientId ?? ""
+        }));
+      }
+    } finally {
+      if (savedDays.length > 0) {
+        broadcastViewRefresh(["timesheet", "vacations", "notion-cards", "ai-summary", "projects"], "mutation");
+      }
     }
 
     return savedDays;
@@ -2084,33 +2180,39 @@ export function TimesheetWorkspace({
     const savedDays: TimesheetDayDraft[] = [];
     const total = dateKeys.length;
 
-    for (const dateKey of dateKeys) {
-      const sourceDay = dateKey === selectedDateKey ? selectedDay : getSavedDraftForVacationDate(dateKey, loadedDrafts);
+    try {
+      for (const dateKey of dateKeys) {
+        const sourceDay = dateKey === selectedDateKey ? selectedDay : getSavedDraftForVacationDate(dateKey, loadedDrafts);
 
-      if (!sourceDay?.entries.some((entry) => entry.kind === "VACATION" && entry.vacationStatus === matchVacationStatus && entry.vacationName.trim() === matchVacationName.trim())) {
-        continue;
+        if (!sourceDay?.entries.some((entry) => entry.kind === "VACATION" && entry.vacationStatus === matchVacationStatus && entry.vacationName.trim() === matchVacationName.trim())) {
+          continue;
+        }
+
+        const saveResult = await saveEntryAction(sanitizeDayForSave(updateVacationEntryForConnectedSave(sourceDay, vacationName, matchVacationName, matchVacationStatus, vacationStatus)));
+        const savedDay = withClientIds(saveResult.day);
+
+        showNotionSyncError(saveResult.notionSyncError);
+        savedDays.push(savedDay);
+        onProgress?.(savedDays.length, total);
+
+        setRecords((current) => ({
+          ...current,
+          [savedDay.dateKey]: savedDay
+        }));
+        setSavedRecords((current) => ({
+          ...current,
+          [savedDay.dateKey]: savedDay
+        }));
+        setSavedEntryDateKeys((current) => new Set(current).add(savedDay.dateKey));
+        setSelectedEntryIdByDate((current) => ({
+          ...current,
+          [savedDay.dateKey]: savedDay.entries.find((entry) => entry.kind === "VACATION")?.clientId ?? savedDay.entries[0]?.clientId ?? ""
+        }));
       }
-
-      const saveResult = await saveEntryAction(sanitizeDayForSave(updateVacationEntryForConnectedSave(sourceDay, vacationName, matchVacationName, matchVacationStatus, vacationStatus)));
-      const savedDay = withClientIds(saveResult.day);
-
-      showNotionSyncError(saveResult.notionSyncError);
-      savedDays.push(savedDay);
-      onProgress?.(savedDays.length, total);
-
-      setRecords((current) => ({
-        ...current,
-        [savedDay.dateKey]: savedDay
-      }));
-      setSavedRecords((current) => ({
-        ...current,
-        [savedDay.dateKey]: savedDay
-      }));
-      setSavedEntryDateKeys((current) => new Set(current).add(savedDay.dateKey));
-      setSelectedEntryIdByDate((current) => ({
-        ...current,
-        [savedDay.dateKey]: savedDay.entries.find((entry) => entry.kind === "VACATION")?.clientId ?? savedDay.entries[0]?.clientId ?? ""
-      }));
+    } finally {
+      if (savedDays.length > 0) {
+        broadcastViewRefresh(["timesheet", "vacations", "notion-cards", "ai-summary", "projects"], "mutation");
+      }
     }
 
     return savedDays;
@@ -2656,6 +2758,7 @@ export function TimesheetWorkspace({
     setIsConnectedVacationSaving(true);
     setDeleteError("");
     setConnectedVacationProgress({ completed: 0, total: 0 });
+    let didMutate = false;
 
     try {
       const loadedDrafts = await loadDateKeysForVacation(connectedVacationPrompt.dateKeys);
@@ -2694,11 +2797,13 @@ export function TimesheetWorkspace({
             ...current,
             [savedDay.dateKey]: savedDay.entries[0]?.clientId ?? ""
           }));
+          didMutate = true;
         } else {
           const deleteResult = await deleteEntryAction(dateKey);
 
           showNotionSyncError(deleteResult.notionSyncError);
           removedDateKeys.push(dateKey);
+          didMutate = true;
         }
 
         completed += 1;
@@ -2714,6 +2819,10 @@ export function TimesheetWorkspace({
       setDeleteState("error");
       setDeleteError("연결된 휴가를 함께 삭제하지 못했습니다.");
     } finally {
+      if (didMutate) {
+        broadcastViewRefresh(["timesheet", "vacations", "notion-cards", "ai-summary", "projects"], "mutation");
+      }
+
       setIsConnectedVacationSaving(false);
     }
   }
@@ -2913,6 +3022,7 @@ export function TimesheetWorkspace({
       setProjectAddState("idle");
       setIsProjectModalOpen(false);
       updateSelectedEntry({ project: savedProject });
+      broadcastViewRefresh(["projects", "timesheet", "ai-summary"], "mutation");
     } catch {
       setProjectAddState("error");
       setProjectAddError("프로젝트를 추가하지 못했습니다.");
@@ -3090,6 +3200,7 @@ export function TimesheetWorkspace({
       mergeSavedDays(result.days);
       setAiCleanupState(result.skipped ? "skipped" : "done");
       setAiCleanupMessage(result.message);
+      broadcastViewRefresh(["timesheet", "ai-summary"], "mutation");
     } catch (error) {
       setAiCleanupState("error");
       setAiCleanupMessage(error instanceof Error ? error.message : "AI 정리에 실패했습니다.");
@@ -3145,7 +3256,7 @@ export function TimesheetWorkspace({
     setDeleteError("");
 
     try {
-      const saveResult = await saveEntryAction(entry);
+      const saveResult = await saveEntryAndNotify(entry);
       const savedEntry = withClientIds(saveResult.day);
 
       updateAiRewriteRequestsFromDays([savedEntry]);
@@ -3245,7 +3356,7 @@ export function TimesheetWorkspace({
     setDeleteError("");
 
     try {
-      const deleteResult = await deleteEntryAction(selectedDateKey);
+      const deleteResult = await deleteEntryAndNotify(selectedDateKey);
 
       showNotionSyncError(deleteResult.notionSyncError);
       removeDeletedDates([selectedDateKey]);
@@ -3455,6 +3566,7 @@ export function TimesheetWorkspace({
       });
       setLoadedMonthKeys((current) => new Set(current).add(monthKey));
       setHolidayResetState("saved");
+      broadcastViewRefresh(["timesheet", "vacations", "ai-summary"], "mutation");
     } catch {
       setHolidayResetState("error");
       setHolidayResetError("공휴일 정보를 다시 불러오지 못했습니다.");
@@ -3503,6 +3615,7 @@ export function TimesheetWorkspace({
       });
       setLoadedMonthKeys(new Set([getMonthCacheKey(monthCursor.year, monthCursor.monthIndex)]));
       setHolidayResetState("saved");
+      broadcastViewRefresh(["timesheet", "vacations", "ai-summary"], "mutation");
     } catch (error) {
       setHolidayResetState("error");
       setHolidayResetError(error instanceof Error ? error.message : "공휴일 정보를 삭제하지 못했습니다.");
@@ -3535,7 +3648,6 @@ export function TimesheetWorkspace({
               </Button>
               <div className="min-w-44 text-center">
                 <h2 className="text-lg font-bold text-slate-950">{getMonthLabel(monthCursor.year, monthCursor.monthIndex)}</h2>
-                {monthLoadState === "loading" ? <p className="text-xs font-semibold text-slate-400">불러오는 중</p> : null}
               </div>
               <Button className="h-11 w-11 shrink-0 p-0" onClick={() => moveMonth(1)} variant="ghost">
                 <ChevronRight aria-hidden="true" className="h-10 w-10 stroke-3" />

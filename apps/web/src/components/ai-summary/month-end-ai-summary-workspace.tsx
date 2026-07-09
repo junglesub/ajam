@@ -24,6 +24,8 @@ import {
 } from "@timesheet/domain";
 import { Badge, Button, Textarea, cn } from "@timesheet/ui";
 
+import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
+
 type MonthlyAiSummaryLoadResult = {
   payload: MonthlyAiSummaryPayload;
   projects: string[];
@@ -144,6 +146,24 @@ export function MonthEndAiSummaryWorkspace({
   const hasValidationErrors = validation.errors.length > 0;
   const canApply = Boolean(parsedImport.payload) && !hasValidationErrors && saveState !== "saving" && !isPending;
 
+  async function loadCurrentMonthData() {
+    setLoadError("");
+
+    try {
+      return await loadMonthlyAiSummaryAction(year, monthIndex);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "월 데이터를 불러오지 못했습니다.");
+      throw error;
+    }
+  }
+
+  useSharedViewRefresh<MonthlyAiSummaryLoadResult>({
+    apply: setData,
+    getKey: () => `${year}-${String(monthIndex + 1).padStart(2, "0")}`,
+    load: loadCurrentMonthData,
+    scope: "ai-summary"
+  });
+
   function changeMonth(delta: number) {
     const next = new Date(year, monthIndex + delta, 1);
     const nextYear = next.getFullYear();
@@ -202,6 +222,7 @@ export function MonthEndAiSummaryWorkspace({
         setImportText(JSON.stringify(refreshed.payload, null, 2));
         setSaveState("saved");
         setStatusMessage(result.appliedDateKeys.length > 0 ? `${result.appliedDateKeys.length}개 날짜를 적용했습니다.` : "변경된 날짜가 없습니다.");
+        broadcastViewRefresh(["ai-summary", "timesheet"], "mutation");
       } catch (error) {
         setSaveState("error");
         setStatusMessage(error instanceof Error ? error.message : "가져온 JSON을 적용하지 못했습니다.");

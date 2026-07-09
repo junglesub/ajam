@@ -18,27 +18,52 @@ export function useNotionCardMonth(params: {
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
 
+  function getLoadErrorMessage(loadError: unknown) {
+    return loadError instanceof Error ? loadError.message : "Notion 카드 목록을 불러오지 못했습니다.";
+  }
+
+  async function loadMonthData(nextMonth = month) {
+    try {
+      if (params.buildMonthlyAnalysisAction) {
+        const [nextAnalysis, nextAvailableCards] = await Promise.all([
+          params.buildMonthlyAnalysisAction(nextMonth),
+          params.listCardsForMonthAction(nextMonth)
+        ]);
+
+        return {
+          analysis: nextAnalysis,
+          availableCards: nextAvailableCards,
+          cards: nextAnalysis.cards
+        };
+      }
+
+      const nextCards = await params.listCardsForMonthAction(nextMonth);
+
+      return {
+        analysis: null,
+        availableCards: nextCards,
+        cards: nextCards
+      };
+    } catch (loadError) {
+      setError(getLoadErrorMessage(loadError));
+      throw loadError;
+    }
+  }
+
+  function applyMonthData(data: Awaited<ReturnType<typeof loadMonthData>>) {
+    setError("");
+    setAnalysis(data.analysis);
+    setCards(data.cards);
+    setAvailableCards(data.availableCards);
+  }
+
   function loadMonth(nextMonth = month) {
     startTransition(async () => {
       try {
         setError("");
-        if (params.buildMonthlyAnalysisAction) {
-          const [nextAnalysis, nextAvailableCards] = await Promise.all([
-            params.buildMonthlyAnalysisAction(nextMonth),
-            params.listCardsForMonthAction(nextMonth)
-          ]);
-          setAnalysis(nextAnalysis);
-          setCards(nextAnalysis.cards);
-          setAvailableCards(nextAvailableCards);
-          return;
-        }
-
-        const nextCards = await params.listCardsForMonthAction(nextMonth);
-        setCards(nextCards);
-        setAvailableCards(nextCards);
-        setAnalysis(null);
-      } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : "Notion 카드 목록을 불러오지 못했습니다.");
+        applyMonthData(await loadMonthData(nextMonth));
+      } catch {
+        return;
       }
     });
   }
@@ -54,11 +79,13 @@ export function useNotionCardMonth(params: {
 
   return {
     analysis,
+    applyMonthData,
     availableCards,
     cards,
     error,
     isPending,
     loadMonth,
+    loadMonthData,
     month,
     setCards,
     setMonth: changeMonth

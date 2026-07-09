@@ -6,6 +6,7 @@ import { CalendarClock, CalendarDays, Database, RefreshCw, Rows3 } from "lucide-
 import type { UserNotionConnection } from "@timesheet/db";
 import { Button, Input } from "@timesheet/ui";
 
+import { broadcastViewRefresh, requestViewRefresh, useSharedViewRefresh, useViewRefreshLoading } from "@/lib/view-refresh";
 import { NotionCardTable } from "./notion-card-table";
 import { NotionCategorySummary } from "./notion-category-summary";
 import { NotionConnectionModal } from "./notion-connection-modal";
@@ -45,6 +46,14 @@ export function NotionCardWorkspace({
   const [fieldUpdateError, setFieldUpdateError] = useState("");
   const [isFieldUpdatePending, startFieldUpdateTransition] = useTransition();
   const monthState = useNotionCardMonth({ buildMonthlyAnalysisAction, initialMonth, listCardsForMonthAction });
+  const isRefreshLoading = useViewRefreshLoading("notion-cards");
+
+  useSharedViewRefresh({
+    apply: monthState.applyMonthData,
+    getKey: () => monthState.month,
+    load: () => monthState.loadMonthData(),
+    scope: "notion-cards"
+  });
 
   function syncDate() {
     setSyncError("");
@@ -56,6 +65,7 @@ export function NotionCardWorkspace({
         setMessage(`${result.cards.length}개 Notion 카드를 동기화했습니다.`);
         setFieldUpdatePrompt(result.notionFieldUpdate);
         setFieldUpdateError("");
+        broadcastViewRefresh(["notion-cards", "timesheet"], "mutation");
       } catch (error) {
         setSyncError(error instanceof Error ? error.message : "Notion 카드를 동기화하지 못했습니다.");
       }
@@ -84,10 +94,21 @@ export function NotionCardWorkspace({
             : `${result.updated}개 Notion 카드 필드를 업데이트했습니다.`
         );
         monthState.loadMonth();
+        broadcastViewRefresh(["notion-cards", "timesheet"], "mutation");
       } catch (error) {
         setFieldUpdateError(error instanceof Error ? error.message : "Notion 필드를 업데이트하지 못했습니다.");
       }
     });
+  }
+
+  function saveConnection(connection: UserNotionConnection | null) {
+    setConnection(connection);
+    broadcastViewRefresh(["notion-cards", "timesheet"], "mutation");
+  }
+
+  function saveWeeklyDefaults(defaults: typeof initialWeeklyDefaults) {
+    setWeeklyDefaults(defaults);
+    broadcastViewRefresh(["notion-cards", "timesheet"], "mutation");
   }
 
   return (
@@ -117,8 +138,8 @@ export function NotionCardWorkspace({
               <CalendarDays aria-hidden="true" className="size-4" />
               <Input className="h-9 w-[150px]" onChange={(event) => monthState.setMonth(event.target.value)} type="month" value={monthState.month} />
             </label>
-            <Button disabled={monthState.isPending} onClick={() => monthState.loadMonth()} type="button" variant="secondary">
-              <RefreshCw aria-hidden="true" className="size-4" />
+            <Button disabled={monthState.isPending || isRefreshLoading} onClick={() => requestViewRefresh("notion-cards")} type="button" variant="secondary">
+              <RefreshCw aria-hidden="true" className={isRefreshLoading ? "size-4 animate-spin" : "size-4"} />
               새로고침
             </Button>
           </div>
@@ -149,7 +170,7 @@ export function NotionCardWorkspace({
       <NotionConnectionModal
         connection={connection}
         onClose={() => setIsConnectionOpen(false)}
-        onConnectionSaved={setConnection}
+        onConnectionSaved={saveConnection}
         onMessage={setMessage}
         open={isConnectionOpen}
         saveConnectionAction={saveConnectionAction}
@@ -159,7 +180,7 @@ export function NotionCardWorkspace({
         availableCards={monthState.availableCards}
         defaults={weeklyDefaults}
         onClose={() => setIsWeeklyDefaultsOpen(false)}
-        onDefaultsSaved={setWeeklyDefaults}
+        onDefaultsSaved={saveWeeklyDefaults}
         onMessage={setMessage}
         open={isWeeklyDefaultsOpen}
         saveWeeklyDefaultsAction={saveWeeklyDefaultsAction}

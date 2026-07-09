@@ -6,8 +6,11 @@ import { CalendarClock, Check, Clock3, FolderKanban, Pencil, X } from "lucide-re
 import type { ProjectSummary } from "@timesheet/db";
 import { Badge, Button, Input, cn } from "@timesheet/ui";
 
+import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
+
 type ProjectManagementProps = {
   initialProjects: ProjectSummary[];
+  loadProjectsAction: () => Promise<ProjectSummary[]>;
   renameProjectAction: (params: { fromName: string; toName: string }) => Promise<ProjectSummary[]>;
 };
 
@@ -31,7 +34,7 @@ function formatLatestDate(dateKey: string | null): string {
   return `${year}.${month}.${day} (${weekday})`;
 }
 
-export function ProjectManagement({ initialProjects, renameProjectAction }: ProjectManagementProps) {
+export function ProjectManagement({ initialProjects, loadProjectsAction, renameProjectAction }: ProjectManagementProps) {
   const [projects, setProjects] = useState(initialProjects);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
@@ -47,6 +50,27 @@ export function ProjectManagement({ initialProjects, renameProjectAction }: Proj
     }),
     [projects]
   );
+
+  async function loadProjects() {
+    try {
+      const nextProjects = await loadProjectsAction();
+      setError("");
+      return nextProjects;
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "프로젝트 목록을 불러오지 못했습니다.");
+      throw loadError;
+    }
+  }
+
+  useSharedViewRefresh<ProjectSummary[]>({
+    apply: (nextProjects) => {
+      setError("");
+      setProjects(nextProjects);
+    },
+    getKey: () => "all",
+    load: loadProjects,
+    scope: "projects"
+  });
 
   function startEditing(project: ProjectSummary) {
     setEditingName(project.name);
@@ -83,6 +107,7 @@ export function ProjectManagement({ initialProjects, renameProjectAction }: Proj
         setProjects(nextProjects);
         setEditingName(null);
         setDraftName("");
+        broadcastViewRefresh(["projects", "timesheet", "ai-summary", "vacations"], "mutation");
       } catch (renameError) {
         setError(renameError instanceof Error ? renameError.message : "프로젝트 이름을 변경하지 못했습니다.");
       } finally {

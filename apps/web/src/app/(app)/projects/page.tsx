@@ -11,5 +11,5 @@ export const metadata: Metadata = {
 export default async function ProjectsPage() {
   const initialProjects = await loadProjectSummariesAction();
 
-  return <ProjectManagement initialProjects={initialProjects} renameProjectAction={renameProjectAction} />;
+  return <ProjectManagement initialProjects={initialProjects} loadProjectsAction={loadProjectSummariesAction} renameProjectAction={renameProjectAction} />;
 }
