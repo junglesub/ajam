@@ -1,6 +1,5 @@
-import { getManagedUser } from "@timesheet/db";
-import { Button } from "@timesheet/ui";
-import { CalendarDays, LogOut } from "lucide-react";
+import { getAppSetting, getManagedUser, getUserAiSetting, listManagedUsers, listTimesheetAiRewriteRequests } from "@timesheet/db";
+import { CalendarDays } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
@@ -9,7 +8,7 @@ import { destroySession, getSession } from "@/server/session";
 
 import { AppNav } from "./app-nav";
 import { AppRefreshButton } from "./app-refresh-button";
-import { logoutAction } from "./actions";
+import { AppSettingsButton } from "./app-settings-button";
 
 export default async function AppLayout({ children }: Readonly<{ children: ReactNode }>) {
   const session = await getSession();
@@ -24,6 +23,13 @@ export default async function AppLayout({ children }: Readonly<{ children: React
     await destroySession();
     redirect("/login");
   }
+
+  const [holidayApiKey, managedUsers, aiSetting, aiRewriteRequests] = await Promise.all([
+    currentUser.role === "ADMIN" ? getAppSetting("data_go_kr_service_key") : Promise.resolve(null),
+    currentUser.role === "ADMIN" ? listManagedUsers() : Promise.resolve([]),
+    getUserAiSetting(currentUser.id),
+    listTimesheetAiRewriteRequests(currentUser.id)
+  ]);
 
   return (
     <main className="min-h-full bg-slate-100">
@@ -44,15 +50,16 @@ export default async function AppLayout({ children }: Readonly<{ children: React
 
           <div className="flex items-center gap-2">
             <AppRefreshButton />
+            <AppSettingsButton
+              aiRewriteRequests={aiRewriteRequests}
+              aiSetting={aiSetting}
+              currentUser={currentUser}
+              initialHolidayApiKey={holidayApiKey ?? ""}
+              initialManagedUsers={managedUsers}
+            />
             <div className="hidden rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 sm:block">
               <span className="font-semibold text-slate-950">{currentUser.username}</span>
             </div>
-            <form action={logoutAction}>
-              <Button className="h-9 px-3" type="submit" variant="secondary">
-                <LogOut aria-hidden="true" className="size-4" />
-                로그아웃
-              </Button>
-            </form>
           </div>
         </div>
       </header>

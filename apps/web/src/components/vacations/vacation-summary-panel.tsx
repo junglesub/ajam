@@ -96,7 +96,7 @@ export function VacationSummaryPanel({
           {groups.map((group) => (
             <div className="flex items-center justify-between gap-3 py-3 text-sm" key={group.name}>
               <span className="flex min-w-0 items-center gap-2">
-                <span className={cn("size-2.5 shrink-0 rounded-full", swatchClassByTone[group.colorClass])} />
+                <span className={cn("size-2.5 shrink-0 rounded-full", swatchClassByTone[group.colorClass])} data-vacation-tone={group.colorClass} />
                 <span className="truncate font-bold text-slate-800">{group.name}</span>
               </span>
               <span className="shrink-0 text-right">

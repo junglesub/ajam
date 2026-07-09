@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import type { ReactNode } from "react";
 
 import { getBuildInfo } from "@/lib/build-info";
@@ -16,11 +17,17 @@ export const metadata: Metadata = {
   }
 };
 
-export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+function normalizeTheme(value: string | undefined) {
+  return value === "dark" ? "dark" : "light";
+}
+
+export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   const buildInfo = getBuildInfo();
+  const cookieStore = await cookies();
+  const theme = normalizeTheme(cookieStore.get("ajam-theme-resolved")?.value);
 
   return (
-    <html lang="ko">
+    <html data-theme={theme} lang="ko">
       <head>
         <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable.css" rel="stylesheet" />
       </head>

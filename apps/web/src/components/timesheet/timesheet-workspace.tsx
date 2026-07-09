@@ -58,15 +58,16 @@ import {
   ArrowUp,
   RotateCcw,
   Search,
-  Settings,
   Sparkles,
   TimerReset,
   type LucideIcon
 } from "lucide-react";
 
+import { logoutAction } from "@/app/(app)/timesheet/actions";
 import { NotionCardLinkSection } from "./notion-card-link-section";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
 import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidate, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
+import { ThemeSetting } from "@/components/theme-setting";
 import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
 
 type ViewMode = "calendar" | "list";
@@ -240,9 +241,8 @@ const cellToneByStatus: Record<TimesheetStatus, string> = {
   VACATION: "border-blue-200 bg-blue-50/80 hover:border-blue-300"
 };
 
-const vacationMixColor = "rgba(59, 130, 246, 0.18)";
-const temporaryVacationHatchBackground =
-  "linear-gradient(rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.38)), repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.62) 0 5px, rgba(59, 130, 246, 0.06) 5px 10px)";
+const vacationMixColor = "var(--vacation-mix-color)";
+const temporaryVacationHatchBackground = "var(--temporary-vacation-hatch-background)";
 const fullDayHours = 8;
 
 const newProjectOptionValue = "__new_project__";
@@ -3399,6 +3399,16 @@ export function TimesheetWorkspace({
     setIsSettingsOpen(true);
   }
 
+  useEffect(() => {
+    function openTimesheetSettings(event: Event) {
+      event.preventDefault();
+      openSettings();
+    }
+
+    window.addEventListener("ajam:open-settings", openTimesheetSettings);
+    return () => window.removeEventListener("ajam:open-settings", openTimesheetSettings);
+  });
+
   async function saveProfile() {
     setProfileState("saving");
     setProfileError("");
@@ -3659,10 +3669,6 @@ export function TimesheetWorkspace({
               <Button className="h-9 px-3" onClick={goToday} variant="secondary">
                 <TimerReset aria-hidden="true" className="size-4" />
                 오늘
-              </Button>
-              <Button className="h-9 px-3" onClick={openSettings} variant="secondary">
-                <Settings aria-hidden="true" className="size-4" />
-                설정
               </Button>
               <SegmentedControl
                 items={[
@@ -3948,6 +3954,10 @@ export function TimesheetWorkspace({
                 <Badge tone={isAdmin ? "green" : "gray"}>{isAdmin ? "관리자" : "일반"}</Badge>
               </div>
 
+              <div className="mt-4">
+                <ThemeSetting />
+              </div>
+
               <div className="mt-4 rounded-md border border-slate-200 bg-white p-4">
                 <h4 className="text-sm font-bold text-slate-950">계정 정보</h4>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -3963,7 +3973,12 @@ export function TimesheetWorkspace({
                 </div>
                 {profileState === "saved" ? <p className="mt-3 text-sm font-semibold text-emerald-700">계정 정보를 저장했습니다.</p> : null}
                 {profileState === "error" ? <p className="mt-3 text-sm font-semibold text-red-600">{profileError}</p> : null}
-                <div className="mt-4 flex justify-end">
+                <div className="mt-4 flex items-end justify-between gap-3">
+                  <form action={logoutAction}>
+                    <button className="text-sm font-semibold text-red-600 transition hover:text-red-700" type="submit">
+                      로그아웃
+                    </button>
+                  </form>
                   <Button disabled={profileState === "saving"} onClick={() => void saveProfile()} type="button">
                     {profileState === "saving" ? "저장 중" : "계정 저장"}
                   </Button>

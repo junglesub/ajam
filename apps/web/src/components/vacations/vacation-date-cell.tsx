@@ -62,8 +62,8 @@ export function VacationDateCell({
       <span
         className={cn(
           "relative grid size-full max-h-6 max-w-6 place-items-center overflow-hidden rounded-full text-[9px] font-black text-slate-700 transition",
-          hasMarkerBackground && "bg-slate-100",
-          today && "outline-2 outline-slate-950 outline-offset-1 text-slate-950",
+          hasMarkerBackground && "vacation-marker-date bg-slate-100",
+          today && "vacation-today-date outline-2 outline-slate-950 outline-offset-1 text-slate-950",
           dimmed && "opacity-40",
           connected && "vacation-connected-date bg-slate-200 opacity-100"
         )}
@@ -73,15 +73,17 @@ export function VacationDateCell({
             <span
               aria-hidden="true"
               className={cn("absolute inset-x-0 bottom-0", fillClassByTone[tone])}
+              data-vacation-tone={tone}
               style={{ height: `${fillRatio * 100}%` }}
             />
             {temporary ? (
               <span
                 aria-hidden="true"
                 className="absolute inset-x-0 bottom-0"
+                data-vacation-temporary="true"
                 style={{
-                  backgroundColor: "rgba(255, 255, 255, 0.28)",
-                  backgroundImage: "repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.78) 0 2px, rgba(255, 255, 255, 0.18) 2px 4px)",
+                  backgroundColor: "var(--vacation-date-temporary-overlay)",
+                  backgroundImage: "var(--vacation-date-temporary-hatch)",
                   height: `${fillRatio * 100}%`
                 }}
               />
