@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { CalendarClock, CalendarDays, Database, RefreshCw, Rows3 } from "lucide-react";
 
 import type { UserNotionConnection } from "@timesheet/db";
 import { Button, Input } from "@timesheet/ui";
 
+import { browserMonth, shiftMonth, shouldIgnoreCalendarShortcut } from "@/lib/calendar-shortcuts";
 import { broadcastViewRefresh, requestViewRefresh, useSharedViewRefresh, useViewRefreshLoading } from "@/lib/view-refresh";
 import { NotionCardTable } from "./notion-card-table";
 import { NotionCategorySummary } from "./notion-category-summary";
@@ -51,6 +52,25 @@ export function NotionCardWorkspace({
   const [isFieldUpdatePending, startFieldUpdateTransition] = useTransition();
   const monthState = useNotionCardMonth({ buildMonthlyAnalysisAction, initialMonth, listCardsForMonthAction });
   const isRefreshLoading = useViewRefreshLoading("notion-cards");
+  const shortcutModalOpen = Boolean(isConnectionOpen || isWeeklyDefaultsOpen || fieldUpdatePrompt);
+
+  useEffect(() => {
+    function handleCalendarShortcut(event: KeyboardEvent) {
+      if (shouldIgnoreCalendarShortcut(event, shortcutModalOpen) || monthState.isPending) {
+        return;
+      }
+
+      if (event.key !== "j" && event.key !== "k" && event.key !== "t") {
+        return;
+      }
+
+      event.preventDefault();
+      monthState.setMonth(event.key === "t" ? browserMonth() : shiftMonth(monthState.month, event.key === "j" ? -1 : 1));
+    }
+
+    window.addEventListener("keydown", handleCalendarShortcut);
+    return () => window.removeEventListener("keydown", handleCalendarShortcut);
+  });
 
   useSharedViewRefresh({
     apply: monthState.applyMonthData,

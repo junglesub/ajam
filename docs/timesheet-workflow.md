@@ -10,7 +10,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - Work entries store project, hours, content, and English translation.
 - Vacation entries store vacation type and hours.
 - Holiday entries store holiday name and use `0h` by default.
-- The day-level short version is separate from entries and is used only for calendar summary fallback, not list rows.
+- The day-level short version is separate from entries and is used for calendar summary fallback and the list view's date summary band.
 - Save replaces the selected date with the full current day draft.
 - Delete removes the saved date, then recreates the default editor draft for the selected date.
 
@@ -37,6 +37,11 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 
 ## Calendar View
 
+- With focus outside an editor or popup, `j` loads the previous month, `k` loads the next month, and `t` returns to the browser-local current month and selects today.
+- Hovering the previous month, next month, today, calendar, or list controls shows the connected `J`, `K`, `T`, or `Tab` shortcut in the native button tooltip.
+- Plain `Tab` switches between calendar and list views outside the right-side daily record editor. Inside that editor, `Tab` keeps native focus navigation across inputs and buttons; `Shift+Tab` always keeps native backward focus navigation.
+- After selecting a calendar date, the left and right arrow keys move to the previous or next visible business day. The up and down arrow keys move to the same weekday in the previous or next week. Keyboard focus follows the selected date so only the current cell keeps an outline. Crossing a month boundary loads that month through the normal navigation flow.
+- Calendar shortcuts are ignored while using an input, textarea, select, editable content, or popup, and when Ctrl, Cmd, or Alt is held. Key composition and held-key repeats are also ignored.
 - Saved completed work shows the `완료` tag on the right.
 - If a day includes vacation and is not vacation-only, a blue dot appears before the completed/holiday tag.
 - Vacation-only days show the vacation tag with text.
@@ -54,12 +59,16 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 
 ## List View
 
-- The list view is row-based rather than grouped by a separate date summary row.
+- The list header shows an icon-only `내용 전체 보기` toggle immediately before the today button. Plain `F` toggles the same preference outside the daily editor and popup. The view keeps the normal compact two-line display when off and shows complete work content and English translations with preserved line breaks when on.
+- The full-content preference is stored under `timesheet:list:show-full-content` in browser `localStorage`. It defaults to off and is not synchronized to other browsers or devices.
+- Up and down arrow keys move through rendered list rows, including separate entries on the same date. Movement stops at the first and last row, and keyboard focus follows the selected row.
+- The list view groups rows under a non-interactive date summary band. The band shows the date, work hours, vacation or holiday information, and spans the saved day-level short version across the project, content, and AI translation columns when present.
+- The short version follows the same full-content preference as work content: compact mode keeps one truncated line, while full-content mode wraps and shows the complete value. Dates without a short version omit that line.
 - Multi-entry days render one row per entry.
 - Missing dates render a single yellow `입력안됨` row.
 - Entry rows show type, hours, project/vacation/holiday title, content, and English translation.
 - Work content is clamped to two lines and uses `(내용 없음)` when saved empty.
-- Short version is not shown in the list view.
+- Up and down arrow navigation skips date summary bands and continues to move only through selectable entry or missing-date rows.
 - Clicking an entry row selects that date and entry in the right editor.
 - Saved non-holiday rows whose total hours are not `8h` show the same orange timer icon as the calendar view.
 
@@ -82,6 +91,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 
 ## Notion Card Mapping
 
+- On the Notion card screen, `j` loads the previous month, `k` loads the next month, and `t` loads the browser-local current month. The shared editor, modifier, repeat, composition, and popup suppression rules apply.
 - Notion cards are user-specific. Card metadata is read from Notion, and optional number properties are written back to Notion after timesheet saves.
 - The `Notion 카드` menu stores each user's integration token, data source ID, field mapping, done status values, optional work-hours number property mapping, optional work-day-count number property mapping, optional available-hours number property mapping, optional last-worked-date property mapping, and optional aJam-update-time date property mapping.
 - The same menu stores weekday Notion defaults for Monday through Friday. In the UI, one default row can select multiple weekdays for the same card and hour value; it is stored as weekday-specific rules with an enabled flag.
@@ -190,6 +200,14 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - The time macro runs in the active page content script. The popup queries the active tab for `GET_AJAM_TIME_MACRO_STATUS` during startup so reopening the popup while a macro is waiting or running shows the stop button again.
 - Missing content-script receivers are treated as no active macro for status restore, so normal pages without an injected macro do not show an error.
 - Refresh and run actions are guarded locally while data is loading or a macro is running. If `시간 입력 실행` needs to load monthly data first, the popup disables overlapping refresh/run clicks before that implicit load starts.
+
+## Vacation Year View
+
+- With focus outside an editor or popup, `j` loads the previous year and `k` loads the next year.
+- `t` returns to the browser-local current year and selects today through the existing date action, opening the applicable vacation or work-record popup.
+- Hovering the previous year, next year, or current-year controls shows the connected `J`, `K`, or `T` shortcut in the native button tooltip.
+- The shared editor, modifier, repeat, composition, and popup suppression rules apply.
+
 ## Vacation Range Save
 
 - `기간 저장` is available only when the selected date has exactly one vacation entry.

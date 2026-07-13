@@ -60,6 +60,7 @@ import {
   Search,
   Sparkles,
   TimerReset,
+  WrapText,
   type LucideIcon
 } from "lucide-react";
 
@@ -68,9 +69,12 @@ import { NotionCardLinkSection } from "./notion-card-link-section";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
 import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidate, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
 import { ThemeSetting } from "@/components/theme-setting";
+import { adjacentListTarget, shouldIgnoreCalendarShortcut } from "@/lib/calendar-shortcuts";
 import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
 
 type ViewMode = "calendar" | "list";
+
+const fullListContentStorageKey = "timesheet:list:show-full-content";
 
 type UserRole = "ADMIN" | "USER";
 type AiCleanupMode = "immediate" | "manual" | "scheduled";
@@ -1036,7 +1040,7 @@ function calendarStatusText(row: TimesheetRow, isSelected: boolean): string {
   return statusText(row);
 }
 
-function listSummaryText(row: TimesheetRow): string {
+function listSummaryText(row: TimesheetRow, showFullContent = false): string {
   if (row.hasVacation && row.entries.every((entry) => entry.kind === "VACATION")) {
     return row.vacationName || "휴가";
   }
@@ -1046,7 +1050,8 @@ function listSummaryText(row: TimesheetRow): string {
   }
 
   const firstWork = firstWorkEntry(row);
-  const content = truncateContent(firstWork?.content ?? row.content ?? "");
+  const rawContent = (firstWork?.content ?? row.content ?? "").trim();
+  const content = showFullContent ? rawContent : truncateContent(rawContent);
 
   if (row.status === "MISSING") {
     if (row.kind === "WORK" && row.project.trim() && !content) {
@@ -1057,6 +1062,18 @@ function listSummaryText(row: TimesheetRow): string {
   }
 
   return content || (row.kind === "WORK" ? "(내용 없음)" : "작성 예정");
+}
+
+function listDayMeta(row: TimesheetRow): string {
+  if (row.status === "MISSING") {
+    return "0h";
+  }
+
+  const workHours = row.entries.filter((entry) => entry.kind === "WORK").reduce((sum, entry) => sum + effectiveEntryHours(entry), 0);
+  const vacationNames = row.entries.filter((entry) => entry.kind === "VACATION").map((entry) => entry.vacationName.trim() || "휴가");
+  const parts = [workHours ? `업무 ${workHours}h` : "", ...vacationNames, row.holidayName.trim()].filter(Boolean);
+
+  return parts.join(" · ") || `${row.hours}h`;
 }
 
 export function TimesheetWorkspace({
@@ -1097,6 +1114,7 @@ export function TimesheetWorkspace({
     year: initialYear
   });
   const [viewMode, setViewMode] = useState<ViewMode>("calendar");
+  const [showFullListContent, setShowFullListContent] = useState(false);
   const [currentUser, setCurrentUser] = useState(initialCurrentUser);
   const [records, setRecords] = useState<Record<string, TimesheetDayDraft>>(() => buildInitialDrafts(initialMonthData, todayKey));
   const [savedRecords, setSavedRecords] = useState<Record<string, TimesheetDayDraft>>(() => buildDraftsFromMonthData(initialMonthData));
@@ -1194,6 +1212,14 @@ export function TimesheetWorkspace({
   const [isInitialMonthSyncing, setIsInitialMonthSyncing] = useState(true);
   const [notionRecommendationLoadingKeys, setNotionRecommendationLoadingKeys] = useState<Set<string>>(() => new Set());
   const previousNotionCardRecommendationKeys = useRef(new Set<string>());
+
+  useEffect(() => {
+    try {
+      setShowFullListContent(localStorage.getItem(fullListContentStorageKey) === "true");
+    } catch {
+      // Browser storage is optional; the in-memory default remains usable.
+    }
+  }, []);
 
   useEffect(() => {
     const browserToday = new Date();
@@ -1357,6 +1383,16 @@ export function TimesheetWorkspace({
   const selectedEntryIdCandidate = selectedEntryIdByDate[selectedDateKey] ?? selectedDay.entries[0]?.clientId ?? "";
   const selectedEntry = selectedDay.entries.find((entry) => entry.clientId === selectedEntryIdCandidate) ?? selectedDay.entries[0];
   const selectedEntryId = selectedEntry?.clientId ?? "";
+  const listNavigationTargets = useMemo(() => listDateKeys.flatMap((dateKey) => {
+    const row = rows[dateKey]!;
+
+    return row.status === "MISSING" || row.entries.length === 0
+      ? [{ dateKey, entryClientId: "" }]
+      : row.entries.map((entry) => ({ dateKey, entryClientId: entry.clientId }));
+  }), [listDateKeys, rows]);
+  const selectedListTarget = listNavigationTargets.find((target) => target.dateKey === selectedDateKey && target.entryClientId === selectedEntryId)
+    ?? listNavigationTargets.find((target) => target.dateKey === selectedDateKey);
+  const selectedListRowKey = selectedListTarget ? listRowKey(selectedListTarget.dateKey, selectedListTarget.entryClientId) : "";
   const selectedEditorKind: WorkRecordKind = selectedEntry?.kind ?? (selectedDay.holidayName ? "HOLIDAY" : isFutureDate ? "VACATION" : "WORK");
   const selectedNotionAllocationError = selectedEntry ? getNotionAllocationError(selectedEntry) : "";
   const isSelectedNotionRecommendationLoading = Boolean(selectedEntry && notionRecommendationLoadingKeys.has(`${selectedDateKey}:${selectedEntry.clientId}`));
@@ -1864,9 +1900,12 @@ export function TimesheetWorkspace({
 
   function runNavigation(navigation: PendingNavigation) {
     if (navigation.kind === "date") {
+      const nextCursor = getDateKeyMonthCursor(navigation.dateKey);
+
       removeSelectedAutoProjectDraft(navigation.dateKey);
       prepareDraftForDate(navigation.dateKey);
       setSelectedDateKey(navigation.dateKey);
+      setMonthCursor(nextCursor);
       const entryClientId = navigation.entryClientId;
       if (entryClientId) {
         setSelectedEntryIdByDate((current) => ({
@@ -1950,6 +1989,16 @@ export function TimesheetWorkspace({
 
   function goToday() {
     requestNavigation({ kind: "today" });
+  }
+
+  function updateShowFullListContent(checked: boolean) {
+    setShowFullListContent(checked);
+
+    try {
+      localStorage.setItem(fullListContentStorageKey, String(checked));
+    } catch {
+      // Keep the toggle working even when browser storage is unavailable.
+    }
   }
 
   async function loadDateKeysForVacation(dateKeys: string[]): Promise<Record<string, TimesheetDayDraft>> {
@@ -3330,6 +3379,78 @@ export function TimesheetWorkspace({
     }
   }
 
+  const shortcutModalOpen = Boolean(
+    editingNotionEntryClientId
+    || isDeleteConfirmOpen
+    || isProjectModalOpen
+    || isSettingsOpen
+    || isAiRewriteQueueOpen
+    || pendingNavigation
+    || isVacationRangeOpen
+    || connectedVacationPrompt
+    || aiRewritePromptDateKey
+    || aiOverwriteEditPrompt
+  );
+
+  useEffect(() => {
+    function handleCalendarShortcut(event: globalThis.KeyboardEvent) {
+      if (shouldIgnoreCalendarShortcut(event, shortcutModalOpen)) {
+        return;
+      }
+
+      if (event.key === "Tab" && !event.shiftKey) {
+        event.preventDefault();
+        setViewMode((current) => current === "calendar" ? "list" : "calendar");
+        return;
+      }
+
+      if (event.key === "j" || event.key === "k" || event.key === "t") {
+        event.preventDefault();
+
+        if (event.key === "j") moveMonth(-1);
+        if (event.key === "k") moveMonth(1);
+        if (event.key === "t") goToday();
+        return;
+      }
+
+      if (viewMode === "list" && event.key === "f") {
+        event.preventDefault();
+        updateShowFullListContent(!showFullListContent);
+        return;
+      }
+
+      if (viewMode === "list" && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+        event.preventDefault();
+        const target = adjacentListTarget(listNavigationTargets, selectedDateKey, selectedEntryId, event.key === "ArrowUp" ? -1 : 1);
+
+        if (target?.entryClientId) {
+          selectDateEntry(target.dateKey, target.entryClientId);
+        } else if (target) {
+          selectDate(target.dateKey);
+        }
+
+        return;
+      }
+
+      if (viewMode !== "calendar") {
+        return;
+      }
+
+      const dayDelta = event.key === "ArrowUp" ? -7 : event.key === "ArrowDown" ? 7 : 0;
+      const businessDirection = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+
+      if (!dayDelta && !businessDirection) {
+        return;
+      }
+
+      event.preventDefault();
+      selectDate(dayDelta ? addDays(selectedDateKey, dayDelta) : addBusinessDays(selectedDateKey, businessDirection as -1 | 1));
+    }
+
+    window.addEventListener("keydown", handleCalendarShortcut);
+    return () => window.removeEventListener("keydown", handleCalendarShortcut);
+  });
+
   async function deleteSelectedEntry(options: { skipConnectedVacation?: boolean } = {}) {
     if (!canDeleteSelected || deleteState === "deleting") {
       return;
@@ -3652,28 +3773,43 @@ export function TimesheetWorkspace({
         <section className="min-w-0 rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
             <div className="flex items-center gap-2">
-              <Button className="h-11 w-11 shrink-0 p-0" onClick={() => moveMonth(-1)} variant="ghost">
+              <Button className="h-11 w-11 shrink-0 p-0" onClick={() => moveMonth(-1)} title="이전 달 (J)" variant="ghost">
                 <ChevronLeft aria-hidden="true" className="h-10 w-10 stroke-3" />
                 <span className="sr-only">이전 달</span>
               </Button>
               <div className="min-w-44 text-center">
                 <h2 className="text-lg font-bold text-slate-950">{getMonthLabel(monthCursor.year, monthCursor.monthIndex)}</h2>
               </div>
-              <Button className="h-11 w-11 shrink-0 p-0" onClick={() => moveMonth(1)} variant="ghost">
+              <Button className="h-11 w-11 shrink-0 p-0" onClick={() => moveMonth(1)} title="다음 달 (K)" variant="ghost">
                 <ChevronRight aria-hidden="true" className="h-10 w-10 stroke-3" />
                 <span className="sr-only">다음 달</span>
               </Button>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Button className="h-9 px-3" onClick={goToday} variant="secondary">
+              {viewMode === "list" ? (
+                <button
+                  aria-label={showFullListContent ? "내용 줄여 보기" : "내용 전체 보기"}
+                  aria-pressed={showFullListContent}
+                  className={cn(
+                    "inline-flex size-9 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100",
+                    showFullListContent && "bg-slate-100 text-slate-950"
+                  )}
+                  onClick={() => updateShowFullListContent(!showFullListContent)}
+                  title={showFullListContent ? "내용 줄여 보기 (F)" : "내용 전체 보기 (F)"}
+                  type="button"
+                >
+                  <WrapText aria-hidden="true" className="size-5" strokeWidth={2.4} />
+                </button>
+              ) : null}
+              <Button className="h-9 px-3" onClick={goToday} title="오늘 (T)" variant="secondary">
                 <TimerReset aria-hidden="true" className="size-4" />
                 오늘
               </Button>
               <SegmentedControl
                 items={[
-                  { icon: <CalendarDays aria-hidden="true" className="size-4" />, label: "캘린더", value: "calendar" },
-                  { icon: <ListChecks aria-hidden="true" className="size-4" />, label: "리스트", value: "list" }
+                  { icon: <CalendarDays aria-hidden="true" className="size-4" />, label: "캘린더", title: "캘린더 (Tab)", value: "calendar" },
+                  { icon: <ListChecks aria-hidden="true" className="size-4" />, label: "리스트", title: "리스트 (Tab)", value: "list" }
                 ]}
                 onChange={setViewMode}
                 value={viewMode}
@@ -3715,13 +3851,15 @@ export function TimesheetWorkspace({
               rows={rows}
               selectedDateKey={selectedDateKey}
               selectedEntryId={selectedEntryId}
+              selectedRowKey={selectedListRowKey}
               setSelectedDateKey={selectDate}
               setSelectedEntry={selectDateEntry}
+              showFullContent={showFullListContent}
             />
           )}
         </section>
 
-        <aside className="rounded-lg border border-slate-200 bg-white shadow-sm">
+        <aside className="rounded-lg border border-slate-200 bg-white shadow-sm" data-calendar-shortcuts-ignore>
           <div className="border-b border-slate-200 px-5 py-4">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -4749,6 +4887,16 @@ function CalendarView({
   weeks: ReturnType<typeof getBusinessCalendarWeeks>;
 }) {
   const dateButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const previousSelectedDateKeyRef = useRef(selectedDateKey);
+
+  useEffect(() => {
+    if (previousSelectedDateKeyRef.current === selectedDateKey) {
+      return;
+    }
+
+    previousSelectedDateKeyRef.current = selectedDateKey;
+    dateButtonRefs.current.get(selectedDateKey)?.focus({ preventScroll: true });
+  }, [selectedDateKey]);
 
   useEffect(() => {
     if (!celebratingDateKey) {
@@ -4871,20 +5019,35 @@ function ListView({
   rows,
   selectedEntryId,
   selectedDateKey,
+  selectedRowKey,
   setSelectedDateKey,
-  setSelectedEntry
+  setSelectedEntry,
+  showFullContent
 }: {
   dateKeys: string[];
   rows: Record<string, TimesheetRow>;
   selectedEntryId: string;
   selectedDateKey: string;
+  selectedRowKey: string;
   setSelectedDateKey: (dateKey: string) => void;
   setSelectedEntry: (dateKey: string, entryClientId: string) => void;
+  showFullContent: boolean;
 }) {
+  const rowButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const previousSelectedRowKeyRef = useRef(selectedRowKey);
+
+  useEffect(() => {
+    if (previousSelectedRowKeyRef.current === selectedRowKey) {
+      return;
+    }
+
+    previousSelectedRowKeyRef.current = selectedRowKey;
+    rowButtonRefs.current.get(selectedRowKey)?.focus({ preventScroll: true });
+  }, [selectedRowKey]);
+
   return (
     <div className="overflow-x-auto p-4">
-      <div className="grid min-w-[980px] grid-cols-[120px_112px_88px_minmax(120px,0.8fr)_minmax(200px,1.2fr)_minmax(200px,1.1fr)] gap-3 border-b border-slate-200 px-3 pb-2 text-xs font-bold text-slate-400">
-        <span>날짜</span>
+      <div className="grid min-w-[980px] grid-cols-[112px_88px_minmax(120px,0.8fr)_minmax(200px,1.2fr)_minmax(200px,1.1fr)] gap-3 border-b border-slate-200 px-3 pb-2 text-xs font-bold text-slate-400">
         <span>상태</span>
         <span>시간</span>
         <span>프로젝트</span>
@@ -4894,78 +5057,94 @@ function ListView({
       <div className="divide-y divide-slate-100">
         {dateKeys.map((dateKey) => {
           const row = rows[dateKey]!;
+          const emptyRowKey = listRowKey(dateKey, "");
           const emptyStatusLabel = row.status === "MISSING" ? "입력안됨" : row.kind === "HOLIDAY" ? "공휴일" : row.kind === "VACATION" && row.vacationStatus === "TEMPORARY" ? "임시" : row.kind === "VACATION" ? "휴가" : "업무";
           const emptyStatusTone: "blue" | "green" | "orange" | "white" = row.status === "MISSING" ? "white" : row.kind === "HOLIDAY" ? "orange" : row.kind === "VACATION" ? "blue" : "green";
+          const dayHeader = (
+            <div className={cn("grid grid-cols-[112px_88px_minmax(120px,0.8fr)_minmax(200px,1.2fr)_minmax(200px,1.1fr)] gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2", selectedDateKey === dateKey && "bg-blue-50/70")}>
+              <div className="col-span-2 flex min-w-0 items-center gap-2">
+                <span className="font-bold text-slate-950">{formatKoreanDate(dateKey)}</span>
+                <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-500">{listDayMeta(row)}</span>
+                {hasTimeMismatch(row) ? <TimeMismatchIcon hours={row.hours} /> : null}
+                {row.hasNotionCardWarning ? <NotionCardWarningIcon /> : null}
+              </div>
+              {row.shortVersion.trim() ? (
+                <p className={cn("col-span-3 min-w-0 text-sm font-semibold text-slate-700", showFullContent ? "whitespace-pre-wrap break-words" : "truncate")}>{row.shortVersion.trim()}</p>
+              ) : null}
+            </div>
+          );
 
           if (row.status === "MISSING" || row.entries.length === 0) {
             return (
-              <button
-                className={cn(
-                  "grid min-w-[980px] grid-cols-[120px_112px_88px_minmax(120px,0.8fr)_minmax(200px,1.2fr)_minmax(200px,1.1fr)] gap-3 px-3 py-3 text-left text-sm transition hover:bg-slate-50",
-                  row.status === "MISSING" && "bg-amber-50 hover:bg-amber-100/70",
-                  selectedDateKey === dateKey && "bg-slate-100"
-                )}
-                key={dateKey}
-                onClick={() => setSelectedDateKey(dateKey)}
-                type="button"
-              >
-                <span className="flex items-center gap-1.5 font-semibold text-slate-950">
-                  <span>{formatKoreanDate(dateKey)}</span>
-                  {hasTimeMismatch(row) ? <TimeMismatchIcon hours={row.hours} /> : null}
-                  {row.hasNotionCardWarning ? <NotionCardWarningIcon /> : null}
-                </span>
-                <span>
-                  <Badge tone={emptyStatusTone}>{emptyStatusLabel}</Badge>
-                </span>
-                <span className="font-semibold text-slate-700">{row.status === "MISSING" ? "0h" : `${row.hours}h`}</span>
-                <span className="truncate font-medium text-slate-700">{row.kind === "HOLIDAY" ? row.holidayName || "-" : row.kind === "VACATION" ? row.vacationName || "휴가" : row.project}</span>
-                <span className={cn("truncate text-slate-600", row.status === "MISSING" && "font-bold text-red-600")}>{listSummaryText(row)}</span>
-                <span className="truncate text-slate-500">-</span>
-              </button>
+              <div className="min-w-[980px]" key={dateKey}>
+                {dayHeader}
+                <button
+                  className={cn(
+                    "grid w-full grid-cols-[112px_88px_minmax(120px,0.8fr)_minmax(200px,1.2fr)_minmax(200px,1.1fr)] gap-3 px-3 py-3 text-left text-sm transition hover:bg-slate-50",
+                    row.status === "MISSING" && "bg-amber-50 hover:bg-amber-100/70",
+                    selectedDateKey === dateKey && "bg-slate-100"
+                  )}
+                  onClick={() => setSelectedDateKey(dateKey)}
+                  ref={(element) => {
+                    if (element) rowButtonRefs.current.set(emptyRowKey, element);
+                    else rowButtonRefs.current.delete(emptyRowKey);
+                  }}
+                  type="button"
+                >
+                  <span><Badge tone={emptyStatusTone}>{emptyStatusLabel}</Badge></span>
+                  <span className="font-semibold text-slate-700">{row.status === "MISSING" ? "0h" : `${row.hours}h`}</span>
+                  <span className="truncate font-medium text-slate-700">{row.kind === "HOLIDAY" ? row.holidayName || "-" : row.kind === "VACATION" ? row.vacationName || "휴가" : row.project}</span>
+                  <span className={cn(showFullContent ? "whitespace-pre-wrap break-words" : "truncate", "text-slate-600", row.status === "MISSING" && "font-bold text-red-600")}>{listSummaryText(row, showFullContent)}</span>
+                  <span className="truncate text-slate-500">-</span>
+                </button>
+              </div>
             );
           }
 
-          return row.entries.map((entry, index) => {
-            const isSelected = selectedDateKey === dateKey && selectedEntryId === entry.clientId;
-            const entryContent = entry.kind === "WORK" ? entry.content.trim() || "(내용 없음)" : "-";
-            const entryTranslation = entry.kind === "WORK" ? entry.aiTranslation.trim() || "-" : "-";
-            const hasEntryNotionWarning = entryHasNotionCardWarning(entry, row.status !== "MISSING");
+          return (
+            <div className="min-w-[980px]" key={dateKey}>
+              {dayHeader}
+              <div className="divide-y divide-slate-100">
+                {row.entries.map((entry) => {
+                  const entryRowKey = listRowKey(dateKey, entry.clientId);
+                  const isSelected = selectedDateKey === dateKey && selectedEntryId === entry.clientId;
+                  const entryContent = entry.kind === "WORK" ? entry.content.trim() || "(내용 없음)" : "-";
+                  const entryTranslation = entry.kind === "WORK" ? entry.aiTranslation.trim() || "-" : "-";
+                  const hasEntryNotionWarning = entryHasNotionCardWarning(entry, row.status !== "MISSING");
 
-            return (
-              <button
-                className={cn(
-                  "grid min-w-[980px] grid-cols-[120px_112px_88px_minmax(120px,0.8fr)_minmax(200px,1.2fr)_minmax(200px,1.1fr)] gap-3 px-3 py-3 text-left text-sm transition hover:bg-slate-50",
-                  isSelected && "bg-slate-50 ring-1 ring-inset ring-slate-300"
-                )}
-                key={`${dateKey}-${entry.clientId}`}
-                onClick={() => setSelectedEntry(dateKey, entry.clientId)}
-                type="button"
-              >
-                <span className="flex items-center gap-1.5 font-semibold text-slate-950">
-                  {index === 0 ? (
-                    <>
-                      <span>{formatKoreanDate(dateKey)}</span>
-                      {hasTimeMismatch(row) ? <TimeMismatchIcon hours={row.hours} /> : null}
-                    </>
-                  ) : null}
-                </span>
-                <span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <Badge tone={entryKindTone(entry)}>{entryKindLabel(entry)}</Badge>
-                    {hasEntryNotionWarning ? <NotionCardWarningIcon /> : null}
-                  </span>
-                </span>
-                <span className="font-semibold text-slate-700">{effectiveEntryHours(entry)}h</span>
-                <span className="truncate font-medium text-slate-700">{entryTitle(entry)}</span>
-                <span className="line-clamp-2 min-w-0 break-words text-slate-600">{entryContent}</span>
-                <span className="line-clamp-2 min-w-0 break-words text-slate-500">{entryTranslation}</span>
-              </button>
-            );
-          });
+                  return (
+                    <button
+                      className={cn(
+                        "grid w-full grid-cols-[112px_88px_minmax(120px,0.8fr)_minmax(200px,1.2fr)_minmax(200px,1.1fr)] gap-3 px-3 py-3 text-left text-sm transition hover:bg-slate-50",
+                        isSelected && "bg-slate-50 ring-1 ring-inset ring-slate-300"
+                      )}
+                      key={entry.clientId}
+                      onClick={() => setSelectedEntry(dateKey, entry.clientId)}
+                      ref={(element) => {
+                        if (element) rowButtonRefs.current.set(entryRowKey, element);
+                        else rowButtonRefs.current.delete(entryRowKey);
+                      }}
+                      type="button"
+                    >
+                      <span><span className="inline-flex items-center gap-1.5"><Badge tone={entryKindTone(entry)}>{entryKindLabel(entry)}</Badge>{hasEntryNotionWarning ? <NotionCardWarningIcon /> : null}</span></span>
+                      <span className="font-semibold text-slate-700">{effectiveEntryHours(entry)}h</span>
+                      <span className="truncate font-medium text-slate-700">{entryTitle(entry)}</span>
+                      <span className={cn("min-w-0 break-words text-slate-600", showFullContent ? "whitespace-pre-wrap" : "line-clamp-2")}>{entryContent}</span>
+                      <span className={cn("min-w-0 break-words text-slate-500", showFullContent ? "whitespace-pre-wrap" : "line-clamp-2")}>{entryTranslation}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
         })}
       </div>
     </div>
   );
+}
+
+function listRowKey(dateKey: string, entryClientId: string): string {
+  return `${dateKey}:${entryClientId}`;
 }
 
 function entryTitle(entry: TimesheetEntryDraft): string {

@@ -6,6 +6,7 @@ type SegmentedControlProps<TValue extends string> = {
   items: Array<{
     icon?: ReactNode;
     label: string;
+    title?: string;
     value: TValue;
   }>;
   onChange: (value: TValue) => void;
@@ -23,6 +24,7 @@ export function SegmentedControl<TValue extends string>({ items, onChange, value
           )}
           key={item.value}
           onClick={() => onChange(item.value)}
+          title={item.title}
           type="button"
         >
           {item.icon}

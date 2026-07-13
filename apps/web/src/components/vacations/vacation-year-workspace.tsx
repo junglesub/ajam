@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   addBusinessDays,
@@ -15,6 +15,7 @@ import {
 import { Button } from "@timesheet/ui";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
+import { shouldIgnoreCalendarShortcut } from "@/lib/calendar-shortcuts";
 import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
 import type { VacationBoundary, VacationDateInput, VacationWorkDay, VacationYearData } from "./types";
 import { VacationEditModal, type VacationEditDraft, type VacationEditOption } from "./vacation-edit-modal";
@@ -292,7 +293,7 @@ export function VacationYearWorkspace({
     setWorkRecords(data.workRecords);
   }
 
-  async function loadYear(nextYear: number) {
+  async function loadYear(nextYear: number, selectedDateKey?: string) {
     setYearLoadState("loading");
 
     try {
@@ -301,6 +302,9 @@ export function VacationYearWorkspace({
       applyVacationYearData(data);
       setHoveredDateKey("");
       setYearLoadState("idle");
+      if (selectedDateKey) {
+        openDateModal(selectedDateKey, data);
+      }
     } catch {
       setYearLoadState("error");
     }
@@ -352,10 +356,10 @@ export function VacationYearWorkspace({
     }
   }
 
-  function openDateModal(dateKey: string) {
-    const dayVacations = vacationRecordsByDate.get(dateKey) ?? [];
+  function openDateModal(dateKey: string, data?: VacationYearData) {
+    const dayVacations = data ? data.vacations.filter((vacation) => vacation.dateKey === dateKey) : vacationRecordsByDate.get(dateKey) ?? [];
     const vacation = dayVacations[0];
-    const workRecord = workRecordByDate.get(dateKey);
+    const workRecord = data ? data.workRecords.find((record) => record.dateKey === dateKey) : workRecordByDate.get(dateKey);
 
     if (!vacation && workRecord) {
       setWorkPreview(workRecord);
@@ -568,6 +572,33 @@ export function VacationYearWorkspace({
         }))
       : [];
   const todayYear = Number(initialTodayKey.slice(0, 4));
+  const shortcutModalOpen = Boolean(modalDraft || connectedPrompt || workPreview);
+
+  useEffect(() => {
+    function handleCalendarShortcut(event: KeyboardEvent) {
+      if (shouldIgnoreCalendarShortcut(event, shortcutModalOpen) || yearLoadState === "loading") {
+        return;
+      }
+
+      if (event.key === "j" || event.key === "k") {
+        event.preventDefault();
+        void loadYear(year + (event.key === "j" ? -1 : 1));
+        return;
+      }
+
+      if (event.key === "t") {
+        event.preventDefault();
+        if (year === todayYear) {
+          openDateModal(initialTodayKey);
+        } else {
+          void loadYear(todayYear, initialTodayKey);
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleCalendarShortcut);
+    return () => window.removeEventListener("keydown", handleCalendarShortcut);
+  });
 
   return (
     <div className="mx-auto flex max-w-[1600px] flex-col gap-4 px-5 py-6">
@@ -581,17 +612,17 @@ export function VacationYearWorkspace({
           {holidayWarning ? <p className="mt-1 text-xs font-semibold text-red-600">{holidayWarning}</p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button className="h-9 px-3" disabled={yearLoadState === "loading"} onClick={() => void loadYear(year - 1)} type="button" variant="secondary">
+          <Button className="h-9 px-3" disabled={yearLoadState === "loading"} onClick={() => void loadYear(year - 1)} title="이전 연도 (J)" type="button" variant="secondary">
             <ChevronLeft aria-hidden="true" className="size-4" />
             이전
           </Button>
           <div className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-950">{year}</div>
-          <Button className="h-9 px-3" disabled={yearLoadState === "loading"} onClick={() => void loadYear(year + 1)} type="button" variant="secondary">
+          <Button className="h-9 px-3" disabled={yearLoadState === "loading"} onClick={() => void loadYear(year + 1)} title="다음 연도 (K)" type="button" variant="secondary">
             다음
             <ChevronRight aria-hidden="true" className="size-4" />
           </Button>
           {year !== todayYear ? (
-            <Button className="h-9 px-3" disabled={yearLoadState === "loading"} onClick={() => void loadYear(todayYear)} type="button" variant="ghost">
+            <Button className="h-9 px-3" disabled={yearLoadState === "loading"} onClick={() => void loadYear(todayYear)} title="올해 (T)" type="button" variant="ghost">
               올해
             </Button>
           ) : null}
