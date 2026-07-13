@@ -77,6 +77,14 @@ export type UserNotionWeeklyDefaultCard = {
   weekday: number;
 };
 
+export type NotionWebhookSettings = {
+  connectionId: string;
+  hasVerificationToken: boolean;
+  lastError: string;
+  lastEventAt: string;
+  status: "awaiting_verification" | "token_received" | "active";
+};
+
 type ConnectionRow = {
   accessTokenEncrypted: string;
   ajamLastUpdatePropertyJson: string;
@@ -256,6 +264,29 @@ export async function ensureNotionSchema() {
   )`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "NotionSyncRun_scope_idx" ON "NotionSyncRun"("userId", "scopeType", "scopeStartDate", "scopeEndDate", "finishedAt")`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "NotionSyncRun_status_idx" ON "NotionSyncRun"("userId", "status", "finishedAt")`);
+
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "UserNotionWebhook" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
+    "verificationTokenEncrypted" TEXT NOT NULL DEFAULT '',
+    "status" TEXT NOT NULL DEFAULT 'awaiting_verification',
+    "lastEventAt" DATETIME,
+    "lastError" TEXT NOT NULL DEFAULT '',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "UserNotionWebhook_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`);
+  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "UserNotionWebhook_userId_key" ON "UserNotionWebhook"("userId")`);
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "NotionWebhookEvent" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "webhookId" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'processing',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "NotionWebhookEvent_webhookId_fkey" FOREIGN KEY ("webhookId") REFERENCES "UserNotionWebhook" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`);
+  if (!(await hasColumn("NotionWebhookEvent", "status"))) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "NotionWebhookEvent" ADD COLUMN "status" TEXT NOT NULL DEFAULT 'complete'`);
+  }
 
   notionSchemaReady = true;
 }
@@ -519,6 +550,169 @@ export async function listCachedNotionCardsByPageIds(params: {
     archived: Boolean(row.archived),
     stale: Boolean(row.stale)
   }));
+}
+
+export async function getOrCreateNotionWebhookSettings(userId: string): Promise<NotionWebhookSettings> {
+  await ensureNotionSchema();
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO "UserNotionWebhook" ("id", "userId") VALUES (?, ?)
+     ON CONFLICT("userId") DO NOTHING`,
+    randomUUID(),
+    userId
+  );
+
+  const rows = await prisma.$queryRawUnsafe<Array<{
+    id: string;
+    lastError: string;
+    lastEventAt: unknown;
+    status: string;
+    verificationTokenEncrypted: string;
+  }>>(
+    `SELECT "id", "verificationTokenEncrypted", "status",
+            strftime('%Y-%m-%dT%H:%M:%fZ', "lastEventAt") AS "lastEventAt", "lastError"
+     FROM "UserNotionWebhook" WHERE "userId" = ? LIMIT 1`,
+    userId
+  );
+  const row = rows[0]!;
+
+  return {
+    connectionId: row.id,
+    hasVerificationToken: Boolean(row.verificationTokenEncrypted),
+    lastError: row.lastError,
+    lastEventAt: normalizeDateTimeString(row.lastEventAt),
+    status: row.status === "active" ? "active" : row.status === "token_received" ? "token_received" : "awaiting_verification"
+  };
+}
+
+export async function resetNotionWebhookSettings(userId: string): Promise<NotionWebhookSettings> {
+  await ensureNotionSchema();
+  await prisma.$executeRawUnsafe(`DELETE FROM "UserNotionWebhook" WHERE "userId" = ?`, userId);
+
+  return getOrCreateNotionWebhookSettings(userId);
+}
+
+export async function setNotionWebhookVerificationToken(params: {
+  token: string;
+  userId: string;
+}): Promise<NotionWebhookSettings> {
+  const settings = await getOrCreateNotionWebhookSettings(params.userId);
+  const token = params.token.trim();
+  const encrypted = token ? await encryptSecret(token, "notion-webhook-verification") : "";
+
+  await prisma.$executeRawUnsafe(
+    `UPDATE "UserNotionWebhook"
+     SET "verificationTokenEncrypted" = ?, "status" = ?, "lastError" = '', "updatedAt" = CURRENT_TIMESTAMP
+     WHERE "id" = ?`,
+    encrypted,
+    token ? "token_received" : "awaiting_verification",
+    settings.connectionId
+  );
+
+  return getOrCreateNotionWebhookSettings(params.userId);
+}
+
+export async function revealNotionWebhookVerificationToken(userId: string): Promise<string> {
+  await ensureNotionSchema();
+  const rows = await prisma.$queryRawUnsafe<Array<{ verificationTokenEncrypted: string }>>(
+    `SELECT "verificationTokenEncrypted" FROM "UserNotionWebhook" WHERE "userId" = ? LIMIT 1`,
+    userId
+  );
+  const encrypted = rows[0]?.verificationTokenEncrypted ?? "";
+
+  return encrypted ? decryptSecret(encrypted, "notion-webhook-verification") : "";
+}
+
+export async function getNotionWebhookById(connectionId: string) {
+  await ensureNotionSchema();
+  const rows = await prisma.$queryRawUnsafe<Array<{
+    id: string;
+    userId: string;
+    verificationTokenEncrypted: string;
+  }>>(
+    `SELECT "id", "userId", "verificationTokenEncrypted" FROM "UserNotionWebhook" WHERE "id" = ? LIMIT 1`,
+    connectionId
+  );
+  const row = rows[0];
+
+  return row
+    ? {
+        connectionId: row.id,
+        userId: row.userId,
+        verificationToken: row.verificationTokenEncrypted
+          ? await decryptSecret(row.verificationTokenEncrypted, "notion-webhook-verification")
+          : ""
+      }
+    : null;
+}
+
+export async function saveNotionWebhookVerificationToken(connectionId: string, token: string) {
+  await ensureNotionSchema();
+  const encrypted = await encryptSecret(token, "notion-webhook-verification");
+  await prisma.$executeRawUnsafe(
+    `UPDATE "UserNotionWebhook"
+     SET "verificationTokenEncrypted" = ?, "status" = 'token_received', "lastError" = '', "updatedAt" = CURRENT_TIMESTAMP
+     WHERE "id" = ?`,
+    encrypted,
+    connectionId
+  );
+}
+
+export async function claimNotionWebhookEvent(params: { connectionId: string; eventId: string }): Promise<"claimed" | "complete" | "processing"> {
+  await ensureNotionSchema();
+
+  try {
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "NotionWebhookEvent" ("id", "webhookId", "status") VALUES (?, ?, 'processing')`,
+      params.eventId,
+      params.connectionId
+    );
+  } catch (error) {
+    if (String(error).includes("UNIQUE constraint failed")) {
+      const rows = await prisma.$queryRawUnsafe<Array<{ status: string }>>(
+        `SELECT "status" FROM "NotionWebhookEvent" WHERE "id" = ? LIMIT 1`,
+        params.eventId
+      );
+      return rows[0]?.status === "complete" ? "complete" : "processing";
+    }
+    throw error;
+  }
+
+  return "claimed";
+}
+
+export async function completeNotionWebhookEvent(params: { connectionId: string; eventId: string }) {
+  await ensureNotionSchema();
+  await prisma.$transaction([
+    prisma.$executeRawUnsafe(`UPDATE "NotionWebhookEvent" SET "status" = 'complete' WHERE "id" = ?`, params.eventId),
+    prisma.$executeRawUnsafe(
+    `UPDATE "UserNotionWebhook"
+     SET "status" = 'active', "lastEventAt" = CURRENT_TIMESTAMP, "lastError" = '', "updatedAt" = CURRENT_TIMESTAMP
+     WHERE "id" = ?`,
+      params.connectionId
+    )
+  ]);
+}
+
+export async function releaseNotionWebhookEvent(params: { connectionId: string; error: string; eventId: string }) {
+  await ensureNotionSchema();
+  await prisma.$transaction([
+    prisma.$executeRawUnsafe(`DELETE FROM "NotionWebhookEvent" WHERE "id" = ? AND "status" = 'processing'`, params.eventId),
+    prisma.$executeRawUnsafe(
+      `UPDATE "UserNotionWebhook" SET "lastError" = ?, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = ?`,
+      params.error,
+      params.connectionId
+    )
+  ]);
+}
+
+export async function markNotionCardStale(params: { notionPageId: string; userId: string }) {
+  await ensureNotionSchema();
+  await prisma.$executeRawUnsafe(
+    `UPDATE "NotionCardCache" SET "stale" = 1, "updatedAt" = CURRENT_TIMESTAMP
+     WHERE "userId" = ? AND "notionPageId" = ?`,
+    params.userId,
+    params.notionPageId
+  );
 }
 
 export async function listUserNotionWeeklyDefaultCards(userId: string): Promise<UserNotionWeeklyDefaultCard[]> {

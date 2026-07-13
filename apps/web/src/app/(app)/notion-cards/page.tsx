@@ -5,7 +5,11 @@ import { NotionCardWorkspace } from "@/components/notion-cards/notion-card-works
 import {
   buildNotionMonthlyAnalysisAction,
   getNotionConnectionAction,
+  getNotionWebhookSettingsAction,
   listNotionWeeklyDefaultsAction,
+  resetNotionWebhookSettingsAction,
+  revealNotionWebhookVerificationTokenAction,
+  saveNotionWebhookVerificationTokenAction,
   listNotionCardsForMonthAction,
   saveNotionConnectionAction,
   saveNotionWeeklyDefaultsAction,
@@ -33,6 +37,10 @@ export default async function NotionCardsPage() {
       initialWeeklyDefaults={weeklyDefaults}
       buildMonthlyAnalysisAction={buildNotionMonthlyAnalysisAction}
       listCardsForMonthAction={listNotionCardsForMonthAction}
+      loadWebhookSettingsAction={getNotionWebhookSettingsAction}
+      resetWebhookSettingsAction={resetNotionWebhookSettingsAction}
+      revealWebhookVerificationTokenAction={revealNotionWebhookVerificationTokenAction}
+      saveWebhookVerificationTokenAction={saveNotionWebhookVerificationTokenAction}
       saveConnectionAction={saveNotionConnectionAction}
       saveWeeklyDefaultsAction={saveNotionWeeklyDefaultsAction}
       syncCardFieldsAction={syncNotionCardFieldsAction}

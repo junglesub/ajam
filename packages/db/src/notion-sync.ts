@@ -11,6 +11,7 @@ import {
   type UserNotionConnection
 } from "./notion-store";
 import { getNotionPropertyKey, pickRawNotionProperty } from "./notion-property";
+import { syncNotionWorkHoursForPages } from "./notion-work-hours-sync";
 
 export type NotionDataSourceSchema = {
   id: string;
@@ -22,6 +23,7 @@ type NotionPage = {
   archived?: boolean;
   id: string;
   last_edited_time?: string;
+  parent?: { data_source_id?: string; id?: string; type?: string };
   properties?: Record<string, unknown>;
   url?: string;
 };
@@ -105,6 +107,38 @@ export async function syncNotionCardsForDate(params: {
     });
     throw error;
   }
+}
+
+export async function syncSingleNotionCard(params: { pageId: string; userId: string }): Promise<NotionCardCacheRecord> {
+  const connection = await requireConnection(params.userId);
+  const token = await getUserNotionAccessToken(params.userId);
+  const page = await notionFetch({
+    method: "GET",
+    path: `/v1/pages/${encodeURIComponent(params.pageId)}`,
+    token
+  }) as NotionPage;
+  const parentDataSourceId = page.parent?.data_source_id ?? (page.parent?.type === "data_source_id" ? page.parent.id : "");
+
+  if (parentDataSourceId !== connection.dataSourceId) {
+    throw new Error("설정된 Notion 데이터 소스의 카드가 아닙니다.");
+  }
+
+  const card = normalizePage({ connection, page });
+  await upsertNotionCardCache({
+    analysisConfigVersion: connection.analysisConfigVersion,
+    cards: [card],
+    userId: params.userId
+  });
+  const fieldResult = await syncNotionWorkHoursForPages({
+    notionPageIds: [params.pageId],
+    userId: params.userId
+  });
+
+  if (fieldResult.failed > 0 && !fieldResult.skippedReason) {
+    throw new Error(fieldResult.errors[0]?.message ?? "Notion 집계 필드 업데이트에 실패했습니다.");
+  }
+
+  return card;
 }
 
 async function queryDataSourcePages(params: {

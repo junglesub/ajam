@@ -28,6 +28,10 @@ export function NotionCardWorkspace({
   initialMonth,
   initialWeeklyDefaults,
   listCardsForMonthAction,
+  loadWebhookSettingsAction,
+  resetWebhookSettingsAction,
+  revealWebhookVerificationTokenAction,
+  saveWebhookVerificationTokenAction,
   saveConnectionAction,
   saveWeeklyDefaultsAction,
   syncCardFieldsAction,
@@ -173,6 +177,10 @@ export function NotionCardWorkspace({
         onConnectionSaved={saveConnection}
         onMessage={setMessage}
         open={isConnectionOpen}
+        loadWebhookSettingsAction={loadWebhookSettingsAction}
+        resetWebhookSettingsAction={resetWebhookSettingsAction}
+        revealWebhookVerificationTokenAction={revealWebhookVerificationTokenAction}
+        saveWebhookVerificationTokenAction={saveWebhookVerificationTokenAction}
         saveConnectionAction={saveConnectionAction}
         testDataSourceAction={testDataSourceAction}
       />

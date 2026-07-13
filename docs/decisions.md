@@ -76,6 +76,16 @@
 - 휴가 유형 색상은 라이트 테마의 기존 Tailwind 색을 유지하고, 다크 테마에서는 `data-vacation-tone` 기반 muted VS Code 토큰 색 후보군으로 오버라이드한다.
 - 공통 설정 모달은 기존 업무 기록 설정에서 제공하던 AI 예약 정리 대기 목록과 공휴일 캐시 리셋 후 화면 갱신을 유지한다.
 
+## 2026-07-13
+
+- Notion 자동 동기화는 유료 Webhook action과 카드 버튼 대신 무료 Connection Webhook의 페이지 이벤트를 사용한다.
+- Webhook verification token은 암호화 저장하고 `X-Notion-Signature` HMAC-SHA256을 검증한다. 공개 connection ID가 포함된 URL은 인증 수단으로 취급하지 않는다.
+- 입력 필드 변경은 기존 단일 카드 캐시 및 집계 필드 업데이트 경로를 실행하고, aJam 출력 필드만 변경된 이벤트는 무한 반복 방지를 위해 무시한다.
+- 기존 Notion 연결 modal은 `기본 연결`과 `자동 동기화` 탭으로 나누며 별도 설정 페이지는 만들지 않는다.
+- 하나의 Notion subscription을 n8n에서 production/development로 분기할 수 있도록 verification token 수동 입력을 허용한다. 각 환경은 같은 Notion token으로 서명을 독립 검증하며 n8n은 raw body와 서명 header를 그대로 전달해야 한다.
+- 저장된 verification token은 기본적으로 숨기고 사용자가 명시적으로 `보기`를 선택한 경우에만 인증된 server action으로 반환한다.
+- Webhook event ID는 처리 전 `processing` 상태로 원자적 claim한다. 완료 이벤트는 중복 응답하고, 처리 중 이벤트는 재시도를 유도하며, 실패 claim은 제거한다.
+
 ## 2026-06-29
 
 - Chrome extension 시간 입력 MVP는 외부 업무 기록 화면의 DOM selector에 의존하지 않고, 사용자가 둔 현재 커서 위치에서 시작하는 매크로 방식으로 구현한다.

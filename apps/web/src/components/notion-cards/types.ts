@@ -2,6 +2,7 @@ import type {
   NotionCardCacheRecord,
   NotionDataSourceSchema,
   NotionPropertyDescriptor,
+  NotionWebhookSettings,
   UserNotionWeeklyDefaultCard,
   UserNotionConnection
 } from "@timesheet/db";
@@ -14,6 +15,10 @@ export type NotionCardWorkspaceProps = {
   initialConnection: UserNotionConnection | null;
   initialMonth: string;
   initialWeeklyDefaults: UserNotionWeeklyDefaultCard[];
+  loadWebhookSettingsAction: () => Promise<NotionWebhookSettings>;
+  resetWebhookSettingsAction: () => Promise<NotionWebhookSettings>;
+  revealWebhookVerificationTokenAction: () => Promise<string>;
+  saveWebhookVerificationTokenAction: (token: string) => Promise<NotionWebhookSettings>;
   listCardsForMonthAction: (month: string) => Promise<NotionCardCacheRecord[]>;
   saveConnectionAction: (params: {
     accessToken?: string;
@@ -85,6 +90,15 @@ export type NotionConnectionPanelProps = {
   onMessage: (message: string) => void;
   saveConnectionAction: NotionCardWorkspaceProps["saveConnectionAction"];
   testDataSourceAction: NotionCardWorkspaceProps["testDataSourceAction"];
+};
+
+export type NotionConnectionModalProps = NotionConnectionPanelProps & {
+  loadWebhookSettingsAction: NotionCardWorkspaceProps["loadWebhookSettingsAction"];
+  resetWebhookSettingsAction: NotionCardWorkspaceProps["resetWebhookSettingsAction"];
+  revealWebhookVerificationTokenAction: NotionCardWorkspaceProps["revealWebhookVerificationTokenAction"];
+  saveWebhookVerificationTokenAction: NotionCardWorkspaceProps["saveWebhookVerificationTokenAction"];
+  onClose: () => void;
+  open: boolean;
 };
 
 export type NotionCardTableProps = {

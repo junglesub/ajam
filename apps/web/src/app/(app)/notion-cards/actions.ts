@@ -9,6 +9,7 @@ import {
 } from "@timesheet/domain";
 import {
   getManagedUser,
+  getOrCreateNotionWebhookSettings,
   getLatestLinkedNotionWorkDateByPage,
   getUserNotionAccessToken,
   getUserNotionConnection,
@@ -18,6 +19,9 @@ import {
   listUserNotionWeeklyDefaultCards,
   listVacations,
   replaceUserNotionWeeklyDefaultCards,
+  revealNotionWebhookVerificationToken,
+  resetNotionWebhookSettings,
+  setNotionWebhookVerificationToken,
   retrieveNotionDataSourceSchema,
   syncNotionCardsForDate,
   syncNotionWorkHoursForPages,
@@ -128,6 +132,30 @@ export async function getNotionConnectionAction() {
   const user = await requireSession();
 
   return getUserNotionConnection(user.id);
+}
+
+export async function getNotionWebhookSettingsAction() {
+  const user = await requireSession();
+
+  return getOrCreateNotionWebhookSettings(user.id);
+}
+
+export async function resetNotionWebhookSettingsAction() {
+  const user = await requireSession();
+
+  return resetNotionWebhookSettings(user.id);
+}
+
+export async function saveNotionWebhookVerificationTokenAction(token: string) {
+  const user = await requireSession();
+
+  return setNotionWebhookVerificationToken({ token, userId: user.id });
+}
+
+export async function revealNotionWebhookVerificationTokenAction() {
+  const user = await requireSession();
+
+  return revealNotionWebhookVerificationToken(user.id);
 }
 
 export async function listNotionWeeklyDefaultsAction(): Promise<UserNotionWeeklyDefaultCard[]> {

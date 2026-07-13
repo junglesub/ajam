@@ -46,6 +46,8 @@
 - `NotionCardCache`: Notion 카드 snapshot을 저장한다. 전체 복제본이 아니라 후보 표시와 월별 분석에 필요한 cache이다.
 - `WorkEntryNotionCard`: 저장된 `WORK` entry와 Notion 카드의 매핑 및 배분 시간을 저장한다.
 - `NotionSyncRun`: 날짜/월/schema 같은 scope별 동기화 결과, 실패 메시지, partial 여부를 저장한다.
+- `UserNotionWebhook`: 사용자별 Connection Webhook 공개 ID, 암호화된 verification token, 상태와 최근 오류를 저장한다. `NotionWebhookEvent`는 재전송 event ID를 중복 처리하지 않게 한다.
+- verification token은 일반 설정 조회에 포함하지 않고 존재 여부만 반환한다. 인증된 사용자가 `보기`를 요청할 때만 별도 action에서 복호화한다. Webhook event는 처리 전에 `processing`으로 원자적 claim하고 성공 시 `complete`, 실패 시 claim을 제거해 재시도를 허용한다.
 - `ReminderLog`: 사용자별 날짜와 리마인더 유형의 발송 기록을 저장해 n8n 재시도나 중복 실행 시 같은 리마인더가 반복 발송되지 않게 한다.
 
 ## Holiday Sync
@@ -63,6 +65,8 @@
 - 주말, 공휴일, 휴가-only, 수동 공휴일 entry는 리마인더 대상에서 제외한다.
 - 업무 entry가 있어도 내용이 비어 있으면 미작성으로 본다.
 - aJam은 내부 API `POST /api/internal/notion/daily-maintenance`로 사용자별 Notion 연결을 점검하고, 선택 날짜 기준 열린 카드 캐시와 진행중 카드의 mapped number/date fields를 갱신한다.
+- Notion Connection Webhook은 `page.created`, `page.properties_updated`, `page.deleted`, `page.undeleted`를 받아 서명을 검증한다. 입력 필드 변경만 단일 카드 동기화를 실행하며 aJam 출력 필드만 바뀐 이벤트는 순환 업데이트 방지를 위해 무시한다.
+- n8n splitter를 쓰는 경우 Notion verification token을 production/development aJam에 수동 저장할 수 있다. n8n은 원본 request body와 `X-Notion-Signature`를 변경 없이 각 환경으로 전달한다.
 - aJam은 내부 API `POST /api/internal/ai/scheduled-cleanup`으로 예약 모드 사용자의 최근 업무 기록을 일괄 AI 정리한다.
 - n8n은 `packages/n8n-nodes-ajam` custom node package의 `aJam` node를 통해 리마인더 API, Notion daily maintenance API, scheduled AI cleanup API를 호출한다.
 - `aJam` n8n node의 두 번째 output은 Notion daily maintenance 또는 scheduled AI cleanup 실패가 있을 때만 alert item을 내보내므로, Email/Slack node를 IF 없이 직접 연결할 수 있다.

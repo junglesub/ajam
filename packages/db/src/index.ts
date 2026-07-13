@@ -3,8 +3,9 @@ export { databaseUrl } from "./database-url";
 export { hashPassword, verifyPassword } from "./password";
 export { ensureUserAiSettingSchema, getUserAiSetting, getUserGeminiApiKey, updateUserAiSetting } from "./ai-settings-store";
 export type { AiCleanupMode, AiProvider, UserAiSetting, UserAiSettingUpdate } from "./ai-settings-store";
-export { retrieveNotionDataSourceSchema, syncNotionCardsForDate } from "./notion-sync";
+export { retrieveNotionDataSourceSchema, syncNotionCardsForDate, syncSingleNotionCard } from "./notion-sync";
 export type { NotionDataSourceSchema } from "./notion-sync";
+export { handleNotionWebhook, NotionWebhookError } from "./notion-webhook";
 export { runNotionDailyMaintenance } from "./notion-daily-maintenance";
 export type { NotionDailyMaintenanceResult, NotionDailyMaintenanceUserResult } from "./notion-daily-maintenance";
 export { syncNotionWorkHoursForPages } from "./notion-work-hours-sync";
@@ -27,6 +28,7 @@ export {
 export type { ExtensionConnection, ExtensionConnectionCode, ExtensionConnectionCodeDisplay, ExtensionRefreshResult } from "./extension-auth-store";
 export {
   ensureNotionSchema,
+  getOrCreateNotionWebhookSettings,
   countLinkedNotionWorkDaysByPage,
   getLatestNotionSyncRun,
   getLatestLinkedNotionWorkDateByPage,
@@ -37,6 +39,9 @@ export {
   listCachedNotionCardsByPageIds,
   listUserNotionWeeklyDefaultCards,
   recordNotionSyncRun,
+  resetNotionWebhookSettings,
+  revealNotionWebhookVerificationToken,
+  setNotionWebhookVerificationToken,
   replaceUserNotionWeeklyDefaultCards,
   replaceEntryNotionCards,
   replaceNotionCardCacheForDate,
@@ -44,6 +49,7 @@ export {
   upsertNotionCardCache,
   upsertUserNotionConnection
 } from "./notion-store";
+export type { NotionWebhookSettings } from "./notion-store";
 export type {
   DateMappingMode,
   NotionAuthType,

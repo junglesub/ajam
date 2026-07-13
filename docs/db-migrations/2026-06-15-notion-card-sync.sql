@@ -40,6 +40,28 @@ CREATE TABLE IF NOT EXISTS "UserNotionConnection" (
 
 CREATE UNIQUE INDEX IF NOT EXISTS "UserNotionConnection_userId_key" ON "UserNotionConnection"("userId");
 
+CREATE TABLE IF NOT EXISTS "UserNotionWebhook" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  "verificationTokenEncrypted" TEXT NOT NULL DEFAULT '',
+  "status" TEXT NOT NULL DEFAULT 'awaiting_verification',
+  "lastEventAt" DATETIME,
+  "lastError" TEXT NOT NULL DEFAULT '',
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "UserNotionWebhook_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "UserNotionWebhook_userId_key" ON "UserNotionWebhook"("userId");
+
+CREATE TABLE IF NOT EXISTS "NotionWebhookEvent" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "webhookId" TEXT NOT NULL,
+  "status" TEXT NOT NULL DEFAULT 'processing',
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "NotionWebhookEvent_webhookId_fkey" FOREIGN KEY ("webhookId") REFERENCES "UserNotionWebhook"("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
 -- If UserNotionConnection already exists from an earlier bootstrap, add only
 -- the columns that are missing. SQLite versions used by this app do not rely on
 -- ALTER TABLE ADD COLUMN IF NOT EXISTS, so check PRAGMA table_info first.
