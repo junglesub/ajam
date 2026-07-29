@@ -61,6 +61,7 @@ import {
   Sparkles,
   TimerReset,
   WrapText,
+  X,
   type LucideIcon
 } from "lucide-react";
 
@@ -175,6 +176,7 @@ type HolidayResetState = "idle" | "saving" | "saved" | "error";
 type VacationRangeSaveState = "idle" | "saving" | "error";
 type MonthLoadState = "idle" | "loading" | "error";
 type PendingNavigation =
+  | { kind: "closeEditor" }
   | { kind: "date"; dateKey: string; entryClientId?: string }
   | { delta: number; kind: "month" }
   | { kind: "today" };
@@ -1114,6 +1116,7 @@ export function TimesheetWorkspace({
     year: initialYear
   });
   const [viewMode, setViewMode] = useState<ViewMode>("calendar");
+  const [isDailyEditorRequested, setIsDailyEditorRequested] = useState(false);
   const [showFullListContent, setShowFullListContent] = useState(false);
   const [currentUser, setCurrentUser] = useState(initialCurrentUser);
   const [records, setRecords] = useState<Record<string, TimesheetDayDraft>>(() => buildInitialDrafts(initialMonthData, todayKey));
@@ -1121,6 +1124,8 @@ export function TimesheetWorkspace({
   const [savedEntryDateKeys, setSavedEntryDateKeys] = useState(() => new Set(initialMonthData.entries.map((entry) => entry.dateKey)));
   const [celebratingDateKey, setCelebratingDateKey] = useState("");
   const [selectedEntryIdByDate, setSelectedEntryIdByDate] = useState<Record<string, string>>(() => buildSelectedEntryIds(records));
+  const workspaceViewRef = useRef<HTMLElement>(null);
+  const closeEditorButtonRef = useRef<HTMLButtonElement>(null);
   const [editingNotionEntryClientId, setEditingNotionEntryClientId] = useState<string | null>(null);
   const [includeDoneNotionCandidates, setIncludeDoneNotionCandidates] = useState(false);
   const notionCandidates = useNotionCardCandidates({ loadNotionCardCandidatesAction, refreshNotionCardCandidatesAction });
@@ -1899,6 +1904,12 @@ export function TimesheetWorkspace({
   }
 
   function runNavigation(navigation: PendingNavigation) {
+    if (navigation.kind === "closeEditor") {
+      setIsDailyEditorRequested(false);
+      requestAnimationFrame(() => (document.getElementById(`timesheet-list-row-${selectedListRowKey}`) ?? workspaceViewRef.current)?.focus());
+      return;
+    }
+
     if (navigation.kind === "date") {
       const nextCursor = getDateKeyMonthCursor(navigation.dateKey);
 
@@ -1970,11 +1981,23 @@ export function TimesheetWorkspace({
     runNavigation(navigation);
   }
 
+  function cancelPendingNavigation() {
+    const restoreCloseButtonFocus = pendingNavigation?.kind === "closeEditor";
+
+    setPendingNavigation(null);
+    if (restoreCloseButtonFocus) {
+      requestAnimationFrame(() => closeEditorButtonRef.current?.focus());
+    }
+  }
+
   function selectDate(dateKey: string) {
+    setIsDailyEditorRequested(true);
     requestNavigation({ dateKey, kind: "date" });
   }
 
   function selectDateEntry(dateKey: string, entryClientId: string) {
+    setIsDailyEditorRequested(true);
+
     if (dateKey === selectedDateKey) {
       selectEntry(entryClientId);
       return;
@@ -1989,6 +2012,10 @@ export function TimesheetWorkspace({
 
   function goToday() {
     requestNavigation({ kind: "today" });
+  }
+
+  function closeDailyEditor() {
+    requestNavigation({ kind: "closeEditor" });
   }
 
   function updateShowFullListContent(checked: boolean) {
@@ -3769,8 +3796,19 @@ export function TimesheetWorkspace({
 
   return (
     <>
-      <div className="mx-auto grid max-w-[1600px] gap-4 px-4 pb-0 pt-4 lg:grid-cols-[minmax(680px,1fr)_420px] xl:grid-cols-[minmax(760px,1fr)_460px]" onKeyDown={handleWorkspaceKeyDown}>
-        <section className="min-w-0 rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div
+        className={cn(
+          "mx-auto grid max-w-[1600px] gap-4 px-4 pb-0 pt-4",
+          (viewMode === "calendar" || isDailyEditorRequested) && "lg:grid-cols-[minmax(680px,1fr)_420px] xl:grid-cols-[minmax(760px,1fr)_460px]"
+        )}
+        onKeyDown={handleWorkspaceKeyDown}
+      >
+        <section
+          aria-label={viewMode === "calendar" ? "업무 기록 캘린더" : "업무 기록 목록"}
+          className="min-w-0 rounded-lg border border-slate-200 bg-white shadow-sm"
+          ref={workspaceViewRef}
+          tabIndex={-1}
+        >
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
             <div className="flex items-center gap-2">
               <Button className="h-11 w-11 shrink-0 p-0" onClick={() => moveMonth(-1)} title="이전 달 (J)" variant="ghost">
@@ -3859,18 +3897,36 @@ export function TimesheetWorkspace({
           )}
         </section>
 
-        <aside className="rounded-lg border border-slate-200 bg-white shadow-sm" data-calendar-shortcuts-ignore>
+        {viewMode === "calendar" || isDailyEditorRequested ? (
+        <aside
+          className="rounded-lg border border-slate-200 bg-white shadow-sm"
+          data-calendar-shortcuts-ignore
+          onFocusCapture={() => setIsDailyEditorRequested(true)}
+        >
           <div className="border-b border-slate-200 px-5 py-4">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="mt-1 text-2xl font-bold text-slate-950">{formatKoreanDate(selectedDateKey)}</h2>
               </div>
-              {!isViewingToday ? (
-                <Button className="h-9 px-3" onClick={goToday} variant="secondary">
-                  <RotateCcw aria-hidden="true" className="size-4" />
-                  오늘로 돌아가기
-                </Button>
-              ) : null}
+              <div className="flex items-center gap-2">
+                {!isViewingToday ? (
+                  <Button className="h-9 px-3" onClick={goToday} variant="secondary">
+                    <RotateCcw aria-hidden="true" className="size-4" />
+                    오늘로 돌아가기
+                  </Button>
+                ) : null}
+                {viewMode === "list" ? (
+                  <button
+                    aria-label="상세 패널 닫기"
+                    className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
+                    onClick={closeDailyEditor}
+                    ref={closeEditorButtonRef}
+                    type="button"
+                  >
+                    <X aria-hidden="true" className="size-5" />
+                  </button>
+                ) : null}
+              </div>
             </div>
           </div>
 
@@ -4078,6 +4134,7 @@ export function TimesheetWorkspace({
             </div>
           ) : null}
         </aside>
+        ) : null}
       </div>
 
       {isSettingsOpen ? (
@@ -4733,16 +4790,18 @@ export function TimesheetWorkspace({
       />
 
       {pendingNavigation ? (
-        <ModalShell onClose={() => setPendingNavigation(null)} onConfirm={confirmPendingNavigation} title="저장되지 않은 변경">
+        <ModalShell onClose={cancelPendingNavigation} onConfirm={confirmPendingNavigation} title="저장되지 않은 변경">
           <div className="space-y-4">
-            <p className="text-sm leading-6 text-slate-600">현재 날짜의 변경사항이 아직 저장되지 않았습니다. 저장하지 않고 이동하면 마지막 저장 상태로 되돌아갑니다.</p>
+            <p className="text-sm leading-6 text-slate-600">
+              현재 날짜의 변경사항이 아직 저장되지 않았습니다. 저장하지 않고 {pendingNavigation.kind === "closeEditor" ? "닫으면" : "이동하면"} 마지막 저장 상태로 되돌아갑니다.
+            </p>
             <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <Button onClick={() => setPendingNavigation(null)} variant="secondary">
+              <Button onClick={cancelPendingNavigation} variant="secondary">
                 계속 작성
                 <ShortcutHint keys={["Esc"]} />
               </Button>
               <Button onClick={confirmPendingNavigation} variant="danger">
-                저장하지 않고 이동
+                저장하지 않고 {pendingNavigation.kind === "closeEditor" ? "닫기" : "이동"}
                 <ShortcutHint keys={["↵"]} />
               </Button>
             </div>
@@ -5084,6 +5143,7 @@ function ListView({
                     row.status === "MISSING" && "bg-amber-50 hover:bg-amber-100/70",
                     selectedDateKey === dateKey && "bg-slate-100"
                   )}
+                  id={`timesheet-list-row-${emptyRowKey}`}
                   onClick={() => setSelectedDateKey(dateKey)}
                   ref={(element) => {
                     if (element) rowButtonRefs.current.set(emptyRowKey, element);
@@ -5118,6 +5178,7 @@ function ListView({
                         "grid w-full grid-cols-[112px_88px_minmax(120px,0.8fr)_minmax(200px,1.2fr)_minmax(200px,1.1fr)] gap-3 px-3 py-3 text-left text-sm transition hover:bg-slate-50",
                         isSelected && "bg-slate-50 ring-1 ring-inset ring-slate-300"
                       )}
+                      id={`timesheet-list-row-${entryRowKey}`}
                       key={entry.clientId}
                       onClick={() => setSelectedEntry(dateKey, entry.clientId)}
                       ref={(element) => {
