@@ -25,6 +25,7 @@ export function AppNav() {
 
         return (
           <Link
+            aria-current={isActive ? "page" : undefined}
             className={cn(
               "inline-flex h-9 items-center gap-2 border-b-2 border-transparent px-2.5 text-sm font-bold text-slate-500 transition hover:border-slate-200 hover:text-slate-950",
               isActive && "border-slate-950 text-slate-950"

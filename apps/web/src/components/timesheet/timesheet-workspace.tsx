@@ -66,6 +66,7 @@ import {
 } from "lucide-react";
 
 import { logoutAction } from "@/app/(app)/timesheet/actions";
+import { AppLoadingOverlay, AppLoadingScreen } from "@/components/app-loading-screen";
 import { NotionCardLinkSection } from "./notion-card-link-section";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
 import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidate, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
@@ -1903,6 +1904,15 @@ export function TimesheetWorkspace({
     });
   }
 
+  function updateMonthCursor(nextCursor: { monthIndex: number; year: number }) {
+    if (!loadedMonthKeys.has(getMonthCacheKey(nextCursor.year, nextCursor.monthIndex))) {
+      setMonthLoadState("loading");
+      setMonthLoadError("");
+    }
+
+    setMonthCursor(nextCursor);
+  }
+
   function runNavigation(navigation: PendingNavigation) {
     if (navigation.kind === "closeEditor") {
       setIsDailyEditorRequested(false);
@@ -1916,7 +1926,7 @@ export function TimesheetWorkspace({
       removeSelectedAutoProjectDraft(navigation.dateKey);
       prepareDraftForDate(navigation.dateKey);
       setSelectedDateKey(navigation.dateKey);
-      setMonthCursor(nextCursor);
+      updateMonthCursor(nextCursor);
       const entryClientId = navigation.entryClientId;
       if (entryClientId) {
         setSelectedEntryIdByDate((current) => ({
@@ -1936,7 +1946,7 @@ export function TimesheetWorkspace({
       removeSelectedAutoProjectDraft(currentTodayKey);
       setSelectedDateKey(currentTodayKey);
       prepareDraftForDate(currentTodayKey, currentTodayKey);
-      setMonthCursor({
+      updateMonthCursor({
         monthIndex: today.getMonth(),
         year: today.getFullYear()
       });
@@ -1953,7 +1963,7 @@ export function TimesheetWorkspace({
     removeSelectedAutoProjectDraft(nextSelectedDateKey);
     setSelectedDateKey(nextSelectedDateKey);
     prepareDraftForDate(nextSelectedDateKey);
-    setMonthCursor({
+    updateMonthCursor({
       monthIndex: next.getMonth(),
       year: next.getFullYear()
     });
@@ -3421,7 +3431,7 @@ export function TimesheetWorkspace({
 
   useEffect(() => {
     function handleCalendarShortcut(event: globalThis.KeyboardEvent) {
-      if (shouldIgnoreCalendarShortcut(event, shortcutModalOpen)) {
+      if (shouldIgnoreCalendarShortcut(event, shortcutModalOpen) || monthLoadState === "loading") {
         return;
       }
 
@@ -3782,15 +3792,10 @@ export function TimesheetWorkspace({
 
   if (isInitialMonthSyncing) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-50 px-6" role="status">
-        <div className="flex flex-col items-center gap-4 text-center">
-          <div className="size-10 animate-spin rounded-full border-4 border-slate-200 border-t-slate-950" />
-          <div>
-            <p className="text-base font-bold text-slate-950">월간 업무 기록을 불러오는 중</p>
-            <p className="mt-1 text-sm font-medium text-slate-500">현재 날짜 기준으로 공휴일과 기록을 확인하고 있습니다.</p>
-          </div>
-        </div>
-      </div>
+      <AppLoadingScreen
+        description="현재 날짜 기준으로 공휴일과 기록을 확인하고 있습니다."
+        title="월간 업무 기록을 불러오는 중"
+      />
     );
   }
 
@@ -3804,21 +3809,22 @@ export function TimesheetWorkspace({
         onKeyDown={handleWorkspaceKeyDown}
       >
         <section
+          aria-busy={monthLoadState === "loading"}
           aria-label={viewMode === "calendar" ? "업무 기록 캘린더" : "업무 기록 목록"}
-          className="min-w-0 rounded-lg border border-slate-200 bg-white shadow-sm"
+          className="relative min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
           ref={workspaceViewRef}
           tabIndex={-1}
         >
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
             <div className="flex items-center gap-2">
-              <Button className="h-11 w-11 shrink-0 p-0" onClick={() => moveMonth(-1)} title="이전 달 (J)" variant="ghost">
+              <Button className="h-11 w-11 shrink-0 p-0" disabled={monthLoadState === "loading"} onClick={() => moveMonth(-1)} title="이전 달 (J)" variant="ghost">
                 <ChevronLeft aria-hidden="true" className="h-10 w-10 stroke-3" />
                 <span className="sr-only">이전 달</span>
               </Button>
               <div className="min-w-44 text-center">
                 <h2 className="text-lg font-bold text-slate-950">{getMonthLabel(monthCursor.year, monthCursor.monthIndex)}</h2>
               </div>
-              <Button className="h-11 w-11 shrink-0 p-0" onClick={() => moveMonth(1)} title="다음 달 (K)" variant="ghost">
+              <Button className="h-11 w-11 shrink-0 p-0" disabled={monthLoadState === "loading"} onClick={() => moveMonth(1)} title="다음 달 (K)" variant="ghost">
                 <ChevronRight aria-hidden="true" className="h-10 w-10 stroke-3" />
                 <span className="sr-only">다음 달</span>
               </Button>
@@ -3840,7 +3846,7 @@ export function TimesheetWorkspace({
                   <WrapText aria-hidden="true" className="size-5" strokeWidth={2.4} />
                 </button>
               ) : null}
-              <Button className="h-9 px-3" onClick={goToday} title="오늘 (T)" variant="secondary">
+              <Button className="h-9 px-3" disabled={monthLoadState === "loading"} onClick={goToday} title="오늘 (T)" variant="secondary">
                 <TimerReset aria-hidden="true" className="size-4" />
                 오늘
               </Button>
@@ -3895,6 +3901,13 @@ export function TimesheetWorkspace({
               showFullContent={showFullListContent}
             />
           )}
+
+          {monthLoadState === "loading" ? (
+            <AppLoadingOverlay
+              description="선택한 월의 업무 기록을 준비하고 있습니다."
+              title="월 데이터를 불러오는 중"
+            />
+          ) : null}
         </section>
 
         {viewMode === "calendar" || isDailyEditorRequested ? (
@@ -3910,7 +3923,7 @@ export function TimesheetWorkspace({
               </div>
               <div className="flex items-center gap-2">
                 {!isViewingToday ? (
-                  <Button className="h-9 px-3" onClick={goToday} variant="secondary">
+                  <Button className="h-9 px-3" disabled={monthLoadState === "loading"} onClick={goToday} variant="secondary">
                     <RotateCcw aria-hidden="true" className="size-4" />
                     오늘로 돌아가기
                   </Button>

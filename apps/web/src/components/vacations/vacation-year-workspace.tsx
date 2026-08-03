@@ -17,6 +17,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { shouldIgnoreCalendarShortcut } from "@/lib/calendar-shortcuts";
 import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
+import { AppLoadingOverlay } from "@/components/app-loading-screen";
 import type { VacationBoundary, VacationDateInput, VacationWorkDay, VacationYearData } from "./types";
 import { VacationEditModal, type VacationEditDraft, type VacationEditOption } from "./vacation-edit-modal";
 import { VacationSummaryPanel } from "./vacation-summary-panel";
@@ -630,19 +631,27 @@ export function VacationYearWorkspace({
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <VacationYearCalendar
-          connectedDateKeys={connectedDateKeys}
-          groups={groups}
-          hoveredDateKey={hoveredDateKey}
-          holidays={holidays}
-          onDateClick={openDateModal}
-          onDateHover={setHoveredDateKey}
-          onDateLeave={() => setHoveredDateKey("")}
-          todayKey={initialTodayKey}
-          vacations={vacations}
-          workDateKeys={workDateKeys}
-          year={year}
-        />
+        <div aria-busy={yearLoadState === "loading"} className="relative min-w-0 overflow-hidden rounded-md">
+          <VacationYearCalendar
+            connectedDateKeys={connectedDateKeys}
+            groups={groups}
+            hoveredDateKey={hoveredDateKey}
+            holidays={holidays}
+            onDateClick={openDateModal}
+            onDateHover={setHoveredDateKey}
+            onDateLeave={() => setHoveredDateKey("")}
+            todayKey={initialTodayKey}
+            vacations={vacations}
+            workDateKeys={workDateKeys}
+            year={year}
+          />
+          {yearLoadState === "loading" ? (
+            <AppLoadingOverlay
+              description="선택한 연도의 휴가 정보를 준비하고 있습니다."
+              title="연도 데이터를 불러오는 중"
+            />
+          ) : null}
+        </div>
         <VacationSummaryPanel
           allowanceDraft={allowanceDraft}
           allowanceError={allowanceError}
