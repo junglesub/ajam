@@ -22,7 +22,7 @@ export type VacationYearMetricSummary = {
 };
 
 export type VacationYearGroup = {
-  colorClass: VacationYearColorClass;
+  color: VacationColor;
   confirmedDays: number;
   confirmedHours: number;
   dateKeys: string[];
@@ -34,9 +34,10 @@ export type VacationYearGroup = {
   withTemporaryHours: number;
 };
 
-export type VacationYearColorClass = "blue" | "amber" | "emerald" | "rose" | "violet" | "cyan";
+export const VACATION_COLOR_PRESETS = ["blue", "amber", "emerald", "rose", "violet", "cyan"] as const;
 
-const colorClasses: VacationYearColorClass[] = ["blue", "amber", "emerald", "rose", "violet", "cyan"];
+export type VacationColorPreset = (typeof VACATION_COLOR_PRESETS)[number];
+export type VacationColor = VacationColorPreset | `#${string}`;
 
 function roundVacationNumber(value: number): number {
   return Number(value.toFixed(2));
@@ -44,6 +45,16 @@ function roundVacationNumber(value: number): number {
 
 export function normalizeVacationName(name: string): string {
   return name.trim() || "휴가";
+}
+
+export function normalizeVacationColor(value: string): VacationColor | null {
+  const color = value.trim().toLowerCase();
+
+  if ((VACATION_COLOR_PRESETS as readonly string[]).includes(color) || /^#[0-9a-f]{6}$/.test(color)) {
+    return color as VacationColor;
+  }
+
+  return null;
 }
 
 export function isTemporaryVacationStatus(status: VacationStatus): boolean {
@@ -86,7 +97,10 @@ export function buildVacationYearMetricSummary(params: {
   };
 }
 
-export function groupVacationRecordsByName(vacations: VacationYearRecord[]): VacationYearGroup[] {
+export function groupVacationRecordsByName(
+  vacations: VacationYearRecord[],
+  colorPreferences: Readonly<Record<string, VacationColor>> = {}
+): VacationYearGroup[] {
   const groups = new Map<string, VacationYearRecord[]>();
 
   for (const vacation of vacations) {
@@ -117,11 +131,10 @@ export function groupVacationRecordsByName(vacations: VacationYearRecord[]): Vac
     .sort((left, right) => right.hours - left.hours || left.name.localeCompare(right.name, "ko-KR"));
 
   return sortedGroups.map((group, index) => {
-    const colorClass = colorClasses[index % colorClasses.length]!;
     const { confirmedDays, confirmedHours, dateKeys, days, hours, name, status, withTemporaryDays, withTemporaryHours } = group;
 
     return {
-      colorClass,
+      color: colorPreferences[normalizeVacationName(name)] ?? VACATION_COLOR_PRESETS[index % VACATION_COLOR_PRESETS.length]!,
       confirmedDays,
       confirmedHours,
       dateKeys,

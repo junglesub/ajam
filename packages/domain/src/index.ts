@@ -76,11 +76,14 @@ export {
   findConnectedVacationDateKeysInDirection,
   groupVacationRecordsByName,
   isTemporaryVacationStatus,
+  normalizeVacationColor,
+  VACATION_COLOR_PRESETS,
   normalizeVacationName
 } from "./vacation-year";
 export type {
   ConnectedVacationDatePredicateParams,
-  VacationYearColorClass,
+  VacationColor,
+  VacationColorPreset,
   VacationYearGroup,
   VacationYearMetricSummary,
   VacationYearMetrics,

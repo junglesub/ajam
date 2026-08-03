@@ -326,6 +326,14 @@ body:has([data-footer-scope="auth"]) .site-footer {
   background-color: #72b7d7;
 }
 
+.vacation-custom-color {
+  background-color: color-mix(in oklab, var(--vacation-custom-color) 40%, white);
+}
+
+:root[data-theme="dark"] .vacation-custom-color {
+  background-color: color-mix(in oklab, var(--vacation-custom-color) 40%, #1f1f1f);
+}
+
 :root[data-theme="dark"] .vacation-today-date {
   box-shadow: 0 0 0 3px rgb(156 220 254 / 18%);
 }

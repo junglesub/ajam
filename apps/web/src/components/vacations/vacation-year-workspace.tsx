@@ -38,6 +38,7 @@ type VacationYearWorkspaceProps = {
   loadVacationYearAction: (year: number) => Promise<VacationYearData>;
   saveVacationAllowanceAction: (year: number, days: number) => Promise<number>;
   saveVacationDateAction: (input: VacationDateInput) => Promise<VacationYearData>;
+  saveVacationTypeColorAction: (year: number, name: string, color: string | null) => Promise<VacationYearData>;
 };
 
 function findConnectedVacationDateKeysForTab({
@@ -214,7 +215,8 @@ export function VacationYearWorkspace({
   initialYear,
   loadVacationYearAction,
   saveVacationAllowanceAction,
-  saveVacationDateAction
+  saveVacationDateAction,
+  saveVacationTypeColorAction
 }: VacationYearWorkspaceProps) {
   const [year, setYear] = useState(initialYear);
   const [allowanceDays, setAllowanceDays] = useState(initialData.allowanceDays);
@@ -226,6 +228,7 @@ export function VacationYearWorkspace({
   const [savedHolidayDateKeys, setSavedHolidayDateKeys] = useState(initialData.savedHolidayDateKeys);
   const [vacationBoundaries, setVacationBoundaries] = useState(initialData.vacationBoundaries);
   const [vacations, setVacations] = useState<VacationYearRecord[]>(initialData.vacations);
+  const [colorPreferences, setColorPreferences] = useState(initialData.colorPreferences);
   const [workDateKeys, setWorkDateKeys] = useState(initialData.workDateKeys);
   const [workRecords, setWorkRecords] = useState(initialData.workRecords);
   const [hoveredDateKey, setHoveredDateKey] = useState("");
@@ -239,7 +242,7 @@ export function VacationYearWorkspace({
   const [workDeleteError, setWorkDeleteError] = useState("");
   const [workDeleting, setWorkDeleting] = useState(false);
 
-  const groups = useMemo(() => groupVacationRecordsByName(vacations), [vacations]);
+  const groups = useMemo(() => groupVacationRecordsByName(vacations, colorPreferences), [colorPreferences, vacations]);
   const metricSummary = useMemo(() => buildVacationYearMetricSummary({ allowanceDays, vacations }), [allowanceDays, vacations]);
   const savedHolidayDateKeySet = useMemo(() => new Set(savedHolidayDateKeys), [savedHolidayDateKeys]);
   const vacationBoundaryByDate = useMemo(() => new Map(vacationBoundaries.map((boundary) => [`${boundary.dateKey}:${boundary.status}:${boundary.name.trim()}`, boundary])), [vacationBoundaries]);
@@ -290,6 +293,7 @@ export function VacationYearWorkspace({
     setSavedHolidayDateKeys(data.savedHolidayDateKeys);
     setVacationBoundaries(data.vacationBoundaries);
     setVacations(data.vacations);
+    setColorPreferences(data.colorPreferences);
     setWorkDateKeys(data.workDateKeys);
     setWorkRecords(data.workRecords);
   }
@@ -355,6 +359,11 @@ export function VacationYearWorkspace({
       setAllowanceState("error");
       setAllowanceError("연차 개수를 저장하지 못했습니다.");
     }
+  }
+
+  async function saveVacationTypeColor(name: string, color: string | null) {
+    const data = await saveVacationTypeColorAction(year, name, color);
+    setColorPreferences(data.colorPreferences);
   }
 
   function openDateModal(dateKey: string, data?: VacationYearData) {
@@ -655,6 +664,7 @@ export function VacationYearWorkspace({
         <VacationSummaryPanel
           allowanceDraft={allowanceDraft}
           allowanceError={allowanceError}
+          colorPreferences={colorPreferences}
           groups={groups}
           metricSummary={metricSummary}
           onAllowanceChange={(value) => {
@@ -662,6 +672,7 @@ export function VacationYearWorkspace({
             setAllowanceState("idle");
           }}
           onAllowanceSave={() => void saveAllowance()}
+          onColorSave={saveVacationTypeColor}
           saveState={allowanceState}
         />
       </div>

@@ -38,6 +38,7 @@
 - `HolidayFetchLog`: `getRestDeInfo` 월별 조회 여부를 저장해 같은 월을 반복 fetch하지 않게 한다.
 - `Vacation`: 사용자별 휴가 날짜, 이름, 시간을 저장한다. 업무 기록을 휴가로 저장하면 같은 날짜의 휴가 레코드가 동기화된다.
 - `VacationAllowance`: 사용자별 연도별 연차 총량을 저장한다. 휴가 사용량은 기존 `Vacation` 기록의 시간을 8시간 기준 일수로 환산한다.
+- `VacationTypeColorPreference`: 사용자와 정규화된 휴가 유형 이름별 색상 하나를 저장한다. 프리셋 ID 또는 6자리 hex 원본만 저장하며 연도에는 종속되지 않는다.
 - `AppSetting`: 공공데이터포털 서비스 키 같은 앱 설정값을 저장한다.
 - `UserAiSetting`: 사용자별 Gemini API key, 모델, 자동 정리 여부, 실행 방식, 참고할 이전 저장 WORK 날짜 수, 과거 미작성 AI 필드 보정 설정을 저장한다. API key는 앱 secret으로 암호화해 저장한다.
 - `TimesheetDay.aiRewriteRequested`: n8n 예약 AI 정리가 해당 날짜의 기존 영문 번역본과 짧은 버전을 한 번 다시 작성해도 되는지 저장한다. 이 값은 전역 설정이 아니라 `AI도 업데이트`를 선택한 날짜에만 켜진다.
@@ -76,6 +77,7 @@
 
 - `/timesheet` 서버 컴포넌트가 서버 기준 현재 월의 기록, 공휴일, 프로젝트, 휴가, 사용자/설정 데이터를 조회해 클라이언트 작업 공간에 전달하고, 클라이언트는 브라우저 기준 현재 월과 다르면 해당 월을 추가 조회한다.
 - `/vacations`는 선택 연도의 `VacationAllowance`, `Vacation`, `Holiday` 데이터를 조회해 연간 휴가 캘린더와 유형별 요약을 표시한다. 휴가 입력/수정/삭제는 기존 timesheet 저장 경로를 사용하되 같은 날짜의 업무/공휴일 기록은 보존한다.
+- `/vacations`는 사용자의 전체 `VacationTypeColorPreference`도 함께 읽는다. 저장된 유형 색상이 있으면 자동 순위 색상보다 우선하고, 없으면 기존 여섯 색상 순환을 유지한다. 사용자 지정 hex는 CSS `color-mix(in oklab, ...)`가 현재 테마에 맞는 tint로 렌더링한다.
 - 월 이동 시 클라이언트가 server action으로 해당 월 데이터를 추가 조회한다.
 - 헤더 새로고침 버튼은 현재 화면 범위를 다시 읽고, 같은 브라우저에서 같은 화면/같은 key를 보는 다른 aJam 창에는 `BroadcastChannel`로 읽은 payload를 공유한다.
 - 저장/삭제처럼 여러 화면에 영향을 줄 수 있는 변경이 성공하면 관련 화면 범위에만 새로고침 이벤트를 보내며, 각 화면은 자신이 보고 있는 월/연도/목록만 다시 로드한다.
@@ -89,7 +91,7 @@
 - 캘린더, 업무 리스트, 선택 날짜의 업무 entry 목록은 업무에 Notion 카드가 없거나 카드 배분 시간이 업무 시간과 맞지 않을 때 노란 경고 아이콘을 즉시 표시한다.
 - Notion API 장애가 발생해도 업무 기록 저장은 계속 가능하며, 후보 조회는 캐시 fallback을 사용한다.
 - 저장하지 않은 상태에서 날짜/월을 이동하려 하면 앱 모달로 확인한다.
-- 앱은 런타임에서 필요한 테이블과 컬럼을 `CREATE TABLE IF NOT EXISTS` 및 보정 쿼리로 보장한다. Notion 카드 동기화 스키마의 SQL reference는 `docs/db-migrations/2026-06-15-notion-card-sync.sql`에 둔다.
+- 앱은 런타임에서 필요한 테이블과 컬럼을 `CREATE TABLE IF NOT EXISTS` 및 보정 쿼리로 보장한다. 휴가 유형 색상 스키마의 SQL reference는 `docs/db-migrations/2026-08-03-vacation-type-color-preferences.sql`에 둔다.
 
 ## Deployment
 

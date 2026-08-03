@@ -45,7 +45,7 @@ export function VacationYearCalendar({
   }
 
   const holidayNameByDate = new Map(holidays.map((holiday) => [holiday.dateKey, holiday.name]));
-  const toneByName = new Map(groups.map((group) => [group.name, group.colorClass]));
+  const colorByName = new Map(groups.map((group) => [group.name, group.color]));
   const workDateKeySet = new Set(workDateKeys);
 
   return (
@@ -97,7 +97,7 @@ export function VacationYearCalendar({
                           onLeave={onDateLeave}
                           temporary={dayVacations.some((vacation) => vacation.status === "TEMPORARY")}
                           today={cell.dateKey === todayKey}
-                          tone={toneByName.get(vacationName) ?? "blue"}
+                          color={colorByName.get(vacationName) ?? "blue"}
                         />
                       );
                     })}

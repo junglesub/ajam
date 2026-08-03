@@ -16,6 +16,7 @@ import {
   findConnectedVacationDateKeysInDirection,
   groupVacationRecordsByName,
   isTemporaryVacationStatus,
+  normalizeVacationColor,
   normalizeVacationName
 } from "./vacation-year.js";
 import type { VacationStatus } from "./status.js";
@@ -77,15 +78,32 @@ test("groupVacationRecordsByName groups blank names under 휴가", () => {
   const groups = groupVacationRecordsByName(vacationDays);
 
   assert.deepEqual(groups.map((group) => ({
-    colorClass: group.colorClass,
+    color: group.color,
     confirmedHours: group.confirmedHours,
     dateKeys: group.dateKeys,
     hours: group.hours,
     name: group.name
   })), [
-    { colorClass: "blue", confirmedHours: 16, dateKeys: ["2026-01-05", "2026-01-06"], hours: 16, name: "연차" },
-    { colorClass: "amber", confirmedHours: 4, dateKeys: ["2026-01-08"], hours: 4, name: "오전반차" },
-    { colorClass: "emerald", confirmedHours: 2, dateKeys: ["2026-03-02"], hours: 2, name: "휴가" }
+    { color: "blue", confirmedHours: 16, dateKeys: ["2026-01-05", "2026-01-06"], hours: 16, name: "연차" },
+    { color: "amber", confirmedHours: 4, dateKeys: ["2026-01-08"], hours: 4, name: "오전반차" },
+    { color: "emerald", confirmedHours: 2, dateKeys: ["2026-03-02"], hours: 2, name: "휴가" }
+  ]);
+});
+
+test("normalizeVacationColor accepts presets and normalizes six-digit hex", () => {
+  assert.equal(normalizeVacationColor("blue"), "blue");
+  assert.equal(normalizeVacationColor("#A1B2C3"), "#a1b2c3");
+  assert.equal(normalizeVacationColor("#abc"), null);
+  assert.equal(normalizeVacationColor("red"), null);
+});
+
+test("groupVacationRecordsByName overrides only saved type colors", () => {
+  const groups = groupVacationRecordsByName(vacationDays, { "연차": "#a1b2c3" });
+
+  assert.deepEqual(groups.map(({ color, name }) => ({ color, name })), [
+    { color: "#a1b2c3", name: "연차" },
+    { color: "amber", name: "오전반차" },
+    { color: "emerald", name: "휴가" }
   ]);
 });
 
@@ -97,15 +115,15 @@ test("groupVacationRecordsByName groups same names and marks mixed temporary gro
   ]);
 
   assert.deepEqual(groups.map((group) => ({
-    colorClass: group.colorClass,
+    color: group.color,
     confirmedHours: group.confirmedHours,
     hours: group.hours,
     name: group.name,
     status: group.status,
     withTemporaryHours: group.withTemporaryHours
   })), [
-    { colorClass: "blue", confirmedHours: 8, hours: 16, name: "반차", status: "TEMPORARY", withTemporaryHours: 16 },
-    { colorClass: "amber", confirmedHours: 0, hours: 4, name: "휴가", status: "TEMPORARY", withTemporaryHours: 4 }
+    { color: "blue", confirmedHours: 8, hours: 16, name: "반차", status: "TEMPORARY", withTemporaryHours: 16 },
+    { color: "amber", confirmedHours: 0, hours: 4, name: "휴가", status: "TEMPORARY", withTemporaryHours: 4 }
   ]);
 });
 

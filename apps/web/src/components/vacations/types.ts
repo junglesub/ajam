@@ -1,4 +1,4 @@
-import type { VacationStatus, VacationYearRecord } from "@timesheet/domain";
+import type { VacationColor, VacationStatus, VacationYearRecord } from "@timesheet/domain";
 
 export type VacationDateInput = {
   dateKey: string;
@@ -35,6 +35,7 @@ export type VacationYearData = {
   holidays: Array<{ dateKey: string; name: string }>;
   savedHolidayDateKeys: string[];
   vacationBoundaries: VacationBoundary[];
+  colorPreferences: Record<string, VacationColor>;
   vacations: VacationYearRecord[];
   vacationOnlyDateKeys: string[];
   workDateKeys: string[];

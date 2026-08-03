@@ -3,16 +3,18 @@
 import {
   getManagedUser,
   getVacationAllowance,
+  listVacationTypeColorPreferences,
   listHolidays,
   listTimesheetEntries,
   listVacations,
   saveTimesheetDay,
+  setVacationTypeColorPreference,
   upsertVacationAllowance,
   type StoredTimesheetDraft,
   type StoredTimesheetEntry,
   type VacationRecord
 } from "@timesheet/db";
-import { createEmptyDraft, createEmptyEntryDraft, getYearRange, isWeekendDateKey, parseDateKey, toBrowserDateKey, type VacationStatus } from "@timesheet/domain";
+import { createEmptyDraft, createEmptyEntryDraft, getYearRange, isWeekendDateKey, normalizeVacationColor, parseDateKey, toBrowserDateKey, type VacationStatus } from "@timesheet/domain";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -278,8 +280,9 @@ export async function loadVacationYearAction(year: number): Promise<VacationYear
   assertValidYear(year);
 
   const range = getYearRange(year);
-  const [allowance, holidayResult, timesheetEntries, vacations] = await Promise.all([
+  const [allowance, colorPreferences, holidayResult, timesheetEntries, vacations] = await Promise.all([
     getVacationAllowance({ userId: user.id, year }),
+    listVacationTypeColorPreferences(user.id),
     loadVacationHolidays(range),
     listTimesheetEntries({ ...range, userId: user.id }),
     listVacations({ ...range, userId: user.id })
@@ -295,6 +298,7 @@ export async function loadVacationYearAction(year: number): Promise<VacationYear
 
   return {
     allowanceDays: allowance?.days ?? 0,
+    colorPreferences: Object.fromEntries(colorPreferences.map((preference) => [preference.name, preference.color])),
     holidayWarning: holidayResult.holidayWarning,
     holidays: mergeManualHolidays(holidayResult.holidays, timesheetEntries),
     savedHolidayDateKeys: buildSavedHolidayDateKeys(timesheetEntries),
@@ -304,6 +308,25 @@ export async function loadVacationYearAction(year: number): Promise<VacationYear
     workDateKeys,
     workRecords
   };
+}
+
+export async function saveVacationTypeColorAction(year: number, name: string, color: string | null): Promise<VacationYearData> {
+  const user = await requireSessionUser();
+  assertValidYear(year);
+
+  if (!name.trim()) {
+    throw new Error("휴가 유형 이름을 확인해 주세요.");
+  }
+
+  const normalizedColor = color === null ? null : normalizeVacationColor(color);
+  if (color !== null && !normalizedColor) {
+    throw new Error("휴가 유형 색상을 확인해 주세요.");
+  }
+
+  await setVacationTypeColorPreference({ color: normalizedColor, name, userId: user.id });
+  revalidatePath("/vacations");
+
+  return loadVacationYearAction(year);
 }
 
 export async function saveVacationAllowanceAction(year: number, days: number): Promise<number> {

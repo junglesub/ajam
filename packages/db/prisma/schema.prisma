@@ -22,6 +22,7 @@ model User {
   timesheetEntries TimesheetEntry[]
   vacations          Vacation[]
   vacationAllowances VacationAllowance[]
+  vacationTypeColorPreferences VacationTypeColorPreference[]
 }
 
 model ReminderLog {
@@ -140,4 +141,17 @@ model VacationAllowance {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, year])
+}
+
+model VacationTypeColorPreference {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  color     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
 }

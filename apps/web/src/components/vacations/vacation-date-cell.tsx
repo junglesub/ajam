@@ -1,10 +1,12 @@
 "use client";
 
-import { clampVacationFillRatio } from "@timesheet/domain";
+import { clampVacationFillRatio, type VacationColor, type VacationColorPreset } from "@timesheet/domain";
 import { cn } from "@timesheet/ui";
+import type { CSSProperties } from "react";
 
 type VacationDateCellProps = {
   connected: boolean;
+  color: VacationColor;
   dateKey: string;
   day: number;
   dimmed: boolean;
@@ -17,10 +19,9 @@ type VacationDateCellProps = {
   onLeave: () => void;
   temporary: boolean;
   today: boolean;
-  tone: "amber" | "blue" | "cyan" | "emerald" | "rose" | "violet";
 };
 
-const fillClassByTone: Record<VacationDateCellProps["tone"], string> = {
+const fillClassByTone: Record<VacationColorPreset, string> = {
   amber: "bg-amber-300",
   blue: "bg-blue-400",
   cyan: "bg-cyan-400",
@@ -31,6 +32,7 @@ const fillClassByTone: Record<VacationDateCellProps["tone"], string> = {
 
 export function VacationDateCell({
   connected,
+  color,
   dateKey,
   day,
   dimmed,
@@ -42,12 +44,13 @@ export function VacationDateCell({
   onHover,
   onLeave,
   temporary,
-  today,
-  tone
+  today
 }: VacationDateCellProps) {
   const fillRatio = clampVacationFillRatio(hours);
   const hasVacation = fillRatio > 0;
   const hasMarkerBackground = hasVacation || hasWorkRecord;
+  const customColor = color.startsWith("#") ? color : null;
+  const presetColor = customColor ? null : color as VacationColorPreset;
 
   return (
     <button
@@ -72,9 +75,12 @@ export function VacationDateCell({
           <>
             <span
               aria-hidden="true"
-              className={cn("absolute inset-x-0 bottom-0", fillClassByTone[tone])}
-              data-vacation-tone={tone}
-              style={{ height: `${fillRatio * 100}%` }}
+              className={cn("absolute inset-x-0 bottom-0", customColor ? "vacation-custom-color" : fillClassByTone[presetColor!])}
+              data-vacation-tone={presetColor ?? undefined}
+              style={{
+                "--vacation-custom-color": customColor ?? undefined,
+                height: `${fillRatio * 100}%`
+              } as CSSProperties}
             />
             {temporary ? (
               <span

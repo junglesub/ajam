@@ -83,6 +83,8 @@ export {
   upsertTimesheetEntry,
   upsertVacationAllowance
 } from "./timesheet-store";
+export { listVacationTypeColorPreferences, setVacationTypeColorPreference } from "./vacation-color-store";
+export type { VacationTypeColorPreference } from "./vacation-color-store";
 export type {
   HolidayRecord,
   ProjectSummary,
