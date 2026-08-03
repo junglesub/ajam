@@ -197,3 +197,84 @@ Update the product brief to note compact visual custom/automatic controls. Run `
 - [ ] **Step 5: Commit**
 
 Stage the summary panel, product brief, design update, and plan update. Commit with `feat(vacation): refine color controls`.
+
+### Task 6: Timesheet Calendar Vacation Colors
+
+**Files:**
+- Modify: `apps/web/src/app/(app)/timesheet/actions.ts`
+- Modify: `apps/web/src/app/(app)/timesheet/page.tsx`
+- Modify: `apps/web/src/components/timesheet/timesheet-workspace.tsx`
+- Modify: `apps/web/src/components/vacations/vacation-year-workspace.tsx`
+- Modify: `apps/web/src/app/globals.css`
+- Modify: `docs/product-brief.md`
+- Modify: `docs/architecture.md`
+
+**Interfaces:**
+- Extends: `TimesheetMonthData.vacationColors: Record<string, VacationColor>` in the server action and client mirror type.
+- Produces: `loadTimesheetVacationColorsAction(year): Promise<Record<string, VacationColor>>` for post-mutation refreshes.
+- Consumes: `listVacationTypeColorPreferences`, `groupVacationRecordsByName`, `normalizeVacationName`, and the existing calendar row vacation entries.
+- Produces: matching vacation surfaces, partial/mixed fills, and badges in the timesheet calendar.
+
+- [ ] **Step 1: Return the annual effective color map with month data**
+
+In `loadTimesheetMonthAction`, fetch the selected year's vacations and the current user's preferences in the existing `Promise.all`. Reuse the annual vacation list for the month by filtering `dateKey` to the month range. Build preferences with `Object.fromEntries`, call `groupVacationRecordsByName(yearVacations, preferences)`, and return `vacationColors` from each group's normalized `name` and resolved `color`.
+
+- [ ] **Step 2: Cache color maps by year in the workspace**
+
+Add `vacationColors` to the client `TimesheetMonthData` type. Initialize `vacationColorsByYear` with the initial year payload and record each loaded payload under the requested year in every month-data ingestion path. Resolve the visible map with `vacationColorsByYear[monthCursor.year] ?? {}`. A shared-view refresh replaces the cached maps with the current year so navigating to a previously loaded year fetches a fresh map instead of reusing stale cross-year preferences.
+
+After a vacation color preference save, broadcast a `timesheet` mutation refresh so another open timesheet tab reloads the effective map.
+
+Pass `loadTimesheetVacationColorsAction` into the workspace. After local vacation create, rename, status/hour change, or delete—including connected and range operations—refresh each affected year's derived map without reloading or overwriting the current month drafts.
+
+- [ ] **Step 3: Apply resolved colors to calendar vacation visuals**
+
+Pass the visible map into `CalendarView`. For each row, normalize its first vacation entry name and resolve the mapped color with `blue` fallback. Set `data-timesheet-vacation-color` for presets or `--timesheet-vacation-color` for custom hex on the cell. Replace the fixed `vacationMixColor` in partial and mixed overlays with `var(--timesheet-vacation-fill)`. Add `timesheet-vacation-only`, `timesheet-vacation-border`, and `timesheet-vacation-badge` classes for the full cell, partial border, and both full/dot badges while preserving temporary hatching.
+
+- [ ] **Step 4: Define theme-aware calendar tokens**
+
+In `globals.css`, map the six preset data attributes to their raw colors. Define light and dark `--timesheet-vacation-surface`, `--timesheet-vacation-fill`, `--timesheet-vacation-border`, and `--timesheet-vacation-foreground` with `color-mix(in oklab, ...)`. Apply them only through the new timesheet classes so vacation-year rendering and non-vacation timesheet cells remain unchanged.
+
+- [ ] **Step 5: Document and verify**
+
+Update product and architecture docs to state that both calendars share annual effective colors. Run `pnpm -r --if-present test`, `pnpm lint`, `pnpm typecheck`, and `git diff --check`. Do not run a production build.
+
+- [ ] **Step 6: Commit**
+
+Stage the server action, workspace, CSS, product/architecture docs, design, and plan. Commit with `feat(timesheet): match vacation type colors`.
+
+### Task 7: Refine Timesheet Calendar Status Cues
+
+**Files:**
+- Modify: `apps/web/src/components/timesheet/timesheet-workspace.tsx`
+- Modify: `apps/web/src/app/globals.css`
+- Modify: `docs/product-brief.md`
+
+**Interfaces:**
+- Consumes: the existing blue `Badge` tone used by vacation status and dot badges.
+- Produces: type-colored calendar cells with consistently blue vacation badges and red holiday date numbers.
+
+- [x] **Step 1: Remove the vacation-color override from badges**
+
+Remove `timesheet-vacation-badge` from both badge render paths so the existing `tone="blue"` styles remain authoritative:
+
+```tsx
+<Badge tone={badgeToneByStatus[status]}>
+<Badge tone="blue">
+```
+
+- [x] **Step 2: Delete the unused badge CSS**
+
+Delete the light and dark `.timesheet-vacation-badge` rules. Keep all cell surface, fill, border, hover, and temporary-hatch rules unchanged.
+
+- [x] **Step 3: Emphasize holiday dates**
+
+Add `text-red-600` to the date number when `row?.status === "HOLIDAY"` and the date is not today. Preserve today's existing `bg-slate-950 text-white` classes. Update the product brief to record both calendar cues.
+
+- [x] **Step 4: Verify without a build**
+
+Run `rg "timesheet-vacation-badge" apps/web/src` and expect no matches. Run `pnpm --filter @timesheet/web typecheck`, `pnpm lint`, and `git diff --check`; all must pass. Do not run a production build.
+
+- [x] **Step 5: Commit**
+
+Stage the workspace, CSS, product brief, and plan. Commit with `fix(timesheet): refine calendar status cues`.

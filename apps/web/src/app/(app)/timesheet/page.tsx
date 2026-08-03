@@ -15,6 +15,7 @@ import {
   listTimesheetAiRewriteRequestsAction,
   loadNotionCardCandidatesAction,
   loadTimesheetMonthAction,
+  loadTimesheetVacationColorsAction,
   refreshNotionCardCandidatesAction,
   resetAllHolidayCacheAction,
   resetHolidayCacheAction,
@@ -75,6 +76,7 @@ export default async function TimesheetPage() {
       initialYear={today.getFullYear()}
       listAiRewriteRequestsAction={listTimesheetAiRewriteRequestsAction}
       loadMonthAction={loadTimesheetMonthAction}
+      loadVacationColorsAction={loadTimesheetVacationColorsAction}
       loadNotionCardCandidatesAction={loadNotionCardCandidatesAction}
       refreshNotionCardCandidatesAction={refreshNotionCardCandidatesAction}
       resetAllHolidayCacheAction={resetAllHolidayCacheAction}

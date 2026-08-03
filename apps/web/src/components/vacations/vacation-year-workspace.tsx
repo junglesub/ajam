@@ -364,6 +364,7 @@ export function VacationYearWorkspace({
   async function saveVacationTypeColor(name: string, color: string | null) {
     const data = await saveVacationTypeColorAction(year, name, color);
     setColorPreferences(data.colorPreferences);
+    broadcastViewRefresh("timesheet", "mutation");
   }
 
   function openDateModal(dateKey: string, data?: VacationYearData) {

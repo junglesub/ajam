@@ -8,12 +8,11 @@
 
 :root {
   color-scheme: light;
-  --vacation-mix-color: rgba(59, 130, 246, 0.18);
   --vacation-date-temporary-overlay: rgba(255, 255, 255, 0.28);
   --vacation-date-temporary-hatch: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.78) 0 2px, rgba(255, 255, 255, 0.18) 2px 4px);
   --temporary-vacation-hatch-background:
     linear-gradient(rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.38)),
-    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.62) 0 5px, rgba(59, 130, 246, 0.06) 5px 10px);
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.62) 0 5px, color-mix(in oklab, var(--timesheet-vacation-color, #3b82f6) 6%, transparent) 5px 10px);
 }
 
 * {
@@ -53,12 +52,11 @@ body:has([data-footer-scope="auth"]) .site-footer {
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --vacation-mix-color: rgba(156, 220, 254, 0.14);
   --vacation-date-temporary-overlay: rgba(31, 31, 31, 0.16);
   --vacation-date-temporary-hatch: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.38) 0 2px, rgba(255, 255, 255, 0.08) 2px 4px);
   --temporary-vacation-hatch-background:
     linear-gradient(rgba(31, 31, 31, 0.42), rgba(31, 31, 31, 0.42)),
-    repeating-linear-gradient(135deg, rgba(156, 220, 254, 0.22) 0 5px, rgba(156, 220, 254, 0.04) 5px 10px);
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0 5px, color-mix(in oklab, var(--timesheet-vacation-color, #9cdcff) 16%, transparent) 5px 10px);
 }
 
 :root[data-theme="dark"] body {
@@ -332,6 +330,67 @@ body:has([data-footer-scope="auth"]) .site-footer {
 
 :root[data-theme="dark"] .vacation-custom-color {
   background-color: color-mix(in oklab, var(--vacation-custom-color) 40%, #1f1f1f);
+}
+
+[data-timesheet-vacation-color="blue"] {
+  --timesheet-vacation-color: #60a5fa;
+}
+
+[data-timesheet-vacation-color="amber"] {
+  --timesheet-vacation-color: #fcd34d;
+}
+
+[data-timesheet-vacation-color="emerald"] {
+  --timesheet-vacation-color: #34d399;
+}
+
+[data-timesheet-vacation-color="rose"] {
+  --timesheet-vacation-color: #fb7185;
+}
+
+[data-timesheet-vacation-color="violet"] {
+  --timesheet-vacation-color: #a78bfa;
+}
+
+[data-timesheet-vacation-color="cyan"] {
+  --timesheet-vacation-color: #22d3ee;
+}
+
+.timesheet-vacation-theme {
+  --timesheet-vacation-surface: color-mix(in oklab, var(--timesheet-vacation-color) 18%, white);
+  --timesheet-vacation-fill: color-mix(in oklab, var(--timesheet-vacation-color) 34%, white);
+  --timesheet-vacation-border: color-mix(in oklab, var(--timesheet-vacation-color) 58%, white);
+  --timesheet-vacation-foreground: color-mix(in oklab, var(--timesheet-vacation-color) 58%, #111827);
+}
+
+.timesheet-vacation-only {
+  background-color: var(--timesheet-vacation-surface);
+  border-color: var(--timesheet-vacation-border);
+}
+
+.timesheet-vacation-border {
+  border-color: var(--timesheet-vacation-border);
+}
+
+.timesheet-vacation-only:hover,
+.timesheet-vacation-border:hover {
+  border-color: var(--timesheet-vacation-color);
+}
+
+:root[data-theme="dark"] .timesheet-vacation-theme {
+  --timesheet-vacation-surface: color-mix(in oklab, var(--timesheet-vacation-color) 24%, #1f1f1f);
+  --timesheet-vacation-fill: color-mix(in oklab, var(--timesheet-vacation-color) 38%, #1f1f1f);
+  --timesheet-vacation-border: color-mix(in oklab, var(--timesheet-vacation-color) 62%, #3a3a3d);
+  --timesheet-vacation-foreground: color-mix(in oklab, var(--timesheet-vacation-color) 52%, white);
+}
+
+:root[data-theme="dark"] .timesheet-vacation-only {
+  background-color: var(--timesheet-vacation-surface);
+  border-color: var(--timesheet-vacation-border);
+}
+
+:root[data-theme="dark"] .timesheet-vacation-border {
+  border-color: var(--timesheet-vacation-border);
 }
 
 :root[data-theme="dark"] .vacation-today-date {

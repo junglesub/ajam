@@ -19,6 +19,7 @@ import {
   listProjects,
   listTimesheetAiRewriteRequests,
   listTimesheetEntries,
+  listVacationTypeColorPreferences,
   listVacations,
   resetHolidayCache,
   setAppSetting,
@@ -41,9 +42,12 @@ import {
 import {
   buildNotionCardAvailableHours,
   filterOpenNotionCardCandidates,
+  getYearRange,
+  groupVacationRecordsByName,
   toBrowserDateKey,
   type TimesheetDayDraft,
-  type TimesheetEntryNotionCardDraft
+  type TimesheetEntryNotionCardDraft,
+  type VacationColor
 } from "@timesheet/domain";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -63,6 +67,7 @@ export type TimesheetMonthData = {
   holidayWarning?: string;
   holidays: Array<{ dateKey: string; name: string }>;
   projects: string[];
+  vacationColors: Record<string, VacationColor>;
   vacations: Array<{ dateKey: string; hours: number; name: string }>;
 };
 
@@ -129,6 +134,17 @@ function getMonthRange(year: number, monthIndex: number) {
     endDateKey: toDateKey(year, monthIndex, lastDay),
     startDateKey: toDateKey(year, monthIndex, 1)
   };
+}
+
+async function loadVacationYearColorData(userId: string, year: number) {
+  const [vacations, colorPreferences] = await Promise.all([
+    listVacations({ ...getYearRange(year), userId }),
+    listVacationTypeColorPreferences(userId)
+  ]);
+  const preferenceMap = Object.fromEntries(colorPreferences.map((preference) => [preference.name, preference.color]));
+  const colors = Object.fromEntries(groupVacationRecordsByName(vacations, preferenceMap).map((group) => [group.name, group.color]));
+
+  return { colors, vacations };
 }
 
 async function requireSession() {
@@ -267,7 +283,7 @@ async function fetchRestDeInfoWithKey(params: { serviceKey: string; solMonth: nu
 export async function loadTimesheetMonthAction(year: number, monthIndex: number): Promise<TimesheetMonthData> {
   const user = await requireSession();
   const range = getMonthRange(year, monthIndex);
-  const [entries, holidayResult, projects, vacations] = await Promise.all([
+  const [entries, holidayResult, projects, vacationYearData] = await Promise.all([
     listTimesheetEntries({ ...range, userId: user.id }),
     listHolidays(range)
       .then((holidays) => ({ holidayWarning: undefined, holidays }))
@@ -276,16 +292,23 @@ export async function loadTimesheetMonthAction(year: number, monthIndex: number)
         holidays: []
       })),
     listProjects({ userId: user.id }),
-    listVacations({ ...range, userId: user.id })
+    loadVacationYearColorData(user.id, year)
   ]);
+  const vacations = vacationYearData.vacations.filter((vacation) => vacation.dateKey >= range.startDateKey && vacation.dateKey <= range.endDateKey);
 
   return {
     entries: mergeLegacyVacations(entries, vacations),
     holidayWarning: holidayResult.holidayWarning,
     holidays: holidayResult.holidays,
     projects,
+    vacationColors: vacationYearData.colors,
     vacations
   };
+}
+
+export async function loadTimesheetVacationColorsAction(year: number): Promise<Record<string, VacationColor>> {
+  const user = await requireSession();
+  return (await loadVacationYearColorData(user.id, year)).colors;
 }
 
 export async function saveTimesheetEntryAction(day: TimesheetDayDraft): Promise<TimesheetSaveResult> {
@@ -785,17 +808,19 @@ export async function resetAllHolidayCacheAction(year: number, monthIndex: numbe
   await resetHolidayCache();
 
   const range = getMonthRange(year, monthIndex);
-  const [entries, projects, vacations] = await Promise.all([
+  const [entries, projects, vacationYearData] = await Promise.all([
     listTimesheetEntries({ ...range, userId: user.id }),
     listProjects({ userId: user.id }),
-    listVacations({ ...range, userId: user.id })
+    loadVacationYearColorData(user.id, year)
   ]);
+  const vacations = vacationYearData.vacations.filter((vacation) => vacation.dateKey >= range.startDateKey && vacation.dateKey <= range.endDateKey);
 
   return {
     entries: mergeLegacyVacations(entries, vacations),
     holidayWarning: undefined,
     holidays: [],
     projects,
+    vacationColors: vacationYearData.colors,
     vacations
   };
 }

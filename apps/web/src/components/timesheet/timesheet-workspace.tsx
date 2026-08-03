@@ -18,7 +18,7 @@ import {
   verticalListSortingStrategy
 } from "@dnd-kit/sortable";
 import confetti from "canvas-confetti";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 
 import {
   allocateNotionCardHours,
@@ -31,6 +31,7 @@ import {
   getDisplayContent,
   getMonthLabel,
   isWeekendDateKey,
+  normalizeVacationName,
   parseDateKey,
   resolveStatus,
   statusLabel,
@@ -40,6 +41,8 @@ import {
   type TimesheetDayDraft,
   type TimesheetEntryDraft,
   type TimesheetEntryNotionCardDraft,
+  type VacationColor,
+  type VacationColorPreset,
   type VacationStatus,
   type WorkRecordKind
 } from "@timesheet/domain";
@@ -93,6 +96,7 @@ type TimesheetMonthData = {
   holidayWarning?: string;
   holidays: Array<{ dateKey: string; name: string }>;
   projects: string[];
+  vacationColors: Record<string, VacationColor>;
   vacations: Array<{ dateKey: string; hours: number; name: string }>;
 };
 
@@ -216,6 +220,7 @@ type TimesheetWorkspaceProps = {
   initialYear: number;
   listAiRewriteRequestsAction: () => Promise<TimesheetAiRewriteRequest[]>;
   loadMonthAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
+  loadVacationColorsAction: (year: number) => Promise<Record<string, VacationColor>>;
   loadNotionCardCandidatesAction: (input: LoadNotionCardCandidatesInput) => Promise<NotionCardCandidatesResult>;
   refreshNotionCardCandidatesAction: (input: LoadNotionCardCandidatesInput) => Promise<NotionCardCandidatesResult>;
   resetAllHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
@@ -245,10 +250,10 @@ const cellToneByStatus: Record<TimesheetStatus, string> = {
   FUTURE: "border-slate-200 bg-slate-100 text-slate-400",
   HOLIDAY: "border-orange-200 bg-orange-50/80 hover:border-orange-300",
   MISSING: "border-slate-200 bg-white hover:border-slate-300",
-  VACATION: "border-blue-200 bg-blue-50/80 hover:border-blue-300"
+  VACATION: "timesheet-vacation-only"
 };
 
-const vacationMixColor = "var(--vacation-mix-color)";
+const vacationFillColor = "var(--timesheet-vacation-fill)";
 const temporaryVacationHatchBackground = "var(--temporary-vacation-hatch-background)";
 const fullDayHours = 8;
 
@@ -360,7 +365,7 @@ function getPartialVacationOnlyOverlayStyle(row: TimesheetRow | undefined) {
   const isTemporaryVacation = vacation.vacationStatus === "TEMPORARY";
 
   return {
-    backgroundColor: vacationMixColor,
+    backgroundColor: vacationFillColor,
     backgroundImage: isTemporaryVacation ? temporaryVacationHatchBackground : undefined,
     WebkitMaskImage: fillMask,
     maskImage: fillMask
@@ -381,7 +386,7 @@ function getVacationMixOverlayStyle(row: TimesheetRow | undefined) {
   const isTemporaryVacation = row.vacationStatus === "TEMPORARY";
 
   return {
-    backgroundColor: vacationMixColor,
+    backgroundColor: vacationFillColor,
     backgroundImage: isTemporaryVacation ? temporaryVacationHatchBackground : undefined,
     clipPath: vacationClipPath
   };
@@ -1098,6 +1103,7 @@ export function TimesheetWorkspace({
   initialYear,
   listAiRewriteRequestsAction,
   loadMonthAction,
+  loadVacationColorsAction,
   loadNotionCardCandidatesAction,
   refreshNotionCardCandidatesAction,
   resetAllHolidayCacheAction,
@@ -1131,6 +1137,9 @@ export function TimesheetWorkspace({
   const [includeDoneNotionCandidates, setIncludeDoneNotionCandidates] = useState(false);
   const notionCandidates = useNotionCardCandidates({ loadNotionCardCandidatesAction, refreshNotionCardCandidatesAction });
   const [projects, setProjects] = useState(() => mergeProjects([], initialMonthData.projects));
+  const [vacationColorsByYear, setVacationColorsByYear] = useState<Record<number, Record<string, VacationColor>>>(() => ({
+    [initialYear]: initialMonthData.vacationColors
+  }));
   const [loadedMonthKeys, setLoadedMonthKeys] = useState(() => {
     return new Set([getMonthCacheKey(initialYear, initialMonthIndex)]);
   });
@@ -1266,6 +1275,7 @@ export function TimesheetWorkspace({
           return;
         }
 
+        rememberVacationColors(monthCursor.year, monthData);
         const monthDrafts = buildDraftsFromMonthData(monthData);
         const selectedDirtyDateKey = isDirty ? selectedDateKey : "";
 
@@ -1354,6 +1364,7 @@ export function TimesheetWorkspace({
     () => getBusinessCalendarWeeks(monthCursor.year, monthCursor.monthIndex),
     [monthCursor.monthIndex, monthCursor.year]
   );
+  const visibleVacationColors = vacationColorsByYear[monthCursor.year] ?? {};
   const listDateKeys = useMemo(
     () => getBusinessDateKeysUntil(monthCursor.year, monthCursor.monthIndex, todayKey).toReversed(),
     [monthCursor.monthIndex, monthCursor.year, todayKey]
@@ -1451,11 +1462,27 @@ export function TimesheetWorkspace({
     return getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
   }
 
+  function rememberVacationColors(year: number, monthData: TimesheetMonthData) {
+    setVacationColorsByYear((current) => ({ ...current, [year]: monthData.vacationColors }));
+  }
+
+  async function refreshVacationColors(dateKeys: string[]) {
+    const years = [...new Set(dateKeys.map((dateKey) => Number(dateKey.slice(0, 4))))].filter(Number.isInteger);
+
+    try {
+      const colorsByYear = await Promise.all(years.map(async (year) => [year, await loadVacationColorsAction(year)] as const));
+      setVacationColorsByYear((current) => ({ ...current, ...Object.fromEntries(colorsByYear) }));
+    } catch {
+      setVacationColorsByYear((current) => Object.fromEntries(Object.entries(current).filter(([year]) => !years.includes(Number(year)))));
+    }
+  }
+
   function applyVisibleMonthData(monthData: TimesheetMonthData) {
     const monthKey = getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
     const monthDrafts = buildDraftsFromMonthData(monthData);
     const selectedDirtyDateKey = isDirty ? selectedDateKey : "";
 
+    setVacationColorsByYear({ [monthCursor.year]: monthData.vacationColors });
     setHolidayWarning(monthData.holidayWarning ?? "");
     setHolidayWarningMonthKeys((current) => {
       const next = new Set(current);
@@ -1518,13 +1545,21 @@ export function TimesheetWorkspace({
   }
 
   async function saveEntryAndNotify(entry: TimesheetDayDraft): Promise<TimesheetSaveResult> {
+    const affectsVacationColors = entry.entries.some((dayEntry) => dayEntry.kind === "VACATION") || savedRecords[entry.dateKey]?.entries.some((dayEntry) => dayEntry.kind === "VACATION");
     const result = await saveEntryAction(entry);
+    if (affectsVacationColors) {
+      await refreshVacationColors([entry.dateKey]);
+    }
     broadcastViewRefresh(["timesheet", "vacations", "notion-cards", "ai-summary", "projects"], "mutation");
     return result;
   }
 
   async function deleteEntryAndNotify(dateKey: string): Promise<TimesheetDeleteResult> {
+    const affectsVacationColors = savedRecords[dateKey]?.entries.some((entry) => entry.kind === "VACATION");
     const result = await deleteEntryAction(dateKey);
+    if (affectsVacationColors) {
+      await refreshVacationColors([dateKey]);
+    }
     broadcastViewRefresh(["timesheet", "vacations", "notion-cards", "ai-summary", "projects"], "mutation");
     return result;
   }
@@ -1539,7 +1574,7 @@ export function TimesheetWorkspace({
   useEffect(() => {
     const monthKey = getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
 
-    if (loadedMonthKeys.has(monthKey)) {
+    if (loadedMonthKeys.has(monthKey) && vacationColorsByYear[monthCursor.year]) {
       setMonthLoadState("idle");
       setMonthLoadError("");
       setIsInitialMonthSyncing(false);
@@ -1559,6 +1594,7 @@ export function TimesheetWorkspace({
           return;
         }
 
+        rememberVacationColors(monthCursor.year, monthData);
         const monthDrafts = buildDraftsFromMonthData(monthData);
 
         setHolidayWarning(monthData.holidayWarning ?? "");
@@ -1614,7 +1650,7 @@ export function TimesheetWorkspace({
     return () => {
       isActive = false;
     };
-  }, [loadMonthAction, loadedMonthKeys, monthCursor.monthIndex, monthCursor.year]);
+  }, [loadMonthAction, loadedMonthKeys, monthCursor.monthIndex, monthCursor.year, vacationColorsByYear]);
 
   useEffect(() => {
     function warnBeforeUnload(event: BeforeUnloadEvent) {
@@ -2053,9 +2089,11 @@ export function TimesheetWorkspace({
       }
 
       const [year, month] = monthKey.split("-").map(Number);
-      const monthData = await loadMonthAction(year ?? monthCursor.year, (month ?? 1) - 1);
+      const targetYear = year ?? monthCursor.year;
+      const monthData = await loadMonthAction(targetYear, (month ?? 1) - 1);
       const monthDrafts = buildDraftsFromMonthData(monthData);
 
+      rememberVacationColors(targetYear, monthData);
       loadedDrafts = {
         ...loadedDrafts,
         ...monthDrafts
@@ -2244,6 +2282,7 @@ export function TimesheetWorkspace({
       }
     } finally {
       if (savedDays.length > 0) {
+        await refreshVacationColors(savedDays.map((day) => day.dateKey));
         broadcastViewRefresh(["timesheet", "vacations", "notion-cards", "ai-summary", "projects"], "mutation");
       }
     }
@@ -2297,6 +2336,7 @@ export function TimesheetWorkspace({
       }
     } finally {
       if (savedDays.length > 0) {
+        await refreshVacationColors(savedDays.map((day) => day.dateKey));
         broadcastViewRefresh(["timesheet", "vacations", "notion-cards", "ai-summary", "projects"], "mutation");
       }
     }
@@ -2906,6 +2946,7 @@ export function TimesheetWorkspace({
       setDeleteError("연결된 휴가를 함께 삭제하지 못했습니다.");
     } finally {
       if (didMutate) {
+        await refreshVacationColors(connectedVacationPrompt.dateKeys);
         broadcastViewRefresh(["timesheet", "vacations", "notion-cards", "ai-summary", "projects"], "mutation");
       }
 
@@ -3693,6 +3734,7 @@ export function TimesheetWorkspace({
       const monthData = await resetHolidayCacheAction(monthCursor.year, monthCursor.monthIndex);
       const monthKey = getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
       const monthDrafts = buildDraftsFromMonthData(monthData);
+      rememberVacationColors(monthCursor.year, monthData);
       const mergeResetMonth = (current: Record<string, TimesheetDayDraft>) => {
         const next = { ...current };
 
@@ -3752,6 +3794,7 @@ export function TimesheetWorkspace({
     try {
       const monthData = await resetAllHolidayCacheAction(monthCursor.year, monthCursor.monthIndex);
       const monthDrafts = buildDraftsFromMonthData(monthData);
+      rememberVacationColors(monthCursor.year, monthData);
       const removeApiHolidayDrafts = (current: Record<string, TimesheetDayDraft>) => {
         const next = { ...current };
 
@@ -3887,6 +3930,7 @@ export function TimesheetWorkspace({
               selectedDateKey={selectedDateKey}
               setSelectedDateKey={selectDate}
               todayKey={todayKey}
+              vacationColors={visibleVacationColors}
               weeks={calendarWeeks}
             />
           ) : (
@@ -4943,12 +4987,22 @@ function ProgressBar({ label, progress }: { label: string; progress: { completed
   );
 }
 
+function getTimesheetVacationColor(row: TimesheetRow | undefined, vacationColors: Record<string, VacationColor>): VacationColor {
+  const vacation = row?.entries.find((entry) => entry.kind === "VACATION");
+  return vacationColors[normalizeVacationName(vacation?.vacationName ?? "")] ?? "blue";
+}
+
+function getTimesheetVacationColorStyle(color: VacationColor): CSSProperties | undefined {
+  return color.startsWith("#") ? ({ "--timesheet-vacation-color": color } as CSSProperties) : undefined;
+}
+
 function CalendarView({
   celebratingDateKey,
   rows,
   selectedDateKey,
   setSelectedDateKey,
   todayKey,
+  vacationColors,
   weeks
 }: {
   celebratingDateKey: string;
@@ -4956,6 +5010,7 @@ function CalendarView({
   selectedDateKey: string;
   setSelectedDateKey: (dateKey: string) => void;
   todayKey: string;
+  vacationColors: Record<string, VacationColor>;
   weeks: ReturnType<typeof getBusinessCalendarWeeks>;
 }) {
   const dateButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -5023,18 +5078,26 @@ function CalendarView({
               const vacationMixOverlayStyle = getVacationMixOverlayStyle(row);
               const partialVacationOnlyOverlayStyle = getPartialVacationOnlyOverlayStyle(row);
               const isPartialVacationOnly = isPartialVacationOnlyCell(row);
+              const vacationColor = getTimesheetVacationColor(row, vacationColors);
+              const presetVacationColor = vacationColor.startsWith("#") ? undefined : vacationColor as VacationColorPreset;
+              const calendarCellStyle = {
+                ...getCalendarCellStyle(row),
+                ...getTimesheetVacationColorStyle(vacationColor)
+              };
 
               return (
                 <button
                   className={cn(
                     "relative flex min-h-32 flex-col justify-between overflow-hidden rounded-md border p-3 text-left transition",
+                    row?.hasVacation && "timesheet-vacation-theme",
                     row && (isPartialVacationOnly
                       ? cell.dateKey > todayKey
-                        ? "border-blue-200 bg-slate-100 text-slate-400 hover:border-blue-300"
-                        : "border-blue-200 bg-white hover:border-blue-300"
+                        ? "timesheet-vacation-border bg-slate-100 text-slate-400"
+                        : "timesheet-vacation-border bg-white"
                       : cellToneByStatus[row.status]),
                     selectedDateKey === cell.dateKey && "ring-2 ring-slate-950 ring-offset-2"
                   )}
+                  data-timesheet-vacation-color={row?.hasVacation ? presetVacationColor : undefined}
                   key={cell.dateKey}
                   onClick={() => setSelectedDateKey(cell.dateKey)}
                   ref={(element) => {
@@ -5044,7 +5107,7 @@ function CalendarView({
                       dateButtonRefs.current.delete(cell.dateKey);
                     }
                   }}
-                  style={getCalendarCellStyle(row)}
+                  style={calendarCellStyle}
                   type="button"
                 >
                   {vacationMixOverlayStyle ? <span aria-hidden="true" className="pointer-events-none absolute inset-0 z-0" style={vacationMixOverlayStyle} /> : null}
@@ -5054,7 +5117,7 @@ function CalendarView({
                       <span
                         className={cn(
                           "flex size-7 items-center justify-center rounded-full text-sm font-bold",
-                          cell.dateKey === todayKey ? "bg-slate-950 text-white" : "text-slate-950"
+                          cell.dateKey === todayKey ? "bg-slate-950 text-white" : row?.status === "HOLIDAY" ? "text-red-600" : "text-slate-950"
                         )}
                       >
                         {cell.day}

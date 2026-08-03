@@ -53,6 +53,23 @@ Custom colors are stored once as the user's raw hex. Calendar fills and summary 
 
 Do not store derived theme colors. Theme changes recalculate the rendered color automatically.
 
+## Timesheet Calendar Integration
+
+The timesheet calendar must use the same effective vacation type colors as the vacation-year calendar. Extend `loadTimesheetMonthAction` to load the selected year's vacation records and the current user's color preferences, then reuse `groupVacationRecordsByName` to return a normalized vacation-name-to-color map with the month payload. This preserves the vacation tab's annual automatic ordering; calculating fallback colors from one month would produce inconsistent colors.
+
+The timesheet workspace keeps color maps by year because month records are cached and navigation can cross a year boundary. Every month-data ingestion path records the returned map for its year. The visible calendar resolves the first vacation entry's normalized name against the visible year's map.
+
+Apply the resolved color to every vacation-specific visual in the timesheet calendar:
+
+- Full-day vacation cell background and border.
+- Partial vacation-only fill.
+- Work-and-vacation mixed overlay.
+- Vacation status badges and dots keep the existing blue `Badge` tone so their meaning stays visually consistent.
+
+Define preset raw colors through CSS data attributes and custom raw hex through `--timesheet-vacation-color`. Shared CSS derives light and dark surface and border values with `color-mix(in oklab, ...)`. Temporary-vacation hatching remains layered above the resolved vacation color. Do not change the blue vacation badges, the timesheet list, or editor styling in this task.
+
+Match the vacation calendar's holiday cue by rendering holiday date numbers in red in the timesheet calendar. Preserve the white date number inside the black today indicator when today is a holiday so the number remains readable. Keep the existing holiday cell surface and badge styling unchanged.
+
 ## Validation And Errors
 
 The server accepts only the six preset IDs, a six-digit hex color, or `null` for automatic mode. It normalizes hex to lowercase and rejects blank vacation names. Database uniqueness guarantees one preference per user and normalized name.
