@@ -51,3 +51,30 @@ concurrency:
 - [x] **Step 4: 정적 검증**
 
 PowerShell로 각 job 블록의 group과 `cancel-in-progress` 값을 검사하고 `git diff --check` 및 `git diff`를 확인한다. 모든 검사는 exit code 0이어야 한다.
+
+### Task 2: PR 검증 중복 제거
+
+**Files:**
+- Modify: `.github/workflows/ci.yml`
+- Modify: `docs/decisions.md`
+
+**Interfaces:**
+- Consumes: 기존 `push`와 `pull_request` trigger
+- Produces: `main` push 및 기본 PR 이벤트별 단일 workflow 실행
+
+- [x] **Step 1: push trigger를 main으로 제한**
+
+```yaml
+on:
+  push:
+    branches: [main]
+  pull_request:
+```
+
+- [x] **Step 2: 기존 결정 문서 갱신**
+
+`docs/decisions.md`의 `2026-08-07` 항목에 PR 브랜치 push의 중복 검증을 제거한다는 결정을 기록한다.
+
+- [x] **Step 3: 정적 검증**
+
+PowerShell로 `push.branches`가 `main`이고 `pull_request`에 이벤트 확장이 없는지 검사한 뒤 `git diff --check`와 전체 diff를 확인한다.

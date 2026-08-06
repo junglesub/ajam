@@ -5,6 +5,7 @@
 - web 배포의 `publish-image`와 `request-dca-deploy`는 같은 `web-deploy-main` concurrency group을 사용한다. 새 web 배포가 준비되면 진행 중인 이전 web 배포를 취소한다.
 - n8n package publish는 별도 `n8n-publish-main` concurrency group에서 직렬 실행한다. 실행 중인 npm publish는 취소하지 않고 완료한 뒤 다음 publish를 실행한다.
 - 배포 concurrency는 배포 job에만 적용하며 PR의 web/n8n 검증 job은 기존처럼 끝까지 실행한다.
+- CI의 `push` trigger는 `main`으로 제한하고 PR은 기본 `opened`, `synchronize`, `reopened` 이벤트를 사용한다. PR 브랜치 push에서 같은 검증이 `push`와 `pull_request`로 중복 실행되지 않게 한다.
 
 ## 2026-05-07
 
