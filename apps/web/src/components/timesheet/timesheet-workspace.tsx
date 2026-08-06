@@ -55,6 +55,7 @@ import {
   Clock3,
   GripVertical,
   ListChecks,
+  LoaderCircle,
   Plus,
   Trash2,
   ArrowDown,
@@ -1124,6 +1125,7 @@ export function TimesheetWorkspace({
   });
   const [viewMode, setViewMode] = useState<ViewMode>("calendar");
   const [isDailyEditorRequested, setIsDailyEditorRequested] = useState(false);
+  const [isCompactViewport, setIsCompactViewport] = useState(false);
   const [showFullListContent, setShowFullListContent] = useState(false);
   const [currentUser, setCurrentUser] = useState(initialCurrentUser);
   const [records, setRecords] = useState<Record<string, TimesheetDayDraft>>(() => buildInitialDrafts(initialMonthData, todayKey));
@@ -1132,6 +1134,7 @@ export function TimesheetWorkspace({
   const [celebratingDateKey, setCelebratingDateKey] = useState("");
   const [selectedEntryIdByDate, setSelectedEntryIdByDate] = useState<Record<string, string>>(() => buildSelectedEntryIds(records));
   const workspaceViewRef = useRef<HTMLElement>(null);
+  const dailyEditorRef = useRef<HTMLElement>(null);
   const closeEditorButtonRef = useRef<HTMLButtonElement>(null);
   const [editingNotionEntryClientId, setEditingNotionEntryClientId] = useState<string | null>(null);
   const [includeDoneNotionCandidates, setIncludeDoneNotionCandidates] = useState(false);
@@ -1225,8 +1228,20 @@ export function TimesheetWorkspace({
   const [monthLoadState, setMonthLoadState] = useState<MonthLoadState>("idle");
   const [monthLoadError, setMonthLoadError] = useState("");
   const [isInitialMonthSyncing, setIsInitialMonthSyncing] = useState(true);
+  const [projectRecommendationLoadingKeys, setProjectRecommendationLoadingKeys] = useState<Set<string>>(() => new Set());
   const [notionRecommendationLoadingKeys, setNotionRecommendationLoadingKeys] = useState<Set<string>>(() => new Set());
   const previousNotionCardRecommendationKeys = useRef(new Set<string>());
+  const isDailyEditorModalActive = isCompactViewport && isDailyEditorRequested;
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 1023px)");
+    const updateViewport = () => setIsCompactViewport(mediaQuery.matches);
+
+    updateViewport();
+    mediaQuery.addEventListener("change", updateViewport);
+
+    return () => mediaQuery.removeEventListener("change", updateViewport);
+  }, []);
 
   useEffect(() => {
     try {
@@ -1412,6 +1427,7 @@ export function TimesheetWorkspace({
   const selectedListRowKey = selectedListTarget ? listRowKey(selectedListTarget.dateKey, selectedListTarget.entryClientId) : "";
   const selectedEditorKind: WorkRecordKind = selectedEntry?.kind ?? (selectedDay.holidayName ? "HOLIDAY" : isFutureDate ? "VACATION" : "WORK");
   const selectedNotionAllocationError = selectedEntry ? getNotionAllocationError(selectedEntry) : "";
+  const isSelectedProjectRecommendationLoading = Boolean(selectedEntry && projectRecommendationLoadingKeys.has(`${selectedDateKey}:${selectedEntry.clientId}`));
   const isSelectedNotionRecommendationLoading = Boolean(selectedEntry && notionRecommendationLoadingKeys.has(`${selectedDateKey}:${selectedEntry.clientId}`));
 
   const monthRows = Object.values(rows).filter((row) => row.dateKey.startsWith(`${monthCursor.year}-${String(monthCursor.monthIndex + 1).padStart(2, "0")}`));
@@ -1701,6 +1717,10 @@ export function TimesheetWorkspace({
   }
 
   async function fillPreviousProjectFromDatabase(dateKey: string, clientId: string) {
+    const loadingKey = `${dateKey}:${clientId}`;
+
+    setProjectRecommendationLoadingKeys((current) => new Set(current).add(loadingKey));
+
     try {
       const project = (await findPreviousProjectAction(dateKey)).trim();
 
@@ -1737,6 +1757,14 @@ export function TimesheetWorkspace({
       });
     } catch {
       // Auto-fill is a convenience path; leave the draft editable if lookup fails.
+    } finally {
+      setProjectRecommendationLoadingKeys((current) => {
+        const next = new Set(current);
+
+        next.delete(loadingKey);
+
+        return next;
+      });
     }
   }
 
@@ -1952,7 +1980,10 @@ export function TimesheetWorkspace({
   function runNavigation(navigation: PendingNavigation) {
     if (navigation.kind === "closeEditor") {
       setIsDailyEditorRequested(false);
-      requestAnimationFrame(() => (document.getElementById(`timesheet-list-row-${selectedListRowKey}`) ?? workspaceViewRef.current)?.focus());
+      requestAnimationFrame(() => (
+        document.getElementById(viewMode === "calendar" ? `timesheet-calendar-date-${selectedDateKey}` : `timesheet-list-row-${selectedListRowKey}`)
+        ?? workspaceViewRef.current
+      )?.focus());
       return;
     }
 
@@ -3471,6 +3502,42 @@ export function TimesheetWorkspace({
   );
 
   useEffect(() => {
+    if (!isDailyEditorModalActive) {
+      return;
+    }
+
+    const originalOverflow = document.body.style.overflow;
+    const frameId = requestAnimationFrame(() => dailyEditorRef.current?.focus());
+
+    document.body.style.overflow = "hidden";
+
+    function handleEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape" && !event.isComposing && !shortcutModalOpen) {
+        event.preventDefault();
+        closeDailyEditor();
+      }
+    }
+
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isDailyEditorModalActive, shortcutModalOpen]);
+
+  useEffect(() => {
+    if (!isDailyEditorModalActive) {
+      return;
+    }
+
+    const frameId = requestAnimationFrame(() => dailyEditorRef.current?.scrollTo({ top: 0 }));
+
+    return () => cancelAnimationFrame(frameId);
+  }, [isDailyEditorModalActive, selectedDateKey]);
+
+  useEffect(() => {
     function handleCalendarShortcut(event: globalThis.KeyboardEvent) {
       if (shouldIgnoreCalendarShortcut(event, shortcutModalOpen) || monthLoadState === "loading") {
         return;
@@ -3904,7 +3971,7 @@ export function TimesheetWorkspace({
             </div>
           </div>
 
-          <div className="grid border-b border-slate-200 bg-slate-50 px-4 py-3 sm:grid-cols-4">
+          <div className="grid grid-cols-4 border-b border-slate-200 bg-slate-50 px-2 py-2 sm:px-4 sm:py-3">
             <Metric icon={CalendarDays} label="업무일" value={`${businessDayCount}일`} />
             <Metric icon={Sparkles} label="입력완료" value={`${completedCount}일`} />
             <Metric icon={Search} label="입력안됨" tone="red" value={`${missingCount}일`} />
@@ -3955,26 +4022,62 @@ export function TimesheetWorkspace({
         </section>
 
         {viewMode === "calendar" || isDailyEditorRequested ? (
+        <div
+          className={cn(
+            isDailyEditorRequested
+              ? "fixed inset-0 z-40 flex items-end justify-center bg-slate-950/35 sm:px-4 sm:py-6 lg:static lg:block lg:bg-transparent lg:p-0"
+              : "hidden lg:block"
+          )}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && isDailyEditorModalActive) {
+              closeDailyEditor();
+            }
+          }}
+          role="presentation"
+        >
         <aside
-          className="rounded-lg border border-slate-200 bg-white shadow-sm"
+          aria-labelledby={isDailyEditorModalActive ? "daily-editor-title" : undefined}
+          aria-modal={isDailyEditorModalActive ? "true" : undefined}
+          className="max-h-[92dvh] w-full overflow-y-auto rounded-t-xl border border-slate-200 bg-white shadow-2xl outline-none sm:max-w-2xl sm:rounded-xl lg:max-h-none lg:max-w-none lg:overflow-visible lg:rounded-lg lg:shadow-sm"
           data-calendar-shortcuts-ignore
           onFocusCapture={() => setIsDailyEditorRequested(true)}
+          ref={dailyEditorRef}
+          role={isDailyEditorModalActive ? "dialog" : undefined}
+          tabIndex={isDailyEditorModalActive ? -1 : undefined}
         >
-          <div className="border-b border-slate-200 px-5 py-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="mt-1 text-2xl font-bold text-slate-950">{formatKoreanDate(selectedDateKey)}</h2>
+          <div className="sticky top-0 z-30 border-b border-slate-200 bg-white px-5 py-4 lg:static">
+            <div className="flex items-center justify-between gap-2 sm:gap-3">
+              <div className="flex min-w-0 items-center gap-1">
+                <button
+                  aria-label="이전 날짜"
+                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 lg:hidden"
+                  disabled={monthLoadState === "loading"}
+                  onClick={() => selectDate(addBusinessDays(selectedDateKey, -1))}
+                  type="button"
+                >
+                  <ChevronLeft aria-hidden="true" className="size-5" />
+                </button>
+                <h2 className="truncate text-lg font-bold text-slate-950 sm:text-xl lg:mt-1 lg:text-2xl" id="daily-editor-title">{formatKoreanDate(selectedDateKey)}</h2>
+                <button
+                  aria-label="다음 날짜"
+                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 lg:hidden"
+                  disabled={monthLoadState === "loading"}
+                  onClick={() => selectDate(addBusinessDays(selectedDateKey, 1))}
+                  type="button"
+                >
+                  <ChevronRight aria-hidden="true" className="size-5" />
+                </button>
               </div>
-              <div className="flex items-center gap-2">
-                {!isViewingToday ? (
-                  <Button className="h-9 px-3" disabled={monthLoadState === "loading"} onClick={goToday} variant="secondary">
+              <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+                {!isViewingToday && !isDailyEditorModalActive ? (
+                  <Button disabled={monthLoadState === "loading"} onClick={goToday} variant="secondary">
                     <RotateCcw aria-hidden="true" className="size-4" />
                     오늘로 돌아가기
                   </Button>
                 ) : null}
-                {viewMode === "list" ? (
+                {viewMode === "list" || isDailyEditorModalActive ? (
                   <button
-                    aria-label="상세 패널 닫기"
+                    aria-label="날짜 상세 닫기"
                     className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
                     onClick={closeDailyEditor}
                     ref={closeEditorButtonRef}
@@ -4047,20 +4150,29 @@ export function TimesheetWorkspace({
                 <>
                   <div className="grid grid-cols-[minmax(0,1fr)_112px] gap-3">
                     <Field label="진행한 프로젝트">
-                      <select
-                        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                        disabled={isFutureWork}
-                        onChange={updateProject}
-                        value={selectedEntry.project}
-                      >
-                        <option value="">프로젝트 선택</option>
-                        {projects.map((project) => (
-                          <option key={project} value={project}>
-                            {project}
-                          </option>
-                        ))}
-                        <option value={newProjectOptionValue}>새 프로젝트 등록...</option>
-                      </select>
+                      <div className="relative">
+                        <select
+                          aria-busy={isSelectedProjectRecommendationLoading}
+                          className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 pr-9 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                          disabled={isFutureWork}
+                          onChange={updateProject}
+                          value={selectedEntry.project}
+                        >
+                          <option value="">프로젝트 선택</option>
+                          {projects.map((project) => (
+                            <option key={project} value={project}>
+                              {project}
+                            </option>
+                          ))}
+                          <option value={newProjectOptionValue}>새 프로젝트 등록...</option>
+                        </select>
+                        {isSelectedProjectRecommendationLoading ? (
+                          <span className="pointer-events-none absolute right-8 top-1/2 inline-flex -translate-y-1/2 text-slate-400" role="status">
+                            <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
+                            <span className="sr-only">이전 프로젝트 불러오는 중</span>
+                          </span>
+                        ) : null}
+                      </div>
                     </Field>
 
                     <Field label="일한 시간">
@@ -4108,7 +4220,7 @@ export function TimesheetWorkspace({
               ) : null
             ) : null}
 
-            <div className="border-t border-slate-100 pt-5">
+            <div className="sticky bottom-0 z-20 -mx-5 -mb-5 border-t border-slate-100 bg-white px-5 pb-5 pt-4 shadow-[0_-8px_20px_-16px_rgba(15,23,42,0.45)] lg:static lg:mx-0 lg:mb-0 lg:px-0 lg:pb-0 lg:pt-5 lg:shadow-none">
               {isSelectedDayScheduledCleanupPending() ? (
                 <p className="mb-3 inline-flex w-full items-center justify-end gap-1 text-right text-xs font-semibold leading-5 text-amber-700">
                   <span>AI 예약 정리 대기 ·</span>
@@ -4191,6 +4303,7 @@ export function TimesheetWorkspace({
             </div>
           ) : null}
         </aside>
+        </div>
         ) : null}
       </div>
 
@@ -4881,13 +4994,18 @@ function Metric({
   value: string;
 }) {
   return (
-    <div className="flex items-center gap-3 border-slate-200 py-2 sm:border-r sm:px-4 sm:last:border-r-0">
-      <div className={cn("flex size-9 items-center justify-center rounded-md bg-white text-slate-500 shadow-sm", tone === "red" && "text-red-600")}>
+    <div
+      aria-label={`${label} ${value}`}
+      className="flex min-w-0 flex-col items-center justify-center gap-1 border-r border-slate-200 px-1 py-1 last:border-r-0 sm:flex-row sm:gap-3 sm:px-4 sm:py-2"
+      role="group"
+      title={`${label} ${value}`}
+    >
+      <div className={cn("flex size-8 shrink-0 items-center justify-center rounded-md bg-white text-slate-500 shadow-sm sm:size-9", tone === "red" && "text-red-600")}>
         <Icon aria-hidden="true" className="size-4" />
       </div>
-      <div>
-        <p className="text-xs font-semibold text-slate-500">{label}</p>
-        <p className={cn("text-lg font-bold text-slate-950", tone === "red" && "text-red-600")}>{value}</p>
+      <div aria-hidden="true" className="hidden min-w-0 text-center min-[360px]:block sm:text-left">
+        <p className="hidden text-xs font-semibold text-slate-500 sm:block">{label}</p>
+        <p className={cn("truncate text-sm font-bold text-slate-950 sm:text-lg", tone === "red" && "text-red-600")}>{value}</p>
       </div>
     </div>
   );
@@ -5058,20 +5176,20 @@ function CalendarView({
   }, [celebratingDateKey]);
 
   return (
-    <div className="p-4">
+    <div className="p-2 sm:p-4">
       <div className="grid grid-cols-5 border-b border-slate-200 pb-2">
         {weekdays.map((weekday) => (
-          <div className="px-2 text-xs font-bold text-slate-400" key={weekday}>
+          <div className="text-center text-xs font-bold text-slate-400 sm:px-2 sm:text-left" key={weekday}>
             {weekday}
           </div>
         ))}
       </div>
-      <div className="grid gap-2 pt-3">
+      <div className="grid gap-1 pt-2 sm:gap-2 sm:pt-3">
         {weeks.map((week, index) => (
-          <div className="grid grid-cols-5 gap-2" key={`${index}-${week.map((cell) => cell?.dateKey ?? "blank").join("-")}`}>
+          <div className="grid grid-cols-5 gap-1 sm:gap-2" key={`${index}-${week.map((cell) => cell?.dateKey ?? "blank").join("-")}`}>
             {week.map((cell, cellIndex) => {
               if (!cell) {
-                return <div className="min-h-32 rounded-md border border-dashed border-slate-100 bg-slate-50/60" key={`blank-${cellIndex}`} />;
+                return <div className="min-h-16 rounded-md border border-dashed border-slate-100 bg-slate-50/60 sm:min-h-24 lg:min-h-32" key={`blank-${cellIndex}`} />;
               }
 
               const row = rows[cell.dateKey];
@@ -5088,7 +5206,7 @@ function CalendarView({
               return (
                 <button
                   className={cn(
-                    "relative flex min-h-32 flex-col justify-between overflow-hidden rounded-md border p-3 text-left transition",
+                    "relative flex min-h-16 flex-col justify-between overflow-hidden rounded-md border p-1.5 text-left transition sm:min-h-24 sm:p-2 lg:min-h-32 lg:p-3",
                     row?.hasVacation && "timesheet-vacation-theme",
                     row && (isPartialVacationOnly
                       ? cell.dateKey > todayKey
@@ -5098,6 +5216,7 @@ function CalendarView({
                     selectedDateKey === cell.dateKey && "ring-2 ring-slate-950 ring-offset-2"
                   )}
                   data-timesheet-vacation-color={row?.hasVacation ? presetVacationColor : undefined}
+                  id={`timesheet-calendar-date-${cell.dateKey}`}
                   key={cell.dateKey}
                   onClick={() => setSelectedDateKey(cell.dateKey)}
                   ref={(element) => {
@@ -5116,7 +5235,7 @@ function CalendarView({
                     <span className="flex items-center gap-0.5">
                       <span
                         className={cn(
-                          "flex size-7 items-center justify-center rounded-full text-sm font-bold",
+                          "flex size-6 items-center justify-center rounded-full text-xs font-bold sm:size-7 sm:text-sm",
                           cell.dateKey === todayKey ? "bg-slate-950 text-white" : row?.status === "HOLIDAY" ? "text-red-600" : "text-slate-950"
                         )}
                       >
@@ -5125,9 +5244,12 @@ function CalendarView({
                       {row && hasTimeMismatch(row) ? <TimeMismatchIcon hours={row.hours} /> : null}
                       {row?.hasNotionCardWarning ? <NotionCardWarningIcon /> : null}
                     </span>
-                    {row ? <CalendarStatusBadges row={row} /> : null}
+                    {row ? <div className="hidden sm:block"><CalendarStatusBadges row={row} /></div> : null}
                   </div>
-                  <div className="relative z-10 mt-3 min-w-0 space-y-1">
+                  <p className="relative z-10 truncate text-center text-[10px] font-semibold text-slate-500 sm:hidden">
+                    {row ? vacationBadgeLabel(row.status, row.vacationStatus) : ""}
+                  </p>
+                  <div className="relative z-10 mt-2 hidden min-w-0 space-y-1 sm:block lg:mt-3">
                     {row?.kind === "WORK" && row.project ? (
                       <div className="flex min-w-0 items-center gap-1">
                         <p className="min-w-0 truncate text-xs font-bold text-slate-950">{row.project}</p>
@@ -5138,7 +5260,7 @@ function CalendarView({
                       {row ? calendarStatusText(row, selectedDateKey === cell.dateKey) : ""}
                     </p>
                   </div>
-                  {row && row.entryCount > 1 ? <span className="absolute bottom-3 right-3 z-20 rounded-full bg-slate-900 px-2 py-0.5 text-xs font-bold text-white">{row.entryCount}</span> : null}
+                  {row && row.entryCount > 1 ? <span className="absolute bottom-1 right-1 z-20 rounded-full bg-slate-900 px-1.5 py-0.5 text-[10px] font-bold text-white sm:bottom-2 sm:right-2 sm:text-xs lg:bottom-3 lg:right-3 lg:px-2">{row.entryCount}</span> : null}
                 </button>
               );
             })}

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The timesheet page supports multiple daily records. A day can contain work, vacation, and holiday entries, but saving is still performed at the day level. The right-side editor is the source of truth for the selected date, and the calendar/list views show saved data plus safe draft previews.
+The timesheet page supports multiple daily records. A day can contain work, vacation, and holiday entries, but saving is still performed at the day level. The responsive daily editor is the source of truth for the selected date: it stays in the right-side panel on desktop and opens as a bottom popup below `lg`. The calendar/list views show saved data plus safe draft previews.
 
 ## Daily Entries
 
@@ -19,6 +19,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - Today or past missing dates open with one default work entry.
 - The default work entry uses the previous work project's project when it can be predicted from loaded drafts.
 - If loaded drafts do not contain a previous work project, the editor asks the server for the latest saved work project before the selected date and fills it into the draft.
+- While the previous project lookup is loading, its selector shows a compact spinner and remains usable. Previous-date Notion card recommendations keep the existing linked-card skeleton without an additional spinner.
 - If a new unsaved `WORK` entry has no Notion cards, the editor first looks for the latest previously saved `WORK` entry with linked Notion cards in the loaded client state. If found, it computes the recommendation locally and applies it immediately. If not found, it asks the server and shows a loading skeleton while the fallback runs. Open-card checks use the card start/end dates and the user's configured done status values.
 - Users can configure weekday Notion defaults in a separate `요일별 자동 카드` popup on the `Notion 카드` page. When a new `WORK` entry is drafted, enabled defaults for that weekday are applied first with fixed manual hours, and previous-date Notion cards split the remaining entry hours automatically. Links created from weekday defaults use `source = weekday_default` and are excluded from future previous-date recommendations.
 - Weekday default Notion links show a gray `자동` tag at the start of the title line in the editor, reuse available card metric snapshots from loaded candidates or saved records, and the server fallback enriches them with linked hours, work day count, and last worked date so the editor can show the same metric text as manually selected cards.
@@ -34,6 +35,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - The vacation metric counts vacation entries only; holidays are not included.
 - Vacation time is displayed as days when possible, using `8h = 1 day`; remaining partial time is displayed in hours.
 - Completed and missing metrics are based on visible month rows.
+- Monthly metrics stay in one four-column row at every width. Below 360px each metric shows only its labeled icon, from 360px through 639px it shows the icon and value, and from `sm` it restores the label and desktop horizontal layout.
 
 ## Calendar View
 
@@ -42,13 +44,15 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - Plain `Tab` switches between calendar and list views outside the right-side daily record editor. Inside that editor, `Tab` keeps native focus navigation across inputs and buttons; `Shift+Tab` always keeps native backward focus navigation.
 - After selecting a calendar date, the left and right arrow keys move to the previous or next visible business day. The up and down arrow keys move to the same weekday in the previous or next week. Keyboard focus follows the selected date so only the current cell keeps an outline. Crossing a month boundary loads that month through the normal navigation flow.
 - Calendar shortcuts are ignored while using an input, textarea, select, editable content, or popup, and when Ctrl, Cmd, or Alt is held. Key composition and held-key repeats are also ignored.
-- Saved completed work shows the `완료` tag on the right.
-- If a day includes vacation and is not vacation-only, a blue dot appears before the completed/holiday tag.
-- Vacation-only days show the vacation tag with text.
+- Below `sm`, calendar cells use a compact `64px` minimum height and keep only the date, warning icons, a short status label, and the entry count when needed. Project/content previews and full status badges are omitted so the five-column calendar does not clip or overflow.
+- From `sm`, cells restore the full status badge and project/content preview with a `96px` minimum height; from `lg`, the minimum height returns to `128px`.
+- From `sm`, saved completed work shows the `완료` tag on the right.
+- From `sm`, if a day includes vacation and is not vacation-only, a blue dot appears before the completed/holiday tag.
+- From `sm`, vacation-only days show the vacation tag with text.
 - If a day has more than one entry, the entry count appears at the bottom right.
-- If a work day has multiple unique projects, `+N` appears next to the project name.
-- Project names stay on one line.
-- Calendar preview content can use up to two lines and truncates with ellipsis.
+- From `sm`, if a work day has multiple unique projects, `+N` appears next to the project name.
+- From `sm`, project names stay on one line.
+- From `sm`, calendar preview content can use up to two lines and truncates with ellipsis.
 - Saved non-holiday days whose total hours are not `8h` show an orange timer icon next to the date. The icon hover text shows the current total hours.
 - Saved work days with at least one `WORK` entry that has no linked Notion card show a yellow warning icon next to the date.
 - Missing unselected days show `미기입`.
@@ -56,6 +60,9 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - Saved work with empty content shows `(내용 없음)`.
 - Project names are shown only when present; there is no placeholder project text.
 - When a date is saved for the first time in the current session, the calendar cell for that date shows a short confetti burst that expands around the saved cell. Editing an already saved date does not replay the animation.
+- Selecting a calendar date below `lg` opens the daily editor as a bottom popup capped at `92dvh`; the page behind it is scroll-locked, while the date/navigation header and save/action area stay pinned to the popup top and bottom as its form scrolls. At `lg` and above, the same editor remains in the right-side panel.
+- The popup header moves to the previous or next business day without closing. Every date change resets the mobile popup scroll position to the top; crossing a month boundary loads the destination month and keeps the popup open with the same reset behavior.
+- The popup closes from its close button, backdrop, or Escape. Unsaved changes still use the existing confirmation, and focus returns to the selected calendar cell after closing.
 
 ## List View
 
@@ -71,7 +78,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - Entry rows show type, hours, project/vacation/holiday title, content, and English translation.
 - Work content is clamped to two lines and uses `(내용 없음)` when saved empty.
 - Up and down arrow navigation skips date summary bands and continues to move only through selectable entry or missing-date rows.
-- Clicking an entry row selects that date and entry in the right editor.
+- Clicking an entry row selects that date and entry in the desktop right editor or the mobile bottom popup.
 - Saved non-holiday rows whose total hours are not `8h` show the same orange timer icon as the calendar view.
 
 ## Month-End AI Summary

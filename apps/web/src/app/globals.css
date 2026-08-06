@@ -1,6 +1,9 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
 
-@source "../../../../packages/ui/src/**/*.{ts,tsx}";
+@source "../";
+@source "../../../../packages/ui/src";
+
+/* Keep responsive editor spacing on standard utilities for stable PostCSS output. */
 
 @theme {
   --font-sans: "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;

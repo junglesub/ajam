@@ -4,6 +4,7 @@
 
 - Monorepo는 pnpm workspace를 사용한다.
 - 웹 앱은 Next.js App Router와 Tailwind CSS를 사용한다.
+- Tailwind 소스 탐색은 `globals.css`의 `source(none)`과 명시적인 `apps/web/src`, `packages/ui/src` 경로만 사용한다. `.git/orca/workspaces` 아래에서 자동 탐색이 비소스 파일의 깨진 문자열을 임의 유틸리티로 오인하는 것을 방지한다.
 - DB는 SQLite와 Prisma를 사용한다.
 - Prisma 7 SQLite 연결은 `@prisma/adapter-better-sqlite3` adapter를 사용한다.
 - 세션은 httpOnly signed cookie로 시작하고, 세션 시크릿은 env 우선/DB 자동 생성 fallback을 사용한다.
