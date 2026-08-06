@@ -39,6 +39,7 @@ type VacationYearWorkspaceProps = {
   saveVacationAllowanceAction: (year: number, days: number) => Promise<number>;
   saveVacationDateAction: (input: VacationDateInput) => Promise<VacationYearData>;
   saveVacationTypeColorAction: (year: number, name: string, color: string | null) => Promise<VacationYearData>;
+  saveVacationTypeNameAction: (year: number, oldName: string, newName: string) => Promise<VacationYearData>;
 };
 
 function findConnectedVacationDateKeysForTab({
@@ -216,7 +217,8 @@ export function VacationYearWorkspace({
   loadVacationYearAction,
   saveVacationAllowanceAction,
   saveVacationDateAction,
-  saveVacationTypeColorAction
+  saveVacationTypeColorAction,
+  saveVacationTypeNameAction
 }: VacationYearWorkspaceProps) {
   const [year, setYear] = useState(initialYear);
   const [allowanceDays, setAllowanceDays] = useState(initialData.allowanceDays);
@@ -237,6 +239,7 @@ export function VacationYearWorkspace({
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
   const [modalError, setModalError] = useState("");
   const [modalSaving, setModalSaving] = useState(false);
+  const [renameSaving, setRenameSaving] = useState(false);
   const [connectedPrompt, setConnectedPrompt] = useState<ConnectedVacationPrompt | null>(null);
   const [workPreview, setWorkPreview] = useState<VacationWorkDay | null>(null);
   const [workDeleteError, setWorkDeleteError] = useState("");
@@ -299,6 +302,10 @@ export function VacationYearWorkspace({
   }
 
   async function loadYear(nextYear: number, selectedDateKey?: string) {
+    if (renameSaving) {
+      return;
+    }
+
     setYearLoadState("loading");
 
     try {
@@ -365,6 +372,21 @@ export function VacationYearWorkspace({
     const data = await saveVacationTypeColorAction(year, name, color);
     setColorPreferences(data.colorPreferences);
     broadcastViewRefresh("timesheet", "mutation");
+  }
+
+  async function saveVacationTypeName(oldName: string, newName: string) {
+    if (yearLoadState === "loading") {
+      throw new Error("연도 데이터를 불러오는 중입니다.");
+    }
+
+    setRenameSaving(true);
+    try {
+      const data = await saveVacationTypeNameAction(year, oldName, newName);
+      applyVacationYearData(data, { preserveAllowanceDraft: true });
+      broadcastViewRefresh(["vacations", "timesheet", "ai-summary", "projects"], "mutation");
+    } finally {
+      setRenameSaving(false);
+    }
   }
 
   function openDateModal(dateKey: string, data?: VacationYearData) {
@@ -587,7 +609,7 @@ export function VacationYearWorkspace({
 
   useEffect(() => {
     function handleCalendarShortcut(event: KeyboardEvent) {
-      if (shouldIgnoreCalendarShortcut(event, shortcutModalOpen) || yearLoadState === "loading") {
+      if (shouldIgnoreCalendarShortcut(event, shortcutModalOpen) || yearLoadState === "loading" || renameSaving) {
         return;
       }
 
@@ -623,17 +645,17 @@ export function VacationYearWorkspace({
           {holidayWarning ? <p className="mt-1 text-xs font-semibold text-red-600">{holidayWarning}</p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button className="h-9 px-3" disabled={yearLoadState === "loading"} onClick={() => void loadYear(year - 1)} title="이전 연도 (J)" type="button" variant="secondary">
+          <Button className="h-9 px-3" disabled={yearLoadState === "loading" || renameSaving} onClick={() => void loadYear(year - 1)} title="이전 연도 (J)" type="button" variant="secondary">
             <ChevronLeft aria-hidden="true" className="size-4" />
             이전
           </Button>
           <div className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-950">{year}</div>
-          <Button className="h-9 px-3" disabled={yearLoadState === "loading"} onClick={() => void loadYear(year + 1)} title="다음 연도 (K)" type="button" variant="secondary">
+          <Button className="h-9 px-3" disabled={yearLoadState === "loading" || renameSaving} onClick={() => void loadYear(year + 1)} title="다음 연도 (K)" type="button" variant="secondary">
             다음
             <ChevronRight aria-hidden="true" className="size-4" />
           </Button>
           {year !== todayYear ? (
-            <Button className="h-9 px-3" disabled={yearLoadState === "loading"} onClick={() => void loadYear(todayYear)} title="올해 (T)" type="button" variant="ghost">
+            <Button className="h-9 px-3" disabled={yearLoadState === "loading" || renameSaving} onClick={() => void loadYear(todayYear)} title="올해 (T)" type="button" variant="ghost">
               올해
             </Button>
           ) : null}
@@ -668,12 +690,14 @@ export function VacationYearWorkspace({
           colorPreferences={colorPreferences}
           groups={groups}
           metricSummary={metricSummary}
+          nameSaveDisabled={yearLoadState === "loading"}
           onAllowanceChange={(value) => {
             setAllowanceDraft(value);
             setAllowanceState("idle");
           }}
           onAllowanceSave={() => void saveAllowance()}
           onColorSave={saveVacationTypeColor}
+          onNameSave={saveVacationTypeName}
           saveState={allowanceState}
         />
       </div>

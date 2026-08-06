@@ -78,6 +78,7 @@
 - `/timesheet` 서버 컴포넌트가 서버 기준 현재 월의 기록, 공휴일, 프로젝트, 휴가, 사용자/설정 데이터를 조회해 클라이언트 작업 공간에 전달하고, 클라이언트는 브라우저 기준 현재 월과 다르면 해당 월을 추가 조회한다.
 - `/timesheet` 월 데이터는 해당 연도의 휴가 기록과 `VacationTypeColorPreference`로 계산한 최종 유형별 색상도 포함한다. 클라이언트는 이를 연도별로 캐시하고 전체 휴가 셀, 부분 휴가, 업무 혼합 overlay, 휴가 badge에 같은 CSS 색상 토큰을 적용한다.
 - `/vacations`는 선택 연도의 `VacationAllowance`, `Vacation`, `Holiday` 데이터를 조회해 연간 휴가 캘린더와 유형별 요약을 표시한다. 휴가 입력/수정/삭제는 기존 timesheet 저장 경로를 사용하되 같은 날짜의 업무/공휴일 기록은 보존한다.
+- `/vacations`의 유형 이름 변경은 현재 사용자와 선택 연도 범위에서 화면과 같은 정규화 이름을 가진 `TimesheetEntry`와 레거시 `Vacation` 행을 한 트랜잭션으로 갱신한다. 새 이름이 기존 유형과 같으면 집계 결과에서 합쳐지며 시간, 상태, 날짜와 색상 설정은 변경하지 않는다.
 - `/vacations`는 사용자의 전체 `VacationTypeColorPreference`도 함께 읽는다. 저장된 유형 색상이 있으면 자동 순위 색상보다 우선하고, 없으면 기존 여섯 색상 순환을 유지한다. 사용자 지정 hex는 CSS `color-mix(in oklab, ...)`가 현재 테마에 맞는 tint로 렌더링한다.
 - 월 이동 시 클라이언트가 server action으로 해당 월 데이터를 추가 조회한다.
 - 헤더 새로고침 버튼은 현재 화면 범위를 다시 읽고, 같은 브라우저에서 같은 화면/같은 key를 보는 다른 aJam 창에는 `BroadcastChannel`로 읽은 payload를 공유한다.

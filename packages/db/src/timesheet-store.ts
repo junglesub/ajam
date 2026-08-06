@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { allocateNotionCardHours, type TimesheetEntryNotionCardDraft, type VacationStatus } from "@timesheet/domain";
+import { allocateNotionCardHours, normalizeVacationName, type TimesheetEntryNotionCardDraft, type VacationStatus } from "@timesheet/domain";
 
 import { prisma } from "./client";
 import { ensureNotionSchema } from "./notion-store";
@@ -769,6 +769,63 @@ export async function listVacations(params: { endDateKey: string; startDateKey: 
   const rows = [...entryRows, ...legacyRows.filter((row) => !entryDateKeys.has(row.dateKey))];
 
   return rows.map((row) => ({ ...row, status: normalizeVacationStatus(row.status) })).sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+}
+
+export async function renameVacationTypeForYear(params: {
+  endDateKey: string;
+  newName: string;
+  oldName: string;
+  startDateKey: string;
+  userId: string;
+}): Promise<number> {
+  await ensureTimesheetSchema();
+
+  const newName = params.newName.trim();
+  if (!newName) {
+    throw new Error("휴가 유형 이름을 확인해 주세요.");
+  }
+
+  const oldName = normalizeVacationName(params.oldName);
+
+  return prisma.$transaction(async (transaction) => {
+    const [entryRows, legacyRows] = await Promise.all([
+      transaction.$queryRawUnsafe<Array<{ id: string; name: string }>>(
+        `SELECT "id", "vacationName" AS "name" FROM "TimesheetEntry"
+         WHERE "userId" = ? AND "dateKey" BETWEEN ? AND ? AND "kind" = 'VACATION'`,
+        params.userId,
+        params.startDateKey,
+        params.endDateKey
+      ),
+      transaction.$queryRawUnsafe<Array<{ id: string; name: string }>>(
+        `SELECT "id", "name" FROM "Vacation" WHERE "userId" = ? AND "dateKey" BETWEEN ? AND ?`,
+        params.userId,
+        params.startDateKey,
+        params.endDateKey
+      )
+    ]);
+    const entryIds = entryRows.filter((row) => normalizeVacationName(row.name) === oldName).map((row) => row.id);
+    const legacyIds = legacyRows.filter((row) => normalizeVacationName(row.name) === oldName).map((row) => row.id);
+    const entryCount = entryIds.length
+      ? await transaction.$executeRawUnsafe(
+          `UPDATE "TimesheetEntry" SET "vacationName" = ?, "updatedAt" = CURRENT_TIMESTAMP
+           WHERE "userId" = ? AND "kind" = 'VACATION' AND "id" IN (${entryIds.map(() => "?").join(", ")})`,
+          newName,
+          params.userId,
+          ...entryIds
+        )
+      : 0;
+    const legacyCount = legacyIds.length
+      ? await transaction.$executeRawUnsafe(
+          `UPDATE "Vacation" SET "name" = ?, "updatedAt" = CURRENT_TIMESTAMP
+           WHERE "userId" = ? AND "id" IN (${legacyIds.map(() => "?").join(", ")})`,
+          newName,
+          params.userId,
+          ...legacyIds
+        )
+      : 0;
+
+    return entryCount + legacyCount;
+  });
 }
 
 export async function getVacationAllowance(params: { userId: string; year: number }): Promise<VacationAllowanceRecord | null> {

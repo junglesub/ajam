@@ -7,6 +7,7 @@ import {
   listHolidays,
   listTimesheetEntries,
   listVacations,
+  renameVacationTypeForYear,
   saveTimesheetDay,
   setVacationTypeColorPreference,
   upsertVacationAllowance,
@@ -14,7 +15,7 @@ import {
   type StoredTimesheetEntry,
   type VacationRecord
 } from "@timesheet/db";
-import { createEmptyDraft, createEmptyEntryDraft, getYearRange, isWeekendDateKey, normalizeVacationColor, parseDateKey, toBrowserDateKey, type VacationStatus } from "@timesheet/domain";
+import { createEmptyDraft, createEmptyEntryDraft, getYearRange, isWeekendDateKey, normalizeVacationColor, normalizeVacationName, parseDateKey, toBrowserDateKey, type VacationStatus } from "@timesheet/domain";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -324,6 +325,35 @@ export async function saveVacationTypeColorAction(year: number, name: string, co
   }
 
   await setVacationTypeColorPreference({ color: normalizedColor, name, userId: user.id });
+  revalidatePath("/vacations");
+
+  return loadVacationYearAction(year);
+}
+
+export async function saveVacationTypeNameAction(year: number, oldName: string, newName: string): Promise<VacationYearData> {
+  const user = await requireSessionUser();
+  assertValidYear(year);
+
+  const name = newName.trim();
+  if (!name) {
+    throw new Error("휴가 유형 이름을 확인해 주세요.");
+  }
+
+  if (normalizeVacationName(oldName) === name) {
+    return loadVacationYearAction(year);
+  }
+
+  const changed = await renameVacationTypeForYear({
+    ...getYearRange(year),
+    newName: name,
+    oldName,
+    userId: user.id
+  });
+  if (changed === 0) {
+    throw new Error("변경할 휴가를 찾지 못했습니다.");
+  }
+
+  revalidatePath("/timesheet");
   revalidatePath("/vacations");
 
   return loadVacationYearAction(year);

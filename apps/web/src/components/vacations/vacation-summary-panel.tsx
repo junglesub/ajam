@@ -1,9 +1,9 @@
 "use client";
 
 import { VACATION_COLOR_PRESETS, type VacationColor, type VacationColorPreset, type VacationYearGroup, type VacationYearMetricSummary } from "@timesheet/domain";
-import { Input, Label, cn } from "@timesheet/ui";
+import { Button, Input, Label, cn } from "@timesheet/ui";
 import { Pencil } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 
 type VacationSummaryPanelProps = {
   allowanceDraft: string;
@@ -11,9 +11,11 @@ type VacationSummaryPanelProps = {
   colorPreferences: Record<string, VacationColor>;
   groups: VacationYearGroup[];
   metricSummary: VacationYearMetricSummary;
+  nameSaveDisabled: boolean;
   onAllowanceChange: (value: string) => void;
   onAllowanceSave: () => void;
   onColorSave: (name: string, color: string | null) => Promise<void>;
+  onNameSave: (oldName: string, newName: string) => Promise<void>;
   saveState: "error" | "idle" | "saved" | "saving";
 };
 
@@ -78,9 +80,11 @@ export function VacationSummaryPanel({
   colorPreferences,
   groups,
   metricSummary,
+  nameSaveDisabled,
   onAllowanceChange,
   onAllowanceSave,
   onColorSave,
+  onNameSave,
   saveState
 }: VacationSummaryPanelProps) {
   const { confirmed, withTemporary } = metricSummary;
@@ -88,6 +92,10 @@ export function VacationSummaryPanel({
   const [customColor, setCustomColor] = useState("#3b82f6");
   const [savingName, setSavingName] = useState("");
   const [colorError, setColorError] = useState("");
+  const [editingName, setEditingName] = useState("");
+  const [nameDraft, setNameDraft] = useState("");
+  const [renameError, setRenameError] = useState("");
+  const [savingRename, setSavingRename] = useState(false);
   const customColorInputRef = useRef<HTMLInputElement>(null);
 
   const saveColor = useCallback(async (name: string, color: string | null) => {
@@ -114,6 +122,33 @@ export function VacationSummaryPanel({
     input.addEventListener("change", commitColor);
     return () => input.removeEventListener("change", commitColor);
   }, [openName, saveColor]);
+
+  async function saveName(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const name = nameDraft.trim();
+    if (!name) {
+      setRenameError("휴가 유형 이름을 입력해 주세요.");
+      return;
+    }
+
+    if (name === editingName) {
+      setEditingName("");
+      return;
+    }
+
+    setSavingRename(true);
+    setRenameError("");
+
+    try {
+      await onNameSave(editingName, name);
+      setEditingName("");
+    } catch {
+      setRenameError("휴가 유형 이름을 변경하지 못했습니다.");
+    } finally {
+      setSavingRename(false);
+    }
+  }
 
   return (
     <aside className="space-y-4">
@@ -173,7 +208,21 @@ export function VacationSummaryPanel({
                       style={{ "--vacation-custom-color": isCustom ? group.color : undefined } as CSSProperties}
                       type="button"
                     />
-                    <span className="truncate font-bold text-slate-800">{group.name}</span>
+                    <button
+                      aria-expanded={editingName === group.name}
+                      aria-label={`${group.name} 이름 변경`}
+                      className="truncate text-left font-bold text-slate-800 underline-offset-2 hover:underline focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-slate-950"
+                      disabled={nameSaveDisabled}
+                      onClick={() => {
+                        const isOpen = editingName === group.name;
+                        setEditingName(isOpen ? "" : group.name);
+                        setNameDraft(group.name);
+                        setRenameError("");
+                      }}
+                      type="button"
+                    >
+                      {group.name}
+                    </button>
                   </span>
                   <span className="shrink-0 text-right">
                     <span className="block font-black text-slate-950">{formatDays(group.confirmedDays)}</span>
@@ -189,6 +238,36 @@ export function VacationSummaryPanel({
                     ) : null}
                   </span>
                 </div>
+                {editingName === group.name ? (
+                  <form className="mt-3 rounded-md bg-slate-50 p-3" onSubmit={(event) => void saveName(event)}>
+                    <Input
+                      aria-label={`${group.name} 새 이름`}
+                      autoFocus
+                      disabled={savingRename || nameSaveDisabled}
+                      onChange={(event) => setNameDraft(event.target.value)}
+                      value={nameDraft}
+                    />
+                    <div className="mt-2 flex justify-end gap-2">
+                      <Button
+                        className="h-8 px-3 text-xs"
+                        disabled={savingRename || nameSaveDisabled}
+                        onClick={() => {
+                          setEditingName("");
+                          setRenameError("");
+                        }}
+                        variant="secondary"
+                      >
+                        취소
+                      </Button>
+                      <Button className="h-8 px-3 text-xs" disabled={savingRename || nameSaveDisabled} type="submit">
+                        변경
+                      </Button>
+                    </div>
+                    <p aria-live="polite" className={cn("mt-2 text-xs font-semibold", renameError ? "text-red-600" : "text-slate-500")}>
+                      {savingRename ? "변경 중" : renameError}
+                    </p>
+                  </form>
+                ) : null}
                 {openName === group.name ? (
                   <div className="mt-3 rounded-md bg-slate-50 p-3">
                     <div className="flex flex-wrap items-center gap-2">

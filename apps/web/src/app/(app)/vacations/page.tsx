@@ -9,7 +9,8 @@ import {
   loadVacationYearAction,
   saveVacationAllowanceAction,
   saveVacationDateAction,
-  saveVacationTypeColorAction
+  saveVacationTypeColorAction,
+  saveVacationTypeNameAction
 } from "./actions";
 
 export const metadata: Metadata = {
@@ -32,6 +33,7 @@ export default async function VacationsPage() {
       saveVacationAllowanceAction={saveVacationAllowanceAction}
       saveVacationDateAction={saveVacationDateAction}
       saveVacationTypeColorAction={saveVacationTypeColorAction}
+      saveVacationTypeNameAction={saveVacationTypeNameAction}
     />
   );
 }

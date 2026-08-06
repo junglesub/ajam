@@ -76,6 +76,7 @@ export {
   listTimesheetAiRewriteRequests,
   listTimesheetEntries,
   listVacations,
+  renameVacationTypeForYear,
   renameProject,
   resetHolidayCache,
   saveTimesheetDay,
