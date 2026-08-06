@@ -1,0 +1,8 @@
+scripts:
+  setup: |
+    copy /Y "%ORCA_ROOT_PATH%\packages\db\prisma\dev.db" "%ORCA_WORKTREE_PATH%\packages\db\prisma\dev.db"
+
+    corepack enable
+    corepack pnpm install
+    pnpm db:generate
+    pnpm db:seed
