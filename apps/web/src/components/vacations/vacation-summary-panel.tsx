@@ -56,11 +56,18 @@ function MetricCard({
   label: string;
   value: string;
 }) {
+  const isNegative = value.startsWith("-");
+  const isInclusiveNegative = inclusiveValue.startsWith("-");
+
   return (
     <div className="rounded-md bg-slate-50 p-3">
       <p className="text-xs font-bold text-slate-500">{label}</p>
-      <p className="text-lg font-black text-slate-950">{value}</p>
-      <p className="mt-1 text-[10px] font-bold leading-tight text-slate-500">임시 포함 {inclusiveValue}</p>
+      <p className={cn("text-lg font-black", isNegative ? "text-red-600" : "text-slate-950")}>{value}</p>
+      {value !== inclusiveValue ? (
+        <p className={cn("mt-1 text-[10px] font-bold leading-tight", isInclusiveNegative ? "text-red-700" : "text-slate-500")}>
+          임시 포함 {inclusiveValue}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -170,7 +177,16 @@ export function VacationSummaryPanel({
                   </span>
                   <span className="shrink-0 text-right">
                     <span className="block font-black text-slate-950">{formatDays(group.confirmedDays)}</span>
-                    <span className="block text-[10px] font-bold leading-tight text-slate-500">임시 포함 {formatDays(group.withTemporaryDays)}</span>
+                    {group.confirmedDays !== group.withTemporaryDays ? (
+                      <span
+                        className={cn(
+                          "block text-[10px] font-bold leading-tight",
+                          formatDays(group.withTemporaryDays).startsWith("-") ? "text-red-700" : "text-slate-500"
+                        )}
+                      >
+                        임시 포함 {formatDays(group.withTemporaryDays)}
+                      </span>
+                    ) : null}
                   </span>
                 </div>
                 {openName === group.name ? (
