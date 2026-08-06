@@ -31,6 +31,7 @@ type AppSettingsButtonProps = {
   currentUser: ManagedUser;
   initialHolidayApiKey: string;
   initialManagedUsers: ManagedUser[];
+  showLabel?: boolean;
 };
 
 const aiModelPresets = [
@@ -59,7 +60,8 @@ export function AppSettingsButton({
   aiSetting: initialAiSetting,
   currentUser,
   initialHolidayApiKey,
-  initialManagedUsers
+  initialManagedUsers,
+  showLabel = false
 }: AppSettingsButtonProps) {
   const [open, setOpen] = useState(false);
   const [profileUsername, setProfileUsername] = useState(currentUser.username);
@@ -237,12 +239,15 @@ export function AppSettingsButton({
     <>
       <button
         aria-label="설정 열기"
-        className="inline-flex size-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
+        className={showLabel
+          ? "inline-flex h-10 w-full items-center justify-start gap-3 rounded-md px-3 text-sm font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
+          : "inline-flex size-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"}
         onClick={openSettings}
         title="설정"
         type="button"
       >
         <Settings aria-hidden="true" className="size-5" strokeWidth={2.4} />
+        {showLabel ? <span>설정</span> : null}
       </button>
 
       {open ? createPortal(

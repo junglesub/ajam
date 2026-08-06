@@ -14,11 +14,17 @@ const navItems = [
   { href: "/projects", icon: FolderKanban, label: "프로젝트 관리" }
 ];
 
-export function AppNav() {
+type AppNavProps = {
+  onNavigate?: () => void;
+  variant?: "desktop" | "sidebar";
+};
+
+export function AppNav({ onNavigate, variant = "desktop" }: AppNavProps) {
   const pathname = usePathname();
+  const isSidebar = variant === "sidebar";
 
   return (
-    <nav aria-label="주요 메뉴" className="flex flex-wrap items-center gap-1">
+    <nav aria-label="주요 메뉴" className={isSidebar ? "flex flex-col gap-1" : "flex flex-wrap items-center gap-1"}>
       {navItems.map((item) => {
         const Icon = item.icon;
         const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
@@ -27,13 +33,16 @@ export function AppNav() {
           <Link
             aria-current={isActive ? "page" : undefined}
             className={cn(
-              "inline-flex h-9 items-center gap-2 border-b-2 border-transparent px-2.5 text-sm font-bold text-slate-500 transition hover:border-slate-200 hover:text-slate-950",
-              isActive && "border-slate-950 text-slate-950"
+              isSidebar
+                ? "inline-flex h-11 w-full items-center gap-3 rounded-md border border-transparent px-3 text-sm font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
+                : "inline-flex h-9 items-center gap-2 border-b-2 border-transparent px-2.5 text-sm font-bold text-slate-500 transition hover:border-slate-200 hover:text-slate-950",
+              isActive && (isSidebar ? "border-slate-200 bg-slate-100 text-slate-950" : "border-slate-950 text-slate-950")
             )}
             href={item.href}
             key={item.href}
+            onClick={onNavigate}
           >
-            <Icon aria-hidden="true" className="size-4" />
+            <Icon aria-hidden="true" className={isSidebar ? "size-5" : "size-4"} />
             {item.label}
           </Link>
         );
