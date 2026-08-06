@@ -1,11 +1,11 @@
-import { CalendarDays, Languages, MousePointerClick, PanelsTopLeft, ShieldCheck, Umbrella } from "lucide-react";
+import { CalendarDays, Languages, MousePointerClick, PanelsTopLeft, Umbrella } from "lucide-react";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { getBuildInfo } from "@/lib/build-info";
 import { getSession } from "@/server/session";
 
-import { LoginForm } from "./login-form";
+import { LoginContainer } from "./login-container";
 
 export const metadata: Metadata = {
   title: {
@@ -76,7 +76,7 @@ export default async function LoginPage({
   searchParams
 }: {
   searchParams: Promise<{ next?: string }>;
-}) {
+}): Promise<React.JSX.Element> {
   const session = await getSession();
   const buildInfo = getBuildInfo();
   const params = await searchParams;
@@ -88,62 +88,45 @@ export default async function LoginPage({
 
   return (
     <main
-      className="grid min-h-screen grid-cols-1 bg-slate-950 text-white lg:h-screen lg:grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)] min-[1281px]:overflow-hidden"
+      className="relative grid min-h-screen grid-cols-1 bg-slate-950 text-white lg:h-screen lg:grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)] min-[1281px]:overflow-hidden"
       data-footer-scope="auth"
     >
-      <section className="flex min-h-0 flex-col px-6 py-7 sm:px-10 lg:px-12 lg:py-8">
-        <div>
+      <LoginContainer next={next}>
+        <section className="flex min-h-0 flex-col px-6 py-7 sm:px-10 lg:px-12 lg:py-8 lg:col-start-1 lg:row-start-1">
           <div>
-            <p className="text-sm font-semibold text-teal-200">aJam</p>
-            <h1 className="mt-2 text-3xl font-bold text-white sm:text-4xl">월말에 급하게 떠올리지 않는 업무 기록</h1>
-          </div>
-        </div>
-
-        <div className="mt-6 grid gap-3 sm:mt-8 sm:grid-cols-2 lg:mt-6 lg:flex-1 lg:content-start">
-          {features.map((item) => {
-              const Icon = item.icon;
-
-              return (
-                <article className="rounded-md border border-white/10 bg-white/[0.06] p-4 shadow-2xl shadow-black/10 backdrop-blur lg:p-3.5" key={item.label}>
-                  <Icon aria-hidden="true" className="size-5 text-teal-200" />
-                  <h2 className="mt-3 text-sm font-semibold text-white">{item.label}</h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-300">{item.text}</p>
-                </article>
-              );
-            })}
-        </div>
-
-        <footer className="mt-6 flex flex-col gap-3 border-t border-white/10 pt-5 text-sm text-slate-400 sm:mt-8 sm:flex-row sm:items-center sm:justify-between lg:mt-6">
-          <p className="font-medium">&copy; {buildInfo.copyrightYear} aJam. All rights reserved.</p>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <a className="font-semibold text-slate-300 transition hover:text-white" href={buildInfo.repositoryUrl} rel="noreferrer" target="_blank">
-              {buildInfo.repositoryLabel}
-            </a>
-            <span className="rounded-full border border-emerald-300/30 bg-emerald-400/10 px-2.5 py-1 font-mono text-xs font-bold text-emerald-200 shadow-sm shadow-emerald-950/20">
-              {buildInfo.version}
-            </span>
-          </div>
-        </footer>
-      </section>
-
-      <section className="flex items-center justify-center bg-slate-50 px-6 py-10 text-slate-950 sm:px-10">
-        <div className="w-full max-w-md">
-          <div className="mb-8 flex items-center gap-3">
-            <div className="flex size-11 items-center justify-center rounded-md bg-slate-950 text-white shadow-lg shadow-slate-950/20">
-              <ShieldCheck aria-hidden="true" className="size-5" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-slate-500">로그인</p>
-              <h2 className="text-2xl font-bold text-slate-950">업무 기록 시작</h2>
+            <div className="pr-24 sm:pr-28 lg:pr-0">
+              <p className="text-sm font-semibold text-teal-200">aJam</p>
+              <h1 className="mt-2 text-3xl font-bold text-white sm:text-4xl">월말에 급하게 떠올리지 않는 업무 기록</h1>
             </div>
           </div>
 
-          <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/70">
-            <LoginForm next={next} />
+          <div className="mt-6 mb-6 grid gap-3 sm:mt-8 sm:mb-8 sm:grid-cols-2 lg:mt-6 lg:mb-6 lg:flex-1 lg:content-start">
+            {features.map((item) => {
+                const Icon = item.icon;
+
+                return (
+                  <article className="rounded-md border border-white/10 bg-white/[0.06] p-4 shadow-2xl shadow-black/10 backdrop-blur lg:p-3.5" key={item.label}>
+                    <Icon aria-hidden="true" className="size-5 text-teal-200" />
+                    <h2 className="mt-3 text-sm font-semibold text-white">{item.label}</h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-300">{item.text}</p>
+                  </article>
+                );
+              })}
           </div>
 
-        </div>
-      </section>
+          <footer className="mt-auto flex flex-col gap-3 border-t border-white/10 pt-5 text-sm text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+            <p className="font-medium">&copy; {buildInfo.copyrightYear} aJam. All rights reserved.</p>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <a className="font-semibold text-slate-300 transition hover:text-white" href={buildInfo.repositoryUrl} rel="noreferrer" target="_blank">
+                {buildInfo.repositoryLabel}
+              </a>
+              <span className="rounded-full border border-emerald-300/30 bg-emerald-400/10 px-2.5 py-1 font-mono text-xs font-bold text-emerald-200 shadow-sm shadow-emerald-950/20">
+                {buildInfo.version}
+              </span>
+            </div>
+          </footer>
+        </section>
+      </LoginContainer>
     </main>
   );
 }
