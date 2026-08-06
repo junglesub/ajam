@@ -55,7 +55,7 @@ export function VacationDateCell({
   return (
     <button
       aria-label={`${dateKey} ${today ? "오늘 " : ""}${holidayName ? `${holidayName} ` : ""}${hasWorkRecord ? "업무 기록 있음 " : ""}${label || "휴가 없음"}`}
-      className="grid aspect-square place-items-center rounded-md p-px outline-none transition focus-visible:ring-2 focus-visible:ring-slate-950"
+      className="grid h-7 place-items-center rounded-md p-px outline-none transition focus-visible:ring-2 focus-visible:ring-slate-950 xl:aspect-square xl:h-auto"
       onClick={() => onClick(dateKey)}
       onMouseEnter={() => onHover(dateKey)}
       onMouseLeave={onLeave}

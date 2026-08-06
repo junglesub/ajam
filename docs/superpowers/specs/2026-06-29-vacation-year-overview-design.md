@@ -4,7 +4,7 @@
 
 aJam already stores vacation data through the timesheet flow. A saved vacation entry is synchronized into the `Vacation` table by `dateKey`, `name`, and `hours`, and the timesheet UI already has logic for connected vacation ranges. The new 휴가 tab should build on that data instead of creating a separate vacation source.
 
-The user approved the calendar-first direction: a compact full-year view where January through December are visible together, with each workday represented by a small circular date marker inside a square hit area. Weekday headers use `M T W T F`.
+The user approved the calendar-first direction: a compact full-year view where January through December are visible together, with each workday represented by a small circular date marker inside a responsive hit area. Weekday headers use `M T W T F`.
 
 ## Goals
 
@@ -32,10 +32,12 @@ Each month is compact:
 
 - Month title at the top.
 - Wide desktop layouts show six months per row so January through June fit on the first row.
+- The month grid uses two columns below 550px, three from 550px, four from `md`, five from `lg`, and six from `xl`, keeping the full year compact without horizontal scrolling.
+- The vacation summary remains below the calendar until `2xl`; only then does it move to the 320px side rail so the six-column calendar is not squeezed at intermediate widths.
 - Weekday header is `M T W T F`.
 - Weekends are omitted, matching the existing business-day calendar pattern.
 - Empty leading cells keep the weekday alignment.
-- Each date has a dense square clickable hitbox with a circular date marker centered inside.
+- Below `xl`, each date uses a compact fixed-height clickable row cell; from `xl`, it uses a square hitbox. The circular date marker stays centered inside.
 - Plain dates do not paint a circle background; dates with a saved work record use the subtle circle background.
 - Today's date has a distinct static thick outline regardless of work, vacation, or holiday state.
 - The circular marker contains the day number and a bottom-up fill showing the vacation-hour ratio against an 8-hour day.
@@ -131,7 +133,7 @@ Create a vacation feature area under `apps/web/src/components/vacations`:
 
 - `vacation-year-workspace.tsx`: client workspace for selected year, allowance editing, metrics, hover state, modal state, and action calls.
 - `vacation-year-calendar.tsx`: renders 12 compact business-month calendars.
-- `vacation-date-cell.tsx`: square hitbox plus circular fill marker.
+- `vacation-date-cell.tsx`: responsive compact/square hitbox plus circular fill marker.
 - `vacation-summary-panel.tsx`: annual metrics and grouped type totals.
 - `vacation-edit-modal.tsx`: create/edit/delete modal with single-date and connected-date actions.
 
@@ -179,7 +181,7 @@ When implementing, update:
 
 - Use calendar-first layout.
 - Use `M T W T F` weekday headers.
-- Use square date hitboxes with circular date markers.
+- Use compact fixed-height date hitboxes below `xl` and square hitboxes from `xl`, with circular date markers.
 - Support modal-based input and editing.
 - Preserve existing connected-vacation logic for hover/edit grouping.
 - Use medium hover emphasis: static outline and soft glow, with no animation.

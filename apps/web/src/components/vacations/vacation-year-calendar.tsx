@@ -50,12 +50,12 @@ export function VacationYearCalendar({
 
   return (
     <section className="min-w-0 rounded-md border border-slate-200 bg-white shadow-sm">
-      <div className="grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-1.5 p-2 min-[550px]:grid-cols-3 sm:gap-2 sm:p-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
         {Array.from({ length: 12 }, (_, monthIndex) => {
           const weeks = getBusinessCalendarWeeks(year, monthIndex);
 
           return (
-            <div className="rounded-md border border-slate-200 bg-white p-1.5" key={monthIndex}>
+            <div className="rounded-md border border-slate-200 bg-white p-1 sm:p-1.5" key={monthIndex}>
               <h2 className="mb-1.5 text-sm font-bold text-slate-950">{monthIndex + 1}월</h2>
               <div className="grid grid-cols-5 gap-0.5">
                 {weekdayLabels.map((label, index) => (
@@ -69,7 +69,7 @@ export function VacationYearCalendar({
                   <div className="grid grid-cols-5 gap-0.5" key={`${monthIndex}-${weekIndex}`}>
                     {week.map((cell, cellIndex) => {
                       if (!cell) {
-                        return <div className="aspect-square" key={`blank-${cellIndex}`} />;
+                        return <div className="h-7 xl:aspect-square xl:h-auto" key={`blank-${cellIndex}`} />;
                       }
 
                       const dayVacations = vacationsByDate.get(cell.dateKey) ?? [];
