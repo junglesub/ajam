@@ -157,6 +157,9 @@ jobs:
 
   publish-image:
     runs-on: ubuntu-latest
+    concurrency:
+      group: web-deploy-main
+      cancel-in-progress: true
     needs: [changes, verify-image]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.image == 'true'
     permissions:
@@ -195,6 +198,9 @@ jobs:
 
   request-dca-deploy:
     runs-on: ubuntu-latest
+    concurrency:
+      group: web-deploy-main
+      cancel-in-progress: true
     needs: [changes, publish-image]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.image == 'true' && needs.publish-image.result == 'success'
     env:
@@ -211,6 +217,9 @@ jobs:
 
   publish-n8n-node:
     runs-on: ubuntu-latest
+    concurrency:
+      group: n8n-publish-main
+      cancel-in-progress: false
     needs: [changes, verify-n8n-node]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.n8n_node_version == 'true'
     permissions:

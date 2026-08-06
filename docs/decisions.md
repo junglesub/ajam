@@ -1,5 +1,11 @@
 # Decisions
 
+## 2026-08-07
+
+- web 배포의 `publish-image`와 `request-dca-deploy`는 같은 `web-deploy-main` concurrency group을 사용한다. 새 web 배포가 준비되면 진행 중인 이전 web 배포를 취소한다.
+- n8n package publish는 별도 `n8n-publish-main` concurrency group에서 직렬 실행한다. 실행 중인 npm publish는 취소하지 않고 완료한 뒤 다음 publish를 실행한다.
+- 배포 concurrency는 배포 job에만 적용하며 PR의 web/n8n 검증 job은 기존처럼 끝까지 실행한다.
+
 ## 2026-05-07
 
 - Monorepo는 pnpm workspace를 사용한다.
