@@ -45,10 +45,10 @@ Use `h-7 xl:aspect-square xl:h-auto` for both empty and interactive date cells s
 
 - [x] **Step 2: Prevent the summary rail from squeezing the calendar**
 
-Move the workspace side-rail breakpoint from `xl` to `2xl`:
+Move the workspace side-rail breakpoint to `xl`:
 
 ```tsx
-<div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_320px]">
+<div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
 ```
 
 - [x] **Step 3: Run final verification**

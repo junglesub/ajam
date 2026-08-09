@@ -33,7 +33,7 @@ Each month is compact:
 - Month title at the top.
 - Wide desktop layouts show six months per row so January through June fit on the first row.
 - The month grid uses two columns below 550px, three from 550px, four from `md`, five from `lg`, and six from `xl`, keeping the full year compact without horizontal scrolling.
-- The vacation summary remains below the calendar until `2xl`; only then does it move to the 320px side rail so the six-column calendar is not squeezed at intermediate widths.
+- The vacation summary remains below the calendar until `xl`; only then does it move to the 320px side rail.
 - Weekday header is `M T W T F`.
 - Weekends are omitted, matching the existing business-day calendar pattern.
 - Empty leading cells keep the weekday alignment.
