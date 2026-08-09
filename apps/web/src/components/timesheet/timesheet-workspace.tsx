@@ -73,6 +73,7 @@ import { logoutAction } from "@/app/(app)/timesheet/actions";
 import { AppLoadingOverlay, AppLoadingScreen } from "@/components/app-loading-screen";
 import { NotionCardLinkSection } from "./notion-card-link-section";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
+import { WeekendRelaxView } from "./weekend-relax-view";
 import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidate, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
 import { ThemeSetting } from "@/components/theme-setting";
 import { adjacentListTarget, shouldIgnoreCalendarShortcut } from "@/lib/calendar-shortcuts";
@@ -1443,6 +1444,7 @@ export function TimesheetWorkspace({
       ? `${vacationDays}일`
       : `${vacationRemainderHours}시간`;
   const isViewingToday = selectedDateKey === todayKey;
+  const isSelectedWeekend = isWeekendDateKey(selectedDateKey);
   const isFutureWork = false;
   const shortcutModifierKey = useMemo(() => getSystemModifierKey(), []);
   const editorKindOptions = isFutureDate ? kindOptions.filter((option) => option.value !== "WORK") : kindOptions;
@@ -1826,7 +1828,7 @@ export function TimesheetWorkspace({
   }
 
   function recommendPreviousProjectForDraft(dateKey: string, day: TimesheetDayDraft | undefined) {
-    if (savedEntryDateKeys.has(dateKey)) {
+    if (isWeekendDateKey(dateKey) || savedEntryDateKeys.has(dateKey)) {
       return;
     }
 
@@ -1838,7 +1840,7 @@ export function TimesheetWorkspace({
   }
 
   function recommendPreviousNotionCardsForDraft(dateKey: string, day: TimesheetDayDraft | undefined) {
-    if (savedEntryDateKeys.has(dateKey)) {
+    if (isWeekendDateKey(dateKey) || savedEntryDateKeys.has(dateKey)) {
       return;
     }
 
@@ -1921,6 +1923,10 @@ export function TimesheetWorkspace({
   }
 
   function prepareDraftForDate(dateKey: string, currentTodayKey = todayKey) {
+    if (isWeekendDateKey(dateKey)) {
+      return;
+    }
+
     if (records[dateKey]) {
       recommendPreviousProjectForDraft(dateKey, records[dateKey]);
       recommendPreviousNotionCardsForDraft(dateKey, records[dateKey]);
@@ -3455,7 +3461,7 @@ export function TimesheetWorkspace({
   }
 
   function isSaveDisabled() {
-    return isFutureWork || saveState === "saving" || deleteState === "deleting" || vacationRangeState === "saving";
+    return isSelectedWeekend || isFutureWork || saveState === "saving" || deleteState === "deleting" || vacationRangeState === "saving";
   }
 
   function requestDeleteSelectedDate() {
@@ -4090,7 +4096,14 @@ export function TimesheetWorkspace({
             </div>
           </div>
 
-          <div className={cn("space-y-5 p-5", isFutureWork && "opacity-70")}>
+          {isSelectedWeekend ? (
+            <WeekendRelaxView
+              dateKey={selectedDateKey}
+              onNavigateNextBusinessDay={() => selectDate(addBusinessDays(selectedDateKey, 1))}
+              onNavigatePreviousBusinessDay={() => selectDate(addBusinessDays(selectedDateKey, -1))}
+            />
+          ) : (
+            <div className={cn("space-y-5 p-5", isFutureWork && "opacity-70")}>
             {selectedHasWork ? (
               <Field label="짧은 버전">
                 <Input disabled={isFutureWork} onChange={(event) => updateSelectedShortVersion(event.target.value)} placeholder="월간 캘린더에 표시할 한 줄 요약" value={selectedDay.shortVersion} />
@@ -4296,8 +4309,9 @@ export function TimesheetWorkspace({
               ) : null}
             </div>
           </div>
+          )}
 
-          {isFutureWork ? (
+          {!isSelectedWeekend && isFutureWork ? (
             <div className="mx-5 mb-5 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-500">
               미래 날짜는 아직 작성하지 않습니다.
             </div>
