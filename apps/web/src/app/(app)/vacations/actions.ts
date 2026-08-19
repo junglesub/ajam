@@ -1,6 +1,7 @@
 "use server";
 
 import {
+  deleteTimesheetEntry,
   getManagedUser,
   getVacationAllowance,
   listVacationTypeColorPreferences,
@@ -135,6 +136,10 @@ async function getExistingDay(params: { dateKey: string; userId: string }): Prom
     ...createEmptyDraft(params.dateKey),
     aiRewriteRequested: false
   };
+}
+
+function isEffectivelyEmptyDay(day: StoredTimesheetDraft): boolean {
+  return day.entries.length === 0 && !day.shortVersion.trim() && !day.aiRewriteRequested;
 }
 
 async function getLegacyVacationRecord(params: { dateKey: string; existingDay: StoredTimesheetDraft; userId: string }): Promise<VacationRecord | undefined> {
@@ -431,10 +436,14 @@ export async function deleteVacationWorkDateAction(dateKey: string): Promise<Vac
     entries: existingDay.entries.filter((entry) => entry.kind !== "WORK")
   };
 
-  await saveTimesheetDay({
-    day,
-    userId: user.id
-  });
+  if (isEffectivelyEmptyDay(day)) {
+    await deleteTimesheetEntry({ dateKey, userId: user.id });
+  } else {
+    await saveTimesheetDay({
+      day,
+      userId: user.id
+    });
+  }
 
   revalidatePath("/timesheet");
   revalidatePath("/vacations");
@@ -459,10 +468,14 @@ export async function deleteVacationDateAction(dateKey: string, status: Vacation
     entries: existingDay.entries.filter((entry) => entry.kind !== "VACATION" || entry.vacationStatus !== status || entry.vacationName.trim() !== name.trim())
   };
 
-  await saveTimesheetDay({
-    day,
-    userId: user.id
-  });
+  if (isEffectivelyEmptyDay(day)) {
+    await deleteTimesheetEntry({ dateKey, userId: user.id });
+  } else {
+    await saveTimesheetDay({
+      day,
+      userId: user.id
+    });
+  }
 
   revalidatePath("/timesheet");
   revalidatePath("/vacations");

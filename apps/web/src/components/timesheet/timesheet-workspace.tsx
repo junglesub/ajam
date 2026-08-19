@@ -1927,18 +1927,23 @@ export function TimesheetWorkspace({
       return;
     }
 
-    if (records[dateKey]) {
-      recommendPreviousProjectForDraft(dateKey, records[dateKey]);
-      recommendPreviousNotionCardsForDraft(dateKey, records[dateKey]);
+    const existing = records[dateKey];
+
+    if (existing?.entries.length) {
+      recommendPreviousProjectForDraft(dateKey, existing);
+      recommendPreviousNotionCardsForDraft(dateKey, existing);
       return;
     }
 
-    const draft = dateKey > currentTodayKey ? createFutureDraftForDate(dateKey) : createDraftForDate(dateKey, records);
+    const baseDraft = dateKey > currentTodayKey ? createFutureDraftForDate(dateKey) : createDraftForDate(dateKey, records);
+    const draft = existing ? { ...existing, entries: baseDraft.entries } : baseDraft;
 
     setRecords((current) => {
-      if (current[dateKey]) {
-        recommendPreviousProjectForDraft(dateKey, current[dateKey]);
-        recommendPreviousNotionCardsForDraft(dateKey, current[dateKey]);
+      const currentDay = current[dateKey];
+
+      if (currentDay?.entries.length) {
+        recommendPreviousProjectForDraft(dateKey, currentDay);
+        recommendPreviousNotionCardsForDraft(dateKey, currentDay);
         return current;
       }
 

@@ -9,7 +9,7 @@
   "scripts": {
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
-    "test": "node --import tsx --test src/vacation-color-store.test.ts src/vacation-name-store.test.ts",
+    "test": "node --import tsx --test src/timesheet-store.test.ts src/vacation-color-store.test.ts src/vacation-name-store.test.ts",
     "typecheck": "tsc --noEmit",
     "db:deploy": "pnpm db:seed"
   },

@@ -236,6 +236,10 @@ function normalizeDay(day: StoredTimesheetDay): StoredTimesheetDay {
   };
 }
 
+function isGhostTimesheetDayRow(day: TimesheetDayRow): boolean {
+  return !day.shortVersion.trim() && !day.aiRewriteRequested;
+}
+
 async function hasColumn(tableName: string, columnName: string): Promise<boolean> {
   const rows = await prisma.$queryRawUnsafe<TableInfoRow[]>(`PRAGMA table_info("${tableName}")`);
   return rows.some((row) => row.name === columnName);
@@ -487,6 +491,10 @@ export async function listTimesheetEntries(params: { endDateKey: string; startDa
   const days = new Map<string, StoredTimesheetDay>();
 
   for (const day of dayRows) {
+    if (isGhostTimesheetDayRow(day)) {
+      continue;
+    }
+
     days.set(day.dateKey, {
       aiRewriteRequested: Boolean(day.aiRewriteRequested),
       dateKey: day.dateKey,
@@ -994,6 +1002,10 @@ async function listTimesheetDaysInTransaction(params: {
   const days = new Map<string, StoredTimesheetDay>();
 
   for (const day of dayRows) {
+    if (isGhostTimesheetDayRow(day)) {
+      continue;
+    }
+
     days.set(day.dateKey, {
       aiRewriteRequested: Boolean(day.aiRewriteRequested),
       dateKey: day.dateKey,
@@ -1040,6 +1052,16 @@ async function saveTimesheetDayInTransaction(params: {
   transaction: TimesheetTransaction;
   userId: string;
 }) {
+  const isEmptyDay = params.day.entries.length === 0 && !params.day.shortVersion.trim() && !params.day.aiRewriteRequested;
+
+  if (isEmptyDay) {
+    await params.transaction.$executeRawUnsafe(`DELETE FROM "WorkEntryNotionCard" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.day.dateKey);
+    await params.transaction.$executeRawUnsafe(`DELETE FROM "TimesheetEntry" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.day.dateKey);
+    await params.transaction.$executeRawUnsafe(`DELETE FROM "TimesheetDay" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.day.dateKey);
+    await params.transaction.$executeRawUnsafe(`DELETE FROM "Vacation" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.day.dateKey);
+    return;
+  }
+
   await params.transaction.$executeRawUnsafe(
     `INSERT INTO "TimesheetDay" ("id", "userId", "dateKey", "shortVersion", "aiRewriteRequested", "createdAt", "updatedAt")
      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
