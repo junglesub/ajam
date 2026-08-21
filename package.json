@@ -15,6 +15,7 @@
     "extension:typecheck": "pnpm --filter @timesheet/extension typecheck",
     "db:generate": "pnpm --filter @timesheet/db db:generate",
     "db:seed": "pnpm --filter @timesheet/db db:seed",
+    "db:seed:dummy": "pnpm --filter @timesheet/db db:seed:dummy",
     "db:deploy": "pnpm db:seed"
   },
   "pnpm": {

@@ -96,3 +96,5 @@ export type {
   VacationAllowanceRecord,
   VacationRecord
 } from "./timesheet-store";
+export { prefillDummyTimesheetData } from "./dummy-prefill";
+export type { DummyPrefillOptions, DummyPrefillResult } from "./dummy-prefill";
