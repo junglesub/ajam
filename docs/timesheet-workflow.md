@@ -2,7 +2,7 @@
 
 ## Overview
 
-The timesheet page supports multiple daily records. A day can contain work, vacation, and holiday entries, but saving is still performed at the day level. The responsive daily editor is the source of truth for the selected date: it stays in the right-side panel on desktop and opens as a bottom popup below `lg`. The calendar/list views show saved data plus safe draft previews.
+The timesheet page supports multiple daily records. A day can contain work, vacation, and holiday entries, but saving is still performed at the day level. The responsive daily editor is the source of truth for the selected date: it stays in the right-side panel on desktop and opens as a bottom popup below `lg`. On desktop the calendar view keeps the right-side editor permanently visible in a two-column layout with no close button. In the list view the right-side editor shows a header `X` button; clicking it collapses the editor so the list uses the full width, and selecting any list row or focusing an editor control reopens it. The page scrolls naturally on desktop; only the right daily editor panel is sticky with its own internal scroll so it stays in view while scrolling through a long calendar or list. The calendar/list views show saved data plus safe draft previews.
 
 ## Daily Entries
 
@@ -52,6 +52,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - From `sm`, vacation-only days show the vacation tag with text.
 - If a day has more than one entry, the entry count appears at the bottom right.
 - From `sm`, if a work day has multiple unique projects, `+N` appears next to the project name.
+- Calendar cells stay clean and do not show Notion card chips; linked card details appear in the right daily editor panel and in the list view instead.
 - From `sm`, project names stay on one line.
 - From `sm`, calendar preview content can use up to two lines and truncates with ellipsis.
 - Saved non-holiday days whose total hours are not `8h` show an orange timer icon next to the date. The icon hover text shows the current total hours.
@@ -61,7 +62,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - Saved work with empty content shows `(내용 없음)`.
 - Project names are shown only when present; there is no placeholder project text.
 - When a date is saved for the first time in the current session, the calendar cell for that date shows a short confetti burst that expands around the saved cell. Editing an already saved date does not replay the animation.
-- Selecting a calendar date below `lg` opens the daily editor as a bottom popup capped at `92dvh`; the page behind it is scroll-locked, while the date/navigation header and save/action area stay pinned to the popup top and bottom as its form scrolls. At `lg` and above, the same editor remains in the right-side panel.
+- Selecting a calendar date below `lg` opens the daily editor as a bottom popup capped at `92dvh`; the page behind it is scroll-locked, while the date/navigation header and save/action area stay pinned to the popup top and bottom as its form scrolls. At `lg` and above, the same editor remains permanently visible in the right-side panel in the calendar view with no close button.
 - The popup header moves to the previous or next business day without closing. Every date change resets the mobile popup scroll position to the top; crossing a month boundary loads the destination month and keeps the popup open with the same reset behavior.
 - The popup closes from its close button, backdrop, or Escape. Unsaved changes still use the existing confirmation, and focus returns to the selected calendar cell after closing.
 
@@ -69,14 +70,19 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 
 - The list header shows an icon-only `내용 전체 보기` toggle immediately before the today button. Plain `F` toggles the same preference outside the daily editor and popup. The view keeps the normal compact two-line display when off and shows complete work content and English translations with preserved line breaks when on.
 - The full-content preference is stored under `timesheet:list:show-full-content` in browser `localStorage`. It defaults to off and is not synchronized to other browsers or devices.
-- The list initially uses the full workspace width and does not show the daily editor when the user switches views immediately after opening the page. Selecting a calendar date or list row, or focusing an editor control to start editing, records explicit editor intent and keeps the editor open across later calendar/list switches.
-- The list editor header has an `X` button that returns the list to full width. If the current draft is dirty, the existing unsaved-change confirmation appears first; confirming restores the last saved draft before closing, while canceling keeps the editor open. Selecting another row opens the editor again. The calendar keeps its editor visible.
+- The page scrolls naturally on desktop; the list table and calendar view use normal document flow. Only the right daily editor panel is sticky on desktop (`lg:sticky lg:top-4 lg:self-start`) with its own internal scroll (`lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto`), so it stays visible in viewport while scrolling through a long list or calendar. Below `lg` no fixed heights are applied: the page scrolls normally, the footer sits naturally at the bottom of the page, and the editor opens as a bottom popup.
+- On desktop (`lg:`) the daily editor stays permanently visible in the right-side panel in the calendar view. In the list view the editor appears when a list row is selected or an editor control is focused, so list rows can show and edit Notion card links; the header `X` button collapses the right panel to full width, and selecting a list row or focusing an editor control reopens it and records explicit editor intent. Below `lg`, the list uses the full workspace width until a calendar date or list row is selected.
+- On mobile and tablet (below `lg`), the list editor opens as a bottom popup whose header `X` button returns the list to full width. If the current draft is dirty, the existing unsaved-change confirmation appears first; confirming restores the last saved draft before closing, while canceling keeps the editor open. Selecting another row opens the editor again. On desktop the list editor stays in the right-hand panel and is collapsed with the same header `X` button; selecting a list row or focusing an editor control reopens it.
 - Up and down arrow keys move through rendered list rows, including separate entries on the same date. Movement stops at the first and last row, and keyboard focus follows the selected row.
 - The list view groups rows under a non-interactive date summary band. The band shows the date, work hours, vacation or holiday information, and spans the saved day-level short version across the project, content, and AI translation columns when present.
 - The short version follows the same full-content preference as work content: compact mode keeps one truncated line, while full-content mode wraps and shows the complete value. Dates without a short version omit that line.
 - Multi-entry days render one row per entry.
 - Missing dates render a single yellow `입력안됨` row.
 - Entry rows show type, hours, project/vacation/holiday title, content, and English translation.
+- Work rows show linked Notion card chips on a second line that starts at the project column and spans the project, content, and AI translation columns underneath the main entry text. Each chip shows the card title, allocated hours (`Xh`), and status; long titles truncate and the full title/hours/status appears in a tooltip.
+- When the row date is a linked card's first or last worked date within the loaded month, the neutral chip keeps its standard styling and only gains a colored badge prefix before the title: `시작` for the first worked date, `종료` for the last, and `시작/종료` when a single date is both. All other dates show no badge.
+- The daily editor places the Notion card link section at the bottom, after work content and English translation fields. Linked cards in the right daily editor panel and in the list view keep their standard neutral card and chip styling and only show a colored `시작`, `종료`, or `시작/종료` badge prefix for first/last/single worked dates; calendar cells do not show these badges.
+- When a work entry has no linked Notion card, or its allocated card hours do not match the entry hours, a warning icon appears next to the status badge. The list header and date summary band also show a warning icon when any row warns.
 - Work content is clamped to two lines and uses `(내용 없음)` when saved empty.
 - Up and down arrow navigation skips date summary bands and continues to move only through selectable entry or missing-date rows.
 - Clicking an entry row selects that date and entry in the desktop right editor or the mobile bottom popup.

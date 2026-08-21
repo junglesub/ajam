@@ -2,7 +2,9 @@
 
 import { Plus, RotateCcw, X } from "lucide-react";
 
-import type { TimesheetEntryDraft } from "@timesheet/domain";
+import type { NotionCardWorkDateRange, TimesheetEntryDraft } from "@timesheet/domain";
+import { getNotionCardWorkDateRole } from "@timesheet/domain";
+import { cn } from "@timesheet/ui";
 
 import { formatNotionDurationCompact } from "../notion-cards/duration-format";
 import type { NotionCardCandidate } from "./use-notion-card-candidates";
@@ -17,6 +19,8 @@ type NotionCardLinkSectionProps = {
   onOpenPicker: () => void;
   onRemoveCard: (notionPageId: string) => void;
   onResetAutoAllocation: () => void;
+  cardDateRanges?: Map<string, NotionCardWorkDateRange>;
+  selectedDateKey?: string;
 };
 
 export function NotionCardLinkSection({
@@ -28,7 +32,9 @@ export function NotionCardLinkSection({
   onAllocatedHoursChange,
   onOpenPicker,
   onRemoveCard,
-  onResetAutoAllocation
+  onResetAutoAllocation,
+  cardDateRanges,
+  selectedDateKey
 }: NotionCardLinkSectionProps) {
   if (entry.kind !== "WORK") {
     return null;
@@ -48,6 +54,14 @@ export function NotionCardLinkSection({
             const lastWorkedDate = link.lastWorkedDate ?? card?.lastWorkedDate;
             const hasMetrics = linkedHours !== undefined || Boolean(lastWorkedDate);
             const isWeekdayDefault = link.source === "weekday_default";
+            const role = cardDateRanges && selectedDateKey ? getNotionCardWorkDateRole(selectedDateKey, link.notionPageId, cardDateRanges) : "none";
+            const roleBadge = role === "first"
+              ? { className: "border border-emerald-300 bg-emerald-100 text-emerald-800", label: "시작" }
+              : role === "last"
+                ? { className: "border border-purple-300 bg-purple-100 text-purple-800", label: "종료" }
+                : role === "single"
+                  ? { className: "border border-teal-300 bg-teal-100 text-teal-800", label: "시작/종료" }
+                  : null;
 
             return (
               <div
@@ -55,10 +69,15 @@ export function NotionCardLinkSection({
                 key={link.notionPageId}
               >
                 <div className="min-w-0">
-                  <span className="flex min-w-0 items-center gap-1">
+                  <span className="flex min-w-0 items-center gap-1 mb-1">
                     {isWeekdayDefault ? (
                       <span className="shrink-0 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-extrabold leading-none text-slate-500">
                         자동
+                      </span>
+                    ) : null}
+                    {roleBadge ? (
+                      <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px] font-extrabold leading-none", roleBadge.className)}>
+                        {roleBadge.label}
                       </span>
                     ) : null}
                     <span className="min-w-0 truncate font-bold text-slate-950">{title}</span>

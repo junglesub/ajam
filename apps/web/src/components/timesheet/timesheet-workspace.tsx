@@ -30,6 +30,8 @@ import {
   getBusinessDateKeysUntil,
   getDisplayContent,
   getMonthLabel,
+  getNotionCardWorkDateRanges,
+  getNotionCardWorkDateRole,
   isWeekendDateKey,
   normalizeVacationName,
   parseDateKey,
@@ -820,6 +822,10 @@ function effectiveEntryHours(entry: TimesheetEntryDraft): number {
   return entry.kind === "HOLIDAY" && entry.hours === 0 ? fullDayHours : entry.hours;
 }
 
+function formatAllocatedHours(hours: number): string {
+  return `${Number(hours.toFixed(2))}h`;
+}
+
 function hasHolidayMarker(day: TimesheetDayDraft | undefined): boolean {
   return Boolean(day?.holidayName || day?.entries.some((entry) => entry.kind === "HOLIDAY"));
 }
@@ -1431,6 +1437,14 @@ export function TimesheetWorkspace({
   const isSelectedProjectRecommendationLoading = Boolean(selectedEntry && projectRecommendationLoadingKeys.has(`${selectedDateKey}:${selectedEntry.clientId}`));
   const isSelectedNotionRecommendationLoading = Boolean(selectedEntry && notionRecommendationLoadingKeys.has(`${selectedDateKey}:${selectedEntry.clientId}`));
 
+  const monthDateKeys = useMemo(
+    () => Object.keys(rows).filter((dateKey) => dateKey.startsWith(`${monthCursor.year}-${String(monthCursor.monthIndex + 1).padStart(2, "0")}`)),
+    [monthCursor.monthIndex, monthCursor.year, rows]
+  );
+  const monthCardDateRanges = useMemo(
+    () => getNotionCardWorkDateRanges(monthDateKeys.map((k) => rows[k]!).filter(Boolean)),
+    [monthDateKeys, rows]
+  );
   const monthRows = Object.values(rows).filter((row) => row.dateKey.startsWith(`${monthCursor.year}-${String(monthCursor.monthIndex + 1).padStart(2, "0")}`));
   const businessDayCount = monthRows.filter((row) => row.status !== "HOLIDAY").length;
   const completedCount = monthRows.filter((row) => row.status === "COMPLETED").length;
@@ -3925,7 +3939,8 @@ export function TimesheetWorkspace({
       <div
         className={cn(
           "mx-auto grid max-w-[1600px] gap-4 px-4 pb-0 pt-4",
-          (viewMode === "calendar" || isDailyEditorRequested) && "lg:grid-cols-[minmax(680px,1fr)_420px] xl:grid-cols-[minmax(760px,1fr)_460px]"
+          (viewMode === "calendar" || isDailyEditorRequested) &&
+            "lg:grid-cols-[minmax(680px,1fr)_420px] xl:grid-cols-[minmax(760px,1fr)_460px]"
         )}
         onKeyDown={handleWorkspaceKeyDown}
       >
@@ -4036,8 +4051,8 @@ export function TimesheetWorkspace({
         <div
           className={cn(
             isDailyEditorRequested
-              ? "fixed inset-0 z-40 flex items-end justify-center bg-slate-950/35 sm:px-4 sm:py-6 lg:static lg:block lg:bg-transparent lg:p-0"
-              : "hidden lg:block"
+              ? "fixed inset-0 z-40 flex items-end justify-center bg-slate-950/35 sm:px-4 sm:py-6 lg:sticky lg:top-4 lg:block lg:self-start lg:bg-transparent lg:p-0"
+              : "hidden lg:sticky lg:top-4 lg:block lg:self-start"
           )}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget && isDailyEditorModalActive) {
@@ -4049,9 +4064,11 @@ export function TimesheetWorkspace({
         <aside
           aria-labelledby={isDailyEditorModalActive ? "daily-editor-title" : undefined}
           aria-modal={isDailyEditorModalActive ? "true" : undefined}
-          className="max-h-[92dvh] w-full overflow-y-auto rounded-t-xl border border-slate-200 bg-white shadow-2xl outline-none sm:max-w-2xl sm:rounded-xl lg:max-h-none lg:max-w-none lg:overflow-visible lg:rounded-lg lg:shadow-sm"
+          className="max-h-[92dvh] w-full overflow-y-auto rounded-t-xl border border-slate-200 bg-white shadow-2xl outline-none sm:max-w-2xl sm:rounded-xl lg:max-h-[calc(100vh-2rem)] lg:max-w-none lg:overflow-y-auto lg:rounded-lg lg:shadow-sm"
           data-calendar-shortcuts-ignore
-          onFocusCapture={() => setIsDailyEditorRequested(true)}
+          onFocusCapture={() => {
+            setIsDailyEditorRequested(true);
+          }}
           ref={dailyEditorRef}
           role={isDailyEditorModalActive ? "dialog" : undefined}
           tabIndex={isDailyEditorModalActive ? -1 : undefined}
@@ -4087,15 +4104,15 @@ export function TimesheetWorkspace({
                   </Button>
                 ) : null}
                 {viewMode === "list" || isDailyEditorModalActive ? (
-                  <button
-                    aria-label="날짜 상세 닫기"
-                    className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
-                    onClick={closeDailyEditor}
-                    ref={closeEditorButtonRef}
-                    type="button"
-                  >
-                    <X aria-hidden="true" className="size-5" />
-                  </button>
+                <button
+                  aria-label="날짜 상세 닫기"
+                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
+                  onClick={closeDailyEditor}
+                  ref={closeEditorButtonRef}
+                  type="button"
+                >
+                  <X aria-hidden="true" className="size-5" />
+                </button>
                 ) : null}
               </div>
             </div>
@@ -4202,12 +4219,18 @@ export function TimesheetWorkspace({
                     <Textarea disabled={isFutureWork} onChange={(event) => updateSelectedEntry({ content: event.target.value })} placeholder="오늘 진행한 일을 간단히 적어주세요." rows={5} value={selectedEntry.content} />
                   </Field>
 
+                  <Field label="영문 번역본">
+                    <Textarea disabled={isFutureWork} onChange={(event) => updateSelectedAiTranslation(event.target.value)} placeholder="오늘 진행한 일을 영어로 간단히 적어주세요." rows={4} value={selectedEntry.aiTranslation} />
+                  </Field>
+
                   <NotionCardLinkSection
                     allocationError={selectedNotionAllocationError}
                     candidates={notionCandidates.candidatesByDate[selectedDateKey] ?? []}
+                    cardDateRanges={monthCardDateRanges}
                     disabled={isFutureWork}
                     entry={selectedEntry}
                     isAutoLoading={isSelectedNotionRecommendationLoading}
+                    selectedDateKey={selectedDateKey}
                     onAllocatedHoursChange={(notionPageId, allocatedHours) => updateNotionCardAllocatedHours(selectedEntry.clientId || selectedEntry.id, notionPageId, allocatedHours)}
                     onOpenPicker={() => {
                       setIncludeDoneNotionCandidates(false);
@@ -4221,10 +4244,6 @@ export function TimesheetWorkspace({
                     onRemoveCard={(notionPageId) => toggleNotionCardForEntry(selectedEntry.clientId || selectedEntry.id, notionPageId)}
                     onResetAutoAllocation={() => resetNotionCardAutoAllocation(selectedEntry.clientId || selectedEntry.id)}
                   />
-
-                  <Field label="영문 번역본">
-                    <Textarea disabled={isFutureWork} onChange={(event) => updateSelectedAiTranslation(event.target.value)} placeholder="오늘 진행한 일을 영어로 간단히 적어주세요." rows={4} value={selectedEntry.aiTranslation} />
-                  </Field>
                 </>
               ) : selectedEntry.kind === "VACATION" ? (
                 <>
@@ -5311,6 +5330,7 @@ function ListView({
 }) {
   const rowButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const previousSelectedRowKeyRef = useRef(selectedRowKey);
+  const cardDateRanges = useMemo(() => getNotionCardWorkDateRanges(dateKeys.map((dateKey) => rows[dateKey]!).filter(Boolean)), [dateKeys, rows]);
 
   useEffect(() => {
     if (previousSelectedRowKeyRef.current === selectedRowKey) {
@@ -5409,6 +5429,33 @@ function ListView({
                       <span className="truncate font-medium text-slate-700">{entryTitle(entry)}</span>
                       <span className={cn("min-w-0 break-words text-slate-600", showFullContent ? "whitespace-pre-wrap" : "line-clamp-2")}>{entryContent}</span>
                       <span className={cn("min-w-0 break-words text-slate-500", showFullContent ? "whitespace-pre-wrap" : "line-clamp-2")}>{entryTranslation}</span>
+                      {entry.kind === "WORK" && entry.notionCards.length > 0 ? (
+                        <span className="col-span-3 col-start-3 flex min-w-0 flex-wrap items-center gap-1.5 pt-1">
+                          {entry.notionCards.map((card) => {
+                            const role = getNotionCardWorkDateRole(dateKey, card.notionPageId, cardDateRanges);
+                            const roleBadge = role === "first"
+                              ? { className: "bg-emerald-200/80 text-emerald-800", label: "시작" }
+                              : role === "last"
+                                ? { className: "bg-purple-200/80 text-purple-800", label: "종료" }
+                                : role === "single"
+                                  ? { className: "bg-teal-200/80 text-teal-800", label: "시작/종료" }
+                                  : null;
+
+                            return (
+                              <span
+                                className="inline-flex min-w-0 max-w-full items-center gap-1 rounded border border-slate-200 bg-slate-100/70 px-1.5 py-0.5 text-[11px] font-semibold text-slate-700"
+                                key={card.notionPageId}
+                                title={`${card.title || card.notionPageId} · ${formatAllocatedHours(card.allocatedHours)}${card.status ? ` · ${card.status}` : ""}`}
+                              >
+                                {roleBadge ? <span className={`shrink-0 rounded px-1 py-0.2 text-[10px] font-bold ${roleBadge.className}`}>{roleBadge.label}</span> : null}
+                                <span className="min-w-0 truncate">{card.title || card.notionPageId}</span>
+                                <span className="shrink-0 font-bold text-slate-950">{formatAllocatedHours(card.allocatedHours)}</span>
+                                {card.status ? <span className="shrink-0 text-[10px] text-slate-400">{card.status}</span> : null}
+                              </span>
+                            );
+                          })}
+                        </span>
+                      ) : null}
                     </button>
                   );
                 })}
