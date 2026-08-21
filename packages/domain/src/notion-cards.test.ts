@@ -7,6 +7,8 @@ import {
   buildNotionCategorySummary,
   buildNotionCardEstimate,
   filterOpenNotionCardCandidates,
+  getNotionCardWorkDateRanges,
+  getNotionCardWorkDateRole,
   normalizeNotionDateToDateKey,
   shouldWarnAboutFallbackHours,
   type NotionCardSnapshot,
@@ -319,5 +321,82 @@ describe("Notion category summary", () => {
       { cardCount: 1, category: "미분류", estimatedHours: 4, linkedHours: 2 },
       { cardCount: 1, category: "Ops", estimatedHours: 3, linkedHours: 1 }
     ]);
+  });
+});
+
+describe("Notion card work date ranges", () => {
+  it("collects sorted first and last worked dates per card across days and entries", () => {
+    const ranges = getNotionCardWorkDateRanges([
+      {
+        dateKey: "2026-06-03",
+        entries: [{ kind: "WORK", notionCards: [{ notionPageId: "card-a" }] }]
+      },
+      {
+        dateKey: "2026-06-01",
+        entries: [
+          { kind: "WORK", notionCards: [{ notionPageId: "card-a" }, { notionPageId: "card-b" }] }
+        ]
+      },
+      {
+        dateKey: "2026-06-02",
+        entries: [{ kind: "VACATION", notionCards: [{ notionPageId: "card-c" }] }]
+      },
+      {
+        dateKey: "2026-06-04",
+        entries: [{ kind: "WORK", notionCards: [] }]
+      }
+    ]);
+
+    assert.equal(ranges.size, 2);
+    assert.deepEqual(ranges.get("card-a"), { firstDateKey: "2026-06-01", lastDateKey: "2026-06-03", totalDays: 2 });
+    assert.deepEqual(ranges.get("card-b"), { firstDateKey: "2026-06-01", lastDateKey: "2026-06-01", totalDays: 1 });
+  });
+
+  it("ignores cards without a page id", () => {
+    const ranges = getNotionCardWorkDateRanges([
+      {
+        dateKey: "2026-06-01",
+        entries: [{ kind: "WORK", notionCards: [{ notionPageId: "" }] }]
+      }
+    ]);
+
+    assert.equal(ranges.size, 0);
+  });
+});
+
+describe("Notion card work date role", () => {
+  const ranges = getNotionCardWorkDateRanges([
+    {
+      dateKey: "2026-06-02",
+      entries: [{ kind: "WORK", notionCards: [{ notionPageId: "card-multi" }] }]
+    },
+    {
+      dateKey: "2026-06-05",
+      entries: [{ kind: "WORK", notionCards: [{ notionPageId: "card-multi" }] }]
+    },
+    {
+      dateKey: "2026-06-03",
+      entries: [{ kind: "WORK", notionCards: [{ notionPageId: "card-single" }] }]
+    }
+  ]);
+
+  it("returns first for the earliest worked date of a multi-day card", () => {
+    assert.equal(getNotionCardWorkDateRole("2026-06-02", "card-multi", ranges), "first");
+  });
+
+  it("returns last for the latest worked date of a multi-day card", () => {
+    assert.equal(getNotionCardWorkDateRole("2026-06-05", "card-multi", ranges), "last");
+  });
+
+  it("returns middle for dates between first and last", () => {
+    assert.equal(getNotionCardWorkDateRole("2026-06-03", "card-multi", ranges), "middle");
+  });
+
+  it("returns single when the card was worked on only that one date", () => {
+    assert.equal(getNotionCardWorkDateRole("2026-06-03", "card-single", ranges), "single");
+  });
+
+  it("returns none when the card has no worked dates", () => {
+    assert.equal(getNotionCardWorkDateRole("2026-06-03", "card-unknown", ranges), "none");
   });
 });

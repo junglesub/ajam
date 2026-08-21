@@ -41,6 +41,14 @@ export type NotionCardSummaryInput = {
   notionPageId: string;
 };
 
+export type NotionCardWorkDateRole = "first" | "last" | "single" | "middle" | "none";
+
+export interface NotionCardWorkDateRange {
+  firstDateKey: string;
+  lastDateKey: string;
+  totalDays: number;
+}
+
 export type NotionCategorySummary = {
   cardCount: number;
   category: string;
@@ -273,6 +281,51 @@ export function allocateNotionCardHours({
 
 export function shouldWarnAboutFallbackHours(fallbackDateCount: number): boolean {
   return fallbackDateCount > 0;
+}
+
+export function getNotionCardWorkDateRanges(
+  days: Array<{ dateKey: string; entries: Array<{ kind?: string; notionCards?: Array<{ notionPageId: string }> }> }>
+): Map<string, NotionCardWorkDateRange> {
+  const map = new Map<string, string[]>();
+  for (const day of days) {
+    for (const entry of day.entries) {
+      if (entry.kind === "WORK" && entry.notionCards) {
+        for (const card of entry.notionCards) {
+          if (!card.notionPageId) continue;
+          if (!map.has(card.notionPageId)) {
+            map.set(card.notionPageId, []);
+          }
+          const dates = map.get(card.notionPageId)!;
+          if (!dates.includes(day.dateKey)) {
+            dates.push(day.dateKey);
+          }
+        }
+      }
+    }
+  }
+  const result = new Map<string, NotionCardWorkDateRange>();
+  for (const [pageId, dates] of map.entries()) {
+    dates.sort();
+    result.set(pageId, {
+      firstDateKey: dates[0]!,
+      lastDateKey: dates[dates.length - 1]!,
+      totalDays: dates.length
+    });
+  }
+  return result;
+}
+
+export function getNotionCardWorkDateRole(
+  dateKey: string,
+  notionPageId: string,
+  ranges: Map<string, NotionCardWorkDateRange>
+): NotionCardWorkDateRole {
+  const range = ranges.get(notionPageId);
+  if (!range) return "none";
+  if (range.totalDays === 1 && range.firstDateKey === dateKey) return "single";
+  if (range.firstDateKey === dateKey) return "first";
+  if (range.lastDateKey === dateKey) return "last";
+  return "middle";
 }
 
 export function buildNotionCategorySummary(params: { cards: NotionCardSummaryInput[] }): NotionCategorySummary[] {

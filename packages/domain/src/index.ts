@@ -18,6 +18,8 @@ export {
   buildNotionCategorySummary,
   buildNotionCardEstimate,
   filterOpenNotionCardCandidates,
+  getNotionCardWorkDateRanges,
+  getNotionCardWorkDateRole,
   normalizeNotionDateToDateKey,
   shouldWarnAboutFallbackHours
 } from "./notion-cards";
@@ -26,6 +28,8 @@ export type {
   NotionCardEstimate,
   NotionCardSnapshot,
   NotionCardSummaryInput,
+  NotionCardWorkDateRange,
+  NotionCardWorkDateRole,
   NotionCategorySummary,
   WorkEntryNotionCardLink
 } from "./notion-cards";
