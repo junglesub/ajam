@@ -1442,8 +1442,8 @@ export function TimesheetWorkspace({
     [monthCursor.monthIndex, monthCursor.year, rows]
   );
   const monthCardDateRanges = useMemo(
-    () => getNotionCardWorkDateRanges(monthDateKeys.map((k) => rows[k]!).filter(Boolean)),
-    [monthDateKeys, rows]
+    () => getNotionCardWorkDateRanges(monthDateKeys.map((k) => savedRecords[k]!).filter(Boolean)),
+    [monthDateKeys, savedRecords]
   );
   const monthRows = Object.values(rows).filter((row) => row.dateKey.startsWith(`${monthCursor.year}-${String(monthCursor.monthIndex + 1).padStart(2, "0")}`));
   const businessDayCount = monthRows.filter((row) => row.status !== "HOLIDAY").length;
@@ -4030,6 +4030,7 @@ export function TimesheetWorkspace({
             <ListView
               dateKeys={listDateKeys}
               rows={rows}
+              savedRecords={savedRecords}
               selectedDateKey={selectedDateKey}
               selectedEntryId={selectedEntryId}
               selectedRowKey={selectedListRowKey}
@@ -5312,6 +5313,7 @@ function CalendarView({
 function ListView({
   dateKeys,
   rows,
+  savedRecords,
   selectedEntryId,
   selectedDateKey,
   selectedRowKey,
@@ -5321,6 +5323,7 @@ function ListView({
 }: {
   dateKeys: string[];
   rows: Record<string, TimesheetRow>;
+  savedRecords: Record<string, TimesheetDayDraft>;
   selectedEntryId: string;
   selectedDateKey: string;
   selectedRowKey: string;
@@ -5330,7 +5333,7 @@ function ListView({
 }) {
   const rowButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const previousSelectedRowKeyRef = useRef(selectedRowKey);
-  const cardDateRanges = useMemo(() => getNotionCardWorkDateRanges(dateKeys.map((dateKey) => rows[dateKey]!).filter(Boolean)), [dateKeys, rows]);
+  const cardDateRanges = useMemo(() => getNotionCardWorkDateRanges(dateKeys.map((dateKey) => savedRecords[dateKey]!).filter(Boolean)), [dateKeys, savedRecords]);
 
   useEffect(() => {
     if (previousSelectedRowKeyRef.current === selectedRowKey) {
