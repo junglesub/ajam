@@ -69,6 +69,7 @@ import { NotionCardWarningIcon, truncateContent } from "./timesheet-row-display"
 import { CalendarView } from "./timesheet-calendar-view";
 import { effectiveEntryHours, entryHasNotionCardWarning, entryKindLabel, entryKindTone, entryTitle, firstWorkEntry, getNotionAllocationError, listRowKey } from "./timesheet-entry-display";
 import { ListView } from "./timesheet-list-view";
+import { ProjectCreateModal } from "./timesheet-project-modal";
 import { Field, Metric, ModalShell, ProgressBar, ShortcutHint } from "./timesheet-ui-primitives";
 import { DeleteConfirmModal, NotionSyncErrorModal, PendingNavigationConfirmModal } from "./timesheet-simple-modals";
 import { WeekendRelaxView } from "./weekend-relax-view";
@@ -4400,25 +4401,16 @@ export function TimesheetWorkspace({
       ) : null}
 
       {isProjectModalOpen ? (
-        <ModalShell onClose={closeProjectModal} title="새 프로젝트 등록">
-          <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void addProject(); }}>
-            <Field label="프로젝트명">
-              <Input autoFocus onChange={(event) => setNewProjectName(event.target.value)} placeholder="예: 고객 포털 개선" value={newProjectName} />
-            </Field>
-            {projectAddState === "error" ? <p className="text-sm font-semibold text-red-600">{projectAddError}</p> : null}
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <Button onClick={closeProjectModal} type="button" variant="secondary">
-                취소
-                <ShortcutHint keys={["Esc"]} />
-              </Button>
-              <Button disabled={projectAddState === "saving"} type="submit">
-                <Plus aria-hidden="true" className="size-4" />
-                {projectAddState === "saving" ? "등록 중" : "등록"}
-                <ShortcutHint keys={["↵"]} />
-              </Button>
-            </div>
-          </form>
-        </ModalShell>
+        <ProjectCreateModal
+          error={projectAddState === "error" ? projectAddError : ""}
+          name={newProjectName}
+          onClose={closeProjectModal}
+          onNameChange={setNewProjectName}
+          onSubmit={() => {
+            void addProject();
+          }}
+          saving={projectAddState === "saving"}
+        />
       ) : null}
 
       {isVacationRangeOpen ? (
