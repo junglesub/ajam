@@ -28,7 +28,6 @@ import {
   formatKoreanDate,
   getBusinessCalendarWeeks,
   getBusinessDateKeysUntil,
-  getDisplayContent,
   getMonthLabel,
   getNotionCardWorkDateRole,
   getSavedNotionCardDateRanges,
@@ -49,7 +48,6 @@ import {
 } from "@timesheet/domain";
 import { Badge, Button, Input, Label, SegmentedControl, Textarea, cn } from "@timesheet/ui";
 import {
-  AlertTriangle,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -75,6 +73,7 @@ import { AppLoadingOverlay, AppLoadingScreen } from "@/components/app-loading-sc
 import { NotionCardLinkSection } from "./notion-card-link-section";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
 import { addBusinessDays, addDays, getBusinessDateKeysInRange, getDateKeyMonthCursor, getDefaultSelectedDateForMonth, getInclusiveDateSpan } from "./timesheet-date-utils";
+import { calendarStatusText, draftPreviewText, hasTimeMismatch, NotionCardWarningIcon, TimeMismatchIcon, truncateContent } from "./timesheet-row-display";
 import { WeekendRelaxView } from "./weekend-relax-view";
 import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidate, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
 import { ThemeSetting } from "@/components/theme-setting";
@@ -403,16 +402,6 @@ const aiModelPresets = [
   { label: "품질 우선 - gemini-2.5-pro", value: "gemini-2.5-pro" },
   { label: "직접 입력", value: "__custom__" }
 ];
-
-function truncateContent(value: string): string {
-  const trimmed = value.trim();
-
-  if (trimmed.length <= 42) {
-    return trimmed;
-  }
-
-  return `${trimmed.slice(0, 42)}...`;
-}
 
 function createClientId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `entry-${Date.now()}-${Math.random()}`;
@@ -826,10 +815,6 @@ function isAutoProjectOnlyDraft(draft: TimesheetDayDraft | undefined): boolean {
   );
 }
 
-function draftPreviewText(row: TimesheetRow): string {
-  return truncateContent(row.previewContent);
-}
-
 function toHourCents(value: number): number {
   return Math.round(value * 100);
 }
@@ -962,30 +947,6 @@ function toAiRewriteRequest(day: TimesheetDayDraft): TimesheetAiRewriteRequest |
     rewriteRequested,
     shortVersion: day.shortVersion
   };
-}
-
-function statusText(row: TimesheetRow): string {
-  if (row.hasVacation && row.entries.every((entry) => entry.kind === "VACATION")) {
-    return row.vacationName || "휴가";
-  }
-
-  if (row.status === "MISSING") {
-    if (row.kind === "WORK" && row.project.trim() && !draftPreviewText(row)) {
-      return "작성 예정";
-    }
-
-    return draftPreviewText(row) || "미기입";
-  }
-
-  return truncateContent(getDisplayContent(row)) || (row.kind === "WORK" ? "(내용 없음)" : "작성 예정");
-}
-
-function calendarStatusText(row: TimesheetRow, isSelected: boolean): string {
-  if (isSelected && row.status === "MISSING" && row.kind === "WORK" && !draftPreviewText(row)) {
-    return "작성 예정";
-  }
-
-  return statusText(row);
 }
 
 function listSummaryText(row: TimesheetRow, showFullContent = false): string {
@@ -5027,32 +4988,6 @@ function CalendarStatusBadges({ row }: { row: TimesheetRow }) {
       {row.hasVacation ? <VacationDotBadge vacationStatus={row.vacationStatus} /> : null}
       <StatusBadge status={row.status} />
     </div>
-  );
-}
-
-function hasTimeMismatch(row: TimesheetRow): boolean {
-  return row.entryCount > 0 && row.status !== "MISSING" && row.status !== "HOLIDAY" && Math.abs(row.hours - 8) > 0.001;
-}
-
-function TimeMismatchIcon({ hours }: { hours: number }) {
-  return (
-    <span
-      className="inline-flex shrink-0 items-center justify-center text-orange-600"
-      title={`총 시간이 8시간이 아닙니다. 현재 ${hours}h입니다.`}
-    >
-      <Clock3 aria-label="총 시간 경고" className="size-3.5" />
-    </span>
-  );
-}
-
-function NotionCardWarningIcon() {
-  return (
-    <span
-      className="inline-flex shrink-0 items-center justify-center text-amber-500"
-      title="Notion 카드가 없거나 배분 시간이 업무 시간과 맞지 않습니다."
-    >
-      <AlertTriangle aria-label="Notion 카드 경고" className="size-3.5" />
-    </span>
   );
 }
 
