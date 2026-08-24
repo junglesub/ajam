@@ -30,8 +30,8 @@ import {
   getBusinessDateKeysUntil,
   getDisplayContent,
   getMonthLabel,
-  getNotionCardWorkDateRanges,
   getNotionCardWorkDateRole,
+  getSavedNotionCardDateRanges,
   isWeekendDateKey,
   normalizeVacationName,
   parseDateKey,
@@ -1442,7 +1442,7 @@ export function TimesheetWorkspace({
     [monthCursor.monthIndex, monthCursor.year, rows]
   );
   const monthCardDateRanges = useMemo(
-    () => getNotionCardWorkDateRanges(monthDateKeys.map((k) => savedRecords[k]!).filter(Boolean)),
+    () => getSavedNotionCardDateRanges(savedRecords, monthDateKeys),
     [monthDateKeys, savedRecords]
   );
   const monthRows = Object.values(rows).filter((row) => row.dateKey.startsWith(`${monthCursor.year}-${String(monthCursor.monthIndex + 1).padStart(2, "0")}`));
@@ -5333,7 +5333,7 @@ function ListView({
 }) {
   const rowButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const previousSelectedRowKeyRef = useRef(selectedRowKey);
-  const cardDateRanges = useMemo(() => getNotionCardWorkDateRanges(dateKeys.map((dateKey) => savedRecords[dateKey]!).filter(Boolean)), [dateKeys, savedRecords]);
+  const cardDateRanges = useMemo(() => getSavedNotionCardDateRanges(savedRecords, dateKeys), [dateKeys, savedRecords]);
 
   useEffect(() => {
     if (previousSelectedRowKeyRef.current === selectedRowKey) {

@@ -315,6 +315,16 @@ export function getNotionCardWorkDateRanges(
   return result;
 }
 
+export function getSavedNotionCardDateRanges(
+  savedRecords: Record<
+    string,
+    { dateKey: string; entries: Array<{ kind?: string; notionCards?: Array<{ notionPageId: string }> }> }
+  >,
+  dateKeys: string[]
+): Map<string, NotionCardWorkDateRange> {
+  return getNotionCardWorkDateRanges(dateKeys.map((dateKey) => savedRecords[dateKey]!).filter(Boolean));
+}
+
 export function getNotionCardWorkDateRole(
   dateKey: string,
   notionPageId: string,

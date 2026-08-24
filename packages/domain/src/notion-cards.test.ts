@@ -9,6 +9,7 @@ import {
   filterOpenNotionCardCandidates,
   getNotionCardWorkDateRanges,
   getNotionCardWorkDateRole,
+  getSavedNotionCardDateRanges,
   normalizeNotionDateToDateKey,
   shouldWarnAboutFallbackHours,
   type NotionCardSnapshot,
@@ -398,5 +399,101 @@ describe("Notion card work date role", () => {
 
   it("returns none when the card has no worked dates", () => {
     assert.equal(getNotionCardWorkDateRole("2026-06-03", "card-unknown", ranges), "none");
+  });
+});
+
+describe("Saved Notion card date ranges (persisted state only)", () => {
+  const monthDateKeys = ["2026-06-01", "2026-06-02", "2026-06-03", "2026-06-30"];
+  const listDateKeys = ["2026-06-03", "2026-06-02", "2026-06-01"];
+
+  function savedDay(dateKey: string, notionPageIds: string[]) {
+    return {
+      dateKey,
+      entries: [{ kind: "WORK", notionCards: notionPageIds.map((notionPageId) => ({ notionPageId })) }]
+    };
+  }
+
+  it("ignores unsaved drafts: a draft with a linked card does not affect Start/End roles", () => {
+    const records = { "2026-06-01": savedDay("2026-06-01", ["card-a"]) };
+    void records;
+
+    // Only persisted records are passed; the draft above never reaches this call.
+    const ranges = getSavedNotionCardDateRanges({}, monthDateKeys);
+
+    assert.equal(ranges.has("card-a"), false);
+    assert.equal(getNotionCardWorkDateRole("2026-06-01", "card-a", ranges), "none");
+  });
+
+  it("reflects a successful save immediately once the record is added to persisted state", () => {
+    const savedRecords = { "2026-06-01": savedDay("2026-06-01", ["card-a"]) };
+
+    for (const dateKeys of [monthDateKeys, listDateKeys]) {
+      const ranges = getSavedNotionCardDateRanges(savedRecords, dateKeys);
+      assert.equal(getNotionCardWorkDateRole("2026-06-01", "card-a", ranges), "single");
+    }
+  });
+
+  it("keeps using the previous persisted version while an already saved record has unsaved edits", () => {
+    const savedRecords = {
+      "2026-06-01": savedDay("2026-06-01", ["card-a"]),
+      "2026-06-02": savedDay("2026-06-02", ["card-a"])
+    };
+
+    // Draft edit removed the card link on 2026-06-02 but was not saved,
+    // so persisted state still contains both dates.
+    const ranges = getSavedNotionCardDateRanges(savedRecords, monthDateKeys);
+
+    assert.equal(getNotionCardWorkDateRole("2026-06-02", "card-a", ranges), "last");
+  });
+
+  it("leaves roles untouched when a save fails and persisted state does not change", () => {
+    const beforeFailedSave = getSavedNotionCardDateRanges(
+      { "2026-06-01": savedDay("2026-06-01", ["card-a"]) },
+      monthDateKeys
+    );
+
+    const afterFailedSave = getSavedNotionCardDateRanges(
+      { "2026-06-01": savedDay("2026-06-01", ["card-a"]) },
+      monthDateKeys
+    );
+
+    assert.deepEqual(afterFailedSave, beforeFailedSave);
+    assert.equal(getNotionCardWorkDateRole("2026-06-01", "card-a", afterFailedSave), "single");
+  });
+
+  it("scopes CalendarView (month keys) and ListView (list keys) ranges to their own persisted dates", () => {
+    const savedRecords = {
+      "2026-05-29": savedDay("2026-05-29", ["card-may"]),
+      "2026-06-01": savedDay("2026-06-01", ["card-june"]),
+      "2026-07-01": savedDay("2026-07-01", ["card-july"])
+    };
+
+    const calendarRanges = getSavedNotionCardDateRanges(savedRecords, monthDateKeys);
+    assert.equal(calendarRanges.has("card-june"), true);
+    assert.equal(calendarRanges.has("card-may"), false);
+    assert.equal(calendarRanges.has("card-july"), false);
+
+    const listViewRanges = getSavedNotionCardDateRanges(savedRecords, listDateKeys);
+    assert.deepEqual(listViewRanges.get("card-june"), { firstDateKey: "2026-06-01", lastDateKey: "2026-06-01", totalDays: 1 });
+    assert.equal(listViewRanges.has("card-may"), false);
+  });
+
+  it("never derives ranges from drafts even when drafts exist for the same cards", () => {
+    const savedRecords = { "2026-06-01": savedDay("2026-06-01", ["card-a"]) };
+    // The draft extends card-a to 2026-06-02 and adds a draft-only card,
+    // but neither affects roles until saved.
+    const draftRecords = {
+      "2026-06-01": savedDay("2026-06-01", ["card-a", "draft-only-card"]),
+      "2026-06-02": savedDay("2026-06-02", ["card-a"])
+    };
+    void draftRecords;
+
+    const ranges = getSavedNotionCardDateRanges(savedRecords, monthDateKeys);
+
+    assert.equal(ranges.has("draft-only-card"), false);
+    assert.equal(getNotionCardWorkDateRole("2026-06-01", "card-a", ranges), "single");
+    // The unsaved date is not part of the persisted range; "middle" renders no badge.
+    assert.equal(getNotionCardWorkDateRole("2026-06-02", "card-a", ranges), "middle");
+    assert.ok(!["first", "last", "single"].includes(getNotionCardWorkDateRole("2026-06-02", "card-a", ranges)));
   });
 });
