@@ -53,3 +53,42 @@ export function entryKindTone(entry: TimesheetEntryDraft) {
 
   return "green";
 }
+
+export function toHourCents(value: number): number {
+  return Math.round(value * 100);
+}
+
+export function toHoursFromCents(value: number): number {
+  return value / 100;
+}
+
+export function getNotionAllocationError(entry: TimesheetEntryDraft): string {
+  if (entry.kind !== "WORK" || entry.notionCards.length === 0) {
+    return "";
+  }
+
+  if (!Number.isFinite(entry.hours) || entry.hours < 0) {
+    return "업무 시간이 올바르지 않습니다.";
+  }
+
+  if (entry.notionCards.some((link) => !Number.isFinite(link.allocatedHours) || link.allocatedHours < 0)) {
+    return "카드 배분 시간이 올바르지 않습니다.";
+  }
+
+  const entryHourCents = toHourCents(entry.hours);
+  const allocatedHourCents = entry.notionCards.reduce((sum, link) => sum + toHourCents(link.allocatedHours), 0);
+
+  if (allocatedHourCents === entryHourCents) {
+    return "";
+  }
+
+  return `배분 합계 ${toHoursFromCents(allocatedHourCents)}h / 업무 ${toHoursFromCents(entryHourCents)}h`;
+}
+
+export function entryHasNotionCardWarning(entry: TimesheetEntryDraft, isSaved: boolean): boolean {
+  if (entry.kind !== "WORK") {
+    return false;
+  }
+
+  return (isSaved && entry.notionCards.length === 0) || Boolean(getNotionAllocationError(entry));
+}
