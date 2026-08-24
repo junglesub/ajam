@@ -20,6 +20,7 @@ export {
   filterOpenNotionCardCandidates,
   getNotionCardWorkDateRanges,
   getNotionCardWorkDateRole,
+  getSavedNotionCardDateRanges,
   normalizeNotionDateToDateKey,
   shouldWarnAboutFallbackHours
 } from "./notion-cards";
@@ -29,6 +30,7 @@ export type {
   NotionCardSnapshot,
   NotionCardSummaryInput,
   NotionCardWorkDateRange,
+  NotionCardWorkDateRangeDay,
   NotionCardWorkDateRole,
   NotionCategorySummary,
   WorkEntryNotionCardLink

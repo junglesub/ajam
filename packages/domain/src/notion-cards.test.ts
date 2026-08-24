@@ -414,14 +414,24 @@ describe("Saved Notion card date ranges (persisted state only)", () => {
   }
 
   it("ignores unsaved drafts: a draft with a linked card does not affect Start/End roles", () => {
-    const records = { "2026-06-01": savedDay("2026-06-01", ["card-a"]) };
-    void records;
+    // Persisted state: card-a was saved on June 1 only.
+    const savedRecords = { "2026-06-01": savedDay("2026-06-01", ["card-a"]) };
+    // Draft state additionally extends card-a to June 2 (not saved yet).
+    const draftRecords = {
+      "2026-06-01": savedDay("2026-06-01", ["card-a"]),
+      "2026-06-02": savedDay("2026-06-02", ["card-a"])
+    };
 
-    // Only persisted records are passed; the draft above never reaches this call.
-    const ranges = getSavedNotionCardDateRanges({}, monthDateKeys);
+    // Deriving from draft state would produce a different (wrong) result:
+    const draftDerived = getNotionCardWorkDateRanges(Object.values(draftRecords));
+    assert.equal(getNotionCardWorkDateRole("2026-06-01", "card-a", draftDerived), "first");
+    assert.equal(getNotionCardWorkDateRole("2026-06-02", "card-a", draftDerived), "last");
 
-    assert.equal(ranges.has("card-a"), false);
-    assert.equal(getNotionCardWorkDateRole("2026-06-01", "card-a", ranges), "none");
+    // The persisted-only derivation keeps June 1 as a single worked date.
+    const ranges = getSavedNotionCardDateRanges(savedRecords, monthDateKeys);
+
+    assert.deepEqual(ranges.get("card-a"), { firstDateKey: "2026-06-01", lastDateKey: "2026-06-01", totalDays: 1 });
+    assert.equal(getNotionCardWorkDateRole("2026-06-01", "card-a", ranges), "single");
   });
 
   it("reflects a successful save immediately once the record is added to persisted state", () => {
@@ -479,21 +489,24 @@ describe("Saved Notion card date ranges (persisted state only)", () => {
   });
 
   it("never derives ranges from drafts even when drafts exist for the same cards", () => {
+    // Persisted state: card-a was saved on June 1 only.
     const savedRecords = { "2026-06-01": savedDay("2026-06-01", ["card-a"]) };
-    // The draft extends card-a to 2026-06-02 and adds a draft-only card,
-    // but neither affects roles until saved.
+    // Draft state extends card-a to June 2 and links an additional draft-only card.
     const draftRecords = {
       "2026-06-01": savedDay("2026-06-01", ["card-a", "draft-only-card"]),
       "2026-06-02": savedDay("2026-06-02", ["card-a"])
     };
-    void draftRecords;
 
+    // Deriving from draft state would expose the draft-only card and split card-a across two dates:
+    const draftDerived = getNotionCardWorkDateRanges(Object.values(draftRecords));
+    assert.equal(draftDerived.has("draft-only-card"), true);
+    assert.deepEqual(draftDerived.get("card-a"), { firstDateKey: "2026-06-01", lastDateKey: "2026-06-02", totalDays: 2 });
+
+    // The persisted-only derivation ignores both draft effects.
     const ranges = getSavedNotionCardDateRanges(savedRecords, monthDateKeys);
 
     assert.equal(ranges.has("draft-only-card"), false);
+    assert.deepEqual(ranges.get("card-a"), { firstDateKey: "2026-06-01", lastDateKey: "2026-06-01", totalDays: 1 });
     assert.equal(getNotionCardWorkDateRole("2026-06-01", "card-a", ranges), "single");
-    // The unsaved date is not part of the persisted range; "middle" renders no badge.
-    assert.equal(getNotionCardWorkDateRole("2026-06-02", "card-a", ranges), "middle");
-    assert.ok(!["first", "last", "single"].includes(getNotionCardWorkDateRole("2026-06-02", "card-a", ranges)));
   });
 });

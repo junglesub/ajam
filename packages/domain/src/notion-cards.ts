@@ -283,8 +283,13 @@ export function shouldWarnAboutFallbackHours(fallbackDateCount: number): boolean
   return fallbackDateCount > 0;
 }
 
+export type NotionCardWorkDateRangeDay = {
+  dateKey: string;
+  entries: Array<{ kind?: string; notionCards?: Array<{ notionPageId: string }> }>;
+};
+
 export function getNotionCardWorkDateRanges(
-  days: Array<{ dateKey: string; entries: Array<{ kind?: string; notionCards?: Array<{ notionPageId: string }> }> }>
+  days: Array<NotionCardWorkDateRangeDay>
 ): Map<string, NotionCardWorkDateRange> {
   const map = new Map<string, string[]>();
   for (const day of days) {
@@ -316,10 +321,7 @@ export function getNotionCardWorkDateRanges(
 }
 
 export function getSavedNotionCardDateRanges(
-  savedRecords: Record<
-    string,
-    { dateKey: string; entries: Array<{ kind?: string; notionCards?: Array<{ notionPageId: string }> }> }
-  >,
+  savedRecords: Record<string, NotionCardWorkDateRangeDay>,
   dateKeys: string[]
 ): Map<string, NotionCardWorkDateRange> {
   return getNotionCardWorkDateRanges(dateKeys.map((dateKey) => savedRecords[dateKey]!).filter(Boolean));
