@@ -34,7 +34,6 @@ import {
   getSavedNotionCardDateRanges,
   isWeekendDateKey,
   normalizeVacationName,
-  parseDateKey,
   resolveStatus,
   statusLabel,
   toBrowserDateKey,
@@ -75,6 +74,7 @@ import { logoutAction } from "@/app/(app)/timesheet/actions";
 import { AppLoadingOverlay, AppLoadingScreen } from "@/components/app-loading-screen";
 import { NotionCardLinkSection } from "./notion-card-link-section";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
+import { addBusinessDays, addDays, getBusinessDateKeysInRange, getDateKeyMonthCursor, getDefaultSelectedDateForMonth, getInclusiveDateSpan } from "./timesheet-date-utils";
 import { WeekendRelaxView } from "./weekend-relax-view";
 import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidate, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
 import { ThemeSetting } from "@/components/theme-setting";
@@ -416,74 +416,6 @@ function truncateContent(value: string): string {
 
 function createClientId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `entry-${Date.now()}-${Math.random()}`;
-}
-
-function addDays(dateKey: string, days: number): string {
-  const date = parseDateKey(dateKey);
-  date.setDate(date.getDate() + days);
-  return toBrowserDateKey(date);
-}
-
-function addBusinessDays(dateKey: string, direction: -1 | 1): string {
-  let next = addDays(dateKey, direction);
-
-  while (isWeekendDateKey(next)) {
-    next = addDays(next, direction);
-  }
-
-  return next;
-}
-
-function getBusinessDateKeysInRange(startDateKey: string, endDateKey: string): string[] {
-  const start = startDateKey <= endDateKey ? startDateKey : endDateKey;
-  const end = startDateKey <= endDateKey ? endDateKey : startDateKey;
-  const dateKeys: string[] = [];
-  const cursor = parseDateKey(start);
-
-  while (toBrowserDateKey(cursor) <= end) {
-    const dateKey = toBrowserDateKey(cursor);
-
-    if (!isWeekendDateKey(dateKey)) {
-      dateKeys.push(dateKey);
-    }
-
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  return dateKeys;
-}
-
-function getDateKeyMonthCursor(dateKey: string): { monthIndex: number; year: number } {
-  const date = parseDateKey(dateKey);
-
-  return {
-    monthIndex: date.getMonth(),
-    year: date.getFullYear()
-  };
-}
-
-function getInclusiveDateSpan(startDateKey: string, endDateKey: string): number {
-  const start = parseDateKey(startDateKey).getTime();
-  const end = parseDateKey(endDateKey).getTime();
-  const dayMs = 24 * 60 * 60 * 1000;
-
-  return Math.floor((end - start) / dayMs) + 1;
-}
-
-function getDefaultSelectedDateForMonth(year: number, monthIndex: number): string {
-  const cursor = new Date(year, monthIndex, 1);
-
-  while (cursor.getMonth() === monthIndex) {
-    const dateKey = toBrowserDateKey(cursor);
-
-    if (!isWeekendDateKey(dateKey)) {
-      return dateKey;
-    }
-
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  return toBrowserDateKey(new Date(year, monthIndex, 1));
 }
 
 function createVacationDay(dateKey: string, vacationName: string, hours: number, vacationStatus: VacationStatus = "CONFIRMED"): TimesheetDayDraft {
