@@ -69,6 +69,7 @@ import { NotionCardPickerModal } from "./notion-card-picker-modal";
 import { addBusinessDays, addDays, getBusinessDateKeysInRange, getDateKeyMonthCursor, getDefaultSelectedDateForMonth, getInclusiveDateSpan } from "./timesheet-date-utils";
 import { hasTimeMismatch, NotionCardWarningIcon, TimeMismatchIcon, truncateContent } from "./timesheet-row-display";
 import { CalendarView } from "./timesheet-calendar-view";
+import { effectiveEntryHours, entryKindLabel, entryKindTone, entryTitle, firstWorkEntry, listRowKey } from "./timesheet-entry-display";
 import { WeekendRelaxView } from "./weekend-relax-view";
 import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidate, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
 import { ThemeSetting } from "@/components/theme-setting";
@@ -233,8 +234,6 @@ type TimesheetWorkspaceProps = {
 };
 
 const todayRefreshIntervalMs = 60_000;
-
-const fullDayHours = 8;
 
 const newProjectOptionValue = "__new_project__";
 
@@ -601,16 +600,8 @@ function createFutureDraftForDate(dateKey: string): TimesheetDayDraft {
   return createVacationDay(dateKey, "휴가", 8);
 }
 
-function firstWorkEntry(day: TimesheetDayDraft): TimesheetEntryDraft | undefined {
-  return day.entries.find((entry) => entry.kind === "WORK");
-}
-
 function firstHolidayEntry(day: TimesheetDayDraft): TimesheetEntryDraft | undefined {
   return day.entries.find((entry) => entry.kind === "HOLIDAY");
-}
-
-function effectiveEntryHours(entry: TimesheetEntryDraft): number {
-  return entry.kind === "HOLIDAY" && entry.hours === 0 ? fullDayHours : entry.hours;
 }
 
 function formatAllocatedHours(hours: number): string {
@@ -4992,50 +4983,6 @@ function ListView({
       </div>
     </div>
   );
-}
-
-function listRowKey(dateKey: string, entryClientId: string): string {
-  return `${dateKey}:${entryClientId}`;
-}
-
-function entryTitle(entry: TimesheetEntryDraft): string {
-  if (entry.kind === "VACATION") {
-    return entry.vacationName || "휴가";
-  }
-
-  if (entry.kind === "HOLIDAY") {
-    return entry.holidayName || "공휴일";
-  }
-
-  return entry.project;
-}
-
-function entryKindLabel(entry: TimesheetEntryDraft): string {
-  if (entry.kind === "VACATION") {
-    if (entry.vacationStatus === "TEMPORARY") {
-      return "임시";
-    }
-
-    return "휴가";
-  }
-
-  if (entry.kind === "HOLIDAY") {
-    return "공휴일";
-  }
-
-  return "업무";
-}
-
-function entryKindTone(entry: TimesheetEntryDraft) {
-  if (entry.kind === "VACATION") {
-    return "blue";
-  }
-
-  if (entry.kind === "HOLIDAY") {
-    return "orange";
-  }
-
-  return "green";
 }
 
 function entryContentPreview(entry: TimesheetEntryDraft): string {
