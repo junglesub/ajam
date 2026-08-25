@@ -60,7 +60,6 @@ import {
   X
 } from "lucide-react";
 
-import { logoutAction } from "@/app/(app)/timesheet/actions";
 import { AppLoadingOverlay, AppLoadingScreen } from "@/components/app-loading-screen";
 import { NotionCardLinkSection } from "./notion-card-link-section";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
@@ -71,12 +70,12 @@ import { effectiveEntryHours, entryHasNotionCardWarning, entryKindLabel, entryKi
 import { ListView } from "./timesheet-list-view";
 import { AiOverwritePromptModal, AiRewritePromptModal, AiRewriteQueueModal } from "./timesheet-ai-modals";
 import { ProjectCreateModal } from "./timesheet-project-modal";
+import { SettingsModal } from "./timesheet-settings-modal";
 import { ConnectedVacationDeleteModal, ConnectedVacationSaveModal, VacationRangeModal } from "./timesheet-vacation-modals";
-import { Field, Metric, ModalShell, ShortcutHint } from "./timesheet-ui-primitives";
+import { Field, Metric, ShortcutHint } from "./timesheet-ui-primitives";
 import { DeleteConfirmModal, NotionSyncErrorModal, PendingNavigationConfirmModal } from "./timesheet-simple-modals";
 import { WeekendRelaxView } from "./weekend-relax-view";
 import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidate, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
-import { ThemeSetting } from "@/components/theme-setting";
 import { adjacentListTarget, shouldIgnoreCalendarShortcut } from "@/lib/calendar-shortcuts";
 import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
 
@@ -4026,336 +4025,82 @@ export function TimesheetWorkspace({
       </div>
 
       {isSettingsOpen ? (
-        <ModalShell onClose={() => setIsSettingsOpen(false)} title="설정">
-          <div className="max-h-[78vh] space-y-5 overflow-y-auto pr-1">
-            <section className="rounded-md border border-slate-200 bg-slate-50 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-950">내 설정</h3>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">계정 정보와 개인 AI 자동 정리를 관리합니다.</p>
-                </div>
-                <Badge tone={isAdmin ? "green" : "gray"}>{isAdmin ? "관리자" : "일반"}</Badge>
-              </div>
-
-              <div className="mt-4">
-                <ThemeSetting />
-              </div>
-
-              <div className="mt-4 rounded-md border border-slate-200 bg-white p-4">
-                <h4 className="text-sm font-bold text-slate-950">계정 정보</h4>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <Field label="아이디">
-                    <Input onChange={(event) => setProfileUsername(event.target.value)} value={profileUsername} />
-                  </Field>
-                  <Field label="이메일">
-                    <Input autoComplete="email" onChange={(event) => setProfileEmail(event.target.value)} placeholder="reminder@example.com" type="email" value={profileEmail} />
-                  </Field>
-                  <Field label="새 비밀번호">
-                    <Input autoComplete="new-password" onChange={(event) => setProfilePassword(event.target.value)} placeholder="변경 시에만 입력" type="password" value={profilePassword} />
-                  </Field>
-                </div>
-                {profileState === "saved" ? <p className="mt-3 text-sm font-semibold text-emerald-700">계정 정보를 저장했습니다.</p> : null}
-                {profileState === "error" ? <p className="mt-3 text-sm font-semibold text-red-600">{profileError}</p> : null}
-                <div className="mt-4 flex items-end justify-between gap-3">
-                  <form action={logoutAction}>
-                    <button className="text-sm font-semibold text-red-600 transition hover:text-red-700" type="submit">
-                      로그아웃
-                    </button>
-                  </form>
-                  <Button disabled={profileState === "saving"} onClick={() => void saveProfile()} type="button">
-                    {profileState === "saving" ? "저장 중" : "계정 저장"}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50/50 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-950">개인 AI 자동 정리</h4>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">내 Gemini API key로 빈 영문 번역본과 짧은 버전을 채웁니다.</p>
-                  </div>
-                  <Badge tone={aiSetting.apiKeySaved ? "green" : "gray"}>{aiSetting.apiKeySaved ? "개인 key 저장됨" : "개인 key 없음"}</Badge>
-                </div>
-
-                <div className="mt-4 space-y-4">
-                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                    <input checked={aiEnabled} className="size-4 accent-slate-950" onChange={(event) => setAiEnabled(event.target.checked)} type="checkbox" />
-                    AI 자동 정리 사용
-                  </label>
-
-                  <div>
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-bold text-slate-700">AI 정리 방식</p>
-                      <button
-                        className={cn(
-                          "rounded-md border px-2 py-1 text-xs font-bold transition",
-                          aiRewriteRequests.length > 0
-                            ? "border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-300"
-                            : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
-                        )}
-                        onClick={() => setIsAiRewriteQueueOpen(true)}
-                        type="button"
-                      >
-                        {aiRewriteRequests.length}개 대기중
-                      </button>
-                    </div>
-                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                      {[
-                        { description: "저장 직후 실행", label: "즉시", value: "immediate" },
-                        { description: "n8n에서 일괄 실행", label: "예약", value: "scheduled" },
-                        { description: "직접 실행만 사용", label: "수동", value: "manual" }
-                      ].map((option) => (
-                        <label
-                          className={cn(
-                            "cursor-pointer rounded-md border bg-white px-3 py-2 transition",
-                            aiCleanupMode === option.value ? "border-slate-950 ring-2 ring-slate-100" : "border-slate-200 hover:border-slate-300"
-                          )}
-                          key={option.value}
-                        >
-                          <input
-                            checked={aiCleanupMode === option.value}
-                            className="sr-only"
-                            onChange={() => setAiCleanupMode(option.value as AiCleanupMode)}
-                            type="radio"
-                          />
-                          <span className="block text-sm font-bold text-slate-950">{option.label}</span>
-                          <span className="mt-1 block text-xs font-medium leading-5 text-slate-500">{option.description}</span>
-                        </label>
-                      ))}
-                    </div>
-                    {aiRewriteRequests.length > 0 && aiCleanupMode !== "scheduled" ? (
-                      <p className="mt-2 text-xs font-semibold leading-5 text-amber-700">
-                        대기 목록은 보존되지만, 예약 모드가 아니면 n8n 예약 정리에서 처리되지 않습니다.
-                      </p>
-                    ) : null}
-                  </div>
-
-                <Field label="Gemini API key">
-                  <Input
-                    autoComplete="off"
-                    onChange={(event) => {
-                      setAiApiKey(event.target.value);
-                      if (event.target.value) {
-                        setAiClearApiKey(false);
-                      }
-                    }}
-                    placeholder={aiSetting.apiKeySaved ? "새 key 입력 시 교체" : "Gemini API key"}
-                    type="password"
-                    value={aiApiKey}
-                  />
-                </Field>
-
-                {aiSetting.apiKeySaved ? (
-                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-600">
-                    <input checked={aiClearApiKey} className="size-4 accent-slate-950" disabled={Boolean(aiApiKey)} onChange={(event) => setAiClearApiKey(event.target.checked)} type="checkbox" />
-                    저장된 API key 삭제
-                  </label>
-                ) : null}
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="모델">
-                    <select
-                      className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                      onChange={(event) => setAiModel(event.target.value)}
-                      value={aiModel}
-                    >
-                      {aiModelPresets.map((preset) => (
-                        <option key={preset.value} value={preset.value}>
-                          {preset.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  {aiModel === "__custom__" ? (
-                    <Field label="직접 입력 모델명">
-                      <Input onChange={(event) => setAiCustomModel(event.target.value)} placeholder="gemini-..." value={aiCustomModel} />
-                    </Field>
-                  ) : (
-                    <Field label="참고할 이전 저장 WORK 날짜">
-                      <select
-                        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                        onChange={(event) => setAiContextDays(Number(event.target.value))}
-                        value={aiContextDays}
-                      >
-                        {[0, 3, 5, 10].map((value) => (
-                          <option key={value} value={value}>
-                            최근 {value}개
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                  )}
-                </div>
-
-                {aiModel === "__custom__" ? (
-                  <Field label="참고할 이전 저장 WORK 날짜">
-                    <select
-                      className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                      onChange={(event) => setAiContextDays(Number(event.target.value))}
-                      value={aiContextDays}
-                    >
-                      {[0, 3, 5, 10].map((value) => (
-                        <option key={value} value={value}>
-                          최근 {value}개
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                ) : null}
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                    <input checked={aiBackfillMissing} className="size-4 accent-slate-950" onChange={(event) => setAiBackfillMissing(event.target.checked)} type="checkbox" />
-                    이전 빈 번역/요약 보정
-                  </label>
-                  <Field label="한 번에 보정할 이전 날짜">
-                    <select
-                      className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                      disabled={!aiBackfillMissing}
-                      onChange={(event) => setAiBackfillLimit(Number(event.target.value))}
-                      value={aiBackfillLimit}
-                    >
-                      {[1, 3, 5].map((value) => (
-                        <option key={value} value={value}>
-                          {value}일
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                </div>
-
-                  <p className="text-xs font-medium leading-5 text-slate-500">미기입, 작성 예정, draft, 휴가, 공휴일, 빈 내용 업무는 참고/보정 대상에서 제외됩니다. 기존 번역본과 요약은 덮어쓰지 않습니다.</p>
-                </div>
-
-                {(aiSettingState !== "idle" || aiTestMessage) ? (
-                  <div className="mt-3 space-y-1">
-                    {aiSettingMessage ? <p className={cn("text-sm font-semibold", aiSettingState === "error" ? "text-red-600" : "text-emerald-700")}>{aiSettingMessage}</p> : null}
-                    {aiTestMessage ? <p className={cn("text-sm font-semibold", aiTestState === "error" ? "text-red-600" : "text-emerald-700")}>{aiTestMessage}</p> : null}
-                  </div>
-                ) : null}
-
-                <div className="mt-4 flex flex-wrap justify-end gap-2">
-                  <Button disabled={aiTestState === "saving"} onClick={() => void testAiSetting()} type="button" variant="secondary">
-                    {aiTestState === "saving" ? "테스트 중" : "키 테스트"}
-                  </Button>
-                  <Button disabled={aiSettingState === "saving"} onClick={() => void saveAiSetting()} type="button">
-                    {aiSettingState === "saving" ? "저장 중" : "AI 설정 저장"}
-                  </Button>
-                </div>
-              </div>
-            </section>
-
-            {isAdmin ? (
-              <section className="rounded-md border border-slate-200 bg-white p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-950">사이트 설정</h3>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">관리자만 공휴일, 캐시, 사용자 설정을 변경할 수 있습니다.</p>
-                  </div>
-                  <Badge tone="green">관리자 전용</Badge>
-                </div>
-
-                <div className="mt-4 space-y-4">
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-                    <h4 className="text-sm font-bold text-slate-950">공휴일 API</h4>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">data.go.kr 서비스 키를 저장하고 현재 월 기준으로 테스트합니다.</p>
-                    <div className="mt-4">
-                      <Field label="공공데이터포털 서비스 키">
-                        <Input onChange={(event) => setHolidayApiKey(event.target.value)} placeholder="서비스 키" type="password" value={holidayApiKey} />
-                      </Field>
-                    </div>
-                    {(holidayApiKeyState === "saved" || holidayApiKeyState === "error" || holidayApiKeyTestMessage) ? (
-                      <div className="mt-3 space-y-1">
-                        {holidayApiKeyState === "saved" ? <p className="text-sm font-semibold text-emerald-700">API 키를 저장했습니다.</p> : null}
-                        {holidayApiKeyState === "error" ? <p className="text-sm font-semibold text-red-600">{holidayApiKeyError}</p> : null}
-                        {holidayApiKeyTestMessage ? (
-                          <p className={cn("text-sm font-semibold", holidayApiKeyTestState === "error" ? "text-red-600" : "text-emerald-700")}>{holidayApiKeyTestMessage}</p>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    <div className="mt-4 flex flex-wrap justify-end gap-2">
-                      <Button disabled={holidayApiKeyTestState === "saving"} onClick={() => void testHolidayApiKey()} type="button" variant="secondary">
-                        {holidayApiKeyTestState === "saving" ? "테스트 중" : "키 테스트"}
-                      </Button>
-                      <Button disabled={holidayApiKeyState === "saving"} onClick={() => void saveHolidayApiKey()} type="button">
-                        {holidayApiKeyState === "saving" ? "저장 중" : "키 저장"}
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-                    <h4 className="text-sm font-bold text-slate-950">공휴일 캐시</h4>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">현재 표시 중인 월의 공휴일 캐시를 삭제하고 다시 조회합니다.</p>
-                    {holidayResetState === "saved" ? <p className="mt-3 text-sm font-semibold text-emerald-700">공휴일 정보를 다시 불러왔습니다.</p> : null}
-                    {holidayResetState === "error" ? <p className="mt-3 text-sm font-semibold text-red-600">{holidayResetError}</p> : null}
-                    <div className="mt-4 flex flex-wrap justify-end gap-2">
-                      {isDevelopment ? (
-                        <Button disabled={holidayResetState === "saving"} onClick={() => void resetAllHolidays()} type="button" variant="secondary">
-                          <Trash2 aria-hidden="true" className="size-4" />
-                          모든 API 공휴일 삭제
-                        </Button>
-                      ) : null}
-                      <Button disabled={holidayResetState === "saving"} onClick={() => void resetCurrentMonthHolidays()} type="button" variant="secondary">
-                        <RotateCcw aria-hidden="true" className="size-4" />
-                        {holidayResetState === "saving" ? "다시 불러오는 중" : "현재 월 공휴일 리셋"}
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-                    <h4 className="text-sm font-bold text-slate-950">사용자 관리</h4>
-                    <div className="mt-3 divide-y divide-slate-100 rounded-md border border-slate-200 bg-white">
-                      {managedUsers.map((user) => (
-                        <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm" key={user.id}>
-                          <div className="min-w-0">
-                            <span className="block truncate font-semibold text-slate-950">{user.username}</span>
-                            <span className="block truncate text-xs font-medium text-slate-500">{user.email || "이메일 없음"}</span>
-                          </div>
-                          <Badge tone={user.role === "ADMIN" ? "green" : "gray"}>{user.role === "ADMIN" ? "관리자" : "일반"}</Badge>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <Field label="아이디">
-                        <Input onChange={(event) => setNewUserUsername(event.target.value)} value={newUserUsername} />
-                      </Field>
-                      <Field label="이메일">
-                        <Input autoComplete="email" onChange={(event) => setNewUserEmail(event.target.value)} placeholder="reminder@example.com" type="email" value={newUserEmail} />
-                      </Field>
-                      <Field label="비밀번호">
-                        <Input autoComplete="new-password" onChange={(event) => setNewUserPassword(event.target.value)} type="password" value={newUserPassword} />
-                      </Field>
-                      <Field label="권한">
-                        <select
-                          className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                          onChange={(event) => setNewUserRole(event.target.value === "ADMIN" ? "ADMIN" : "USER")}
-                          value={newUserRole}
-                        >
-                          <option value="USER">일반</option>
-                          <option value="ADMIN">관리자</option>
-                        </select>
-                      </Field>
-                    </div>
-                    {userCreateState === "saved" ? <p className="mt-3 text-sm font-semibold text-emerald-700">사용자를 추가했습니다.</p> : null}
-                    {userCreateState === "error" ? <p className="mt-3 text-sm font-semibold text-red-600">{userCreateError}</p> : null}
-                    <div className="mt-4 flex justify-end">
-                      <Button disabled={userCreateState === "saving"} onClick={() => void createUser()} type="button">
-                        <Plus aria-hidden="true" className="size-4" />
-                        {userCreateState === "saving" ? "추가 중" : "사용자 추가"}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </section>
-            ) : null}
-
-            <div className="flex justify-end border-t border-slate-100 pt-4">
-              <Button onClick={() => setIsSettingsOpen(false)} variant="secondary">
-                닫기
-              </Button>
-            </div>
-          </div>
-        </ModalShell>
+        <SettingsModal
+          ai={{
+            apiKey: aiApiKey,
+            backfillLimit: aiBackfillLimit,
+            backfillMissing: aiBackfillMissing,
+            cleanupMode: aiCleanupMode,
+            clearApiKey: aiClearApiKey,
+            contextDays: aiContextDays,
+            customModel: aiCustomModel,
+            enabled: aiEnabled,
+            keySaved: aiSetting.apiKeySaved,
+            model: aiModel,
+            modelPresets: aiModelPresets,
+            onApiKeyChange: (value) => { setAiApiKey(value); if (value) { setAiClearApiKey(false); } },
+            onBackfillLimitChange: setAiBackfillLimit,
+            onBackfillMissingChange: setAiBackfillMissing,
+            onCleanupModeChange: setAiCleanupMode,
+            onClearApiKeyChange: setAiClearApiKey,
+            onContextDaysChange: setAiContextDays,
+            onCustomModelChange: setAiCustomModel,
+            onEnabledChange: setAiEnabled,
+            onModelChange: setAiModel,
+            onOpenRewriteQueue: () => setIsAiRewriteQueueOpen(true),
+            onSave: () => void saveAiSetting(),
+            onTest: () => void testAiSetting(),
+            rewriteQueueCount: aiRewriteRequests.length,
+            saveMessage: aiSettingMessage,
+            saveState: aiSettingState,
+            testMessage: aiTestMessage,
+            testState: aiTestState
+          }}
+          holidayApi={{
+            apiKey: holidayApiKey,
+            onApiKeyChange: setHolidayApiKey,
+            onSave: () => void saveHolidayApiKey(),
+            onTest: () => void testHolidayApiKey(),
+            saveError: holidayApiKeyError,
+            saveState: holidayApiKeyState,
+            testMessage: holidayApiKeyTestMessage,
+            testState: holidayApiKeyTestState
+          }}
+          holidayCache={{
+            error: holidayResetError,
+            onResetAll: () => void resetAllHolidays(),
+            onResetCurrentMonth: () => void resetCurrentMonthHolidays(),
+            state: holidayResetState
+          }}
+          isAdmin={isAdmin}
+          isDevelopment={isDevelopment}
+          onClose={() => setIsSettingsOpen(false)}
+          profile={{
+            email: profileEmail,
+            error: profileError,
+            onEmailChange: setProfileEmail,
+            onPasswordChange: setProfilePassword,
+            onSave: () => void saveProfile(),
+            onUsernameChange: setProfileUsername,
+            password: profilePassword,
+            state: profileState,
+            username: profileUsername
+          }}
+          users={{
+            createError: userCreateError,
+            createState: userCreateState,
+            existingUsers: managedUsers,
+            newEmail: newUserEmail,
+            newPassword: newUserPassword,
+            newRole: newUserRole,
+            newUsername: newUserUsername,
+            onCreate: () => void createUser(),
+            onNewEmailChange: setNewUserEmail,
+            onNewPasswordChange: setNewUserPassword,
+            onNewRoleChange: setNewUserRole,
+            onNewUsernameChange: setNewUserUsername
+          }}
+        />
       ) : null}
 
       {isAiRewriteQueueOpen ? (
