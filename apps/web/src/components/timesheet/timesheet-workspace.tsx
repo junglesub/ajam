@@ -29,7 +29,6 @@ import {
   getMonthLabel,
   getSavedNotionCardDateRanges,
   isWeekendDateKey,
-  resolveStatus,
   toBrowserDateKey,
   type TimesheetRow,
   type TimesheetDayDraft,
@@ -64,9 +63,11 @@ import { AppLoadingOverlay, AppLoadingScreen } from "@/components/app-loading-sc
 import { NotionCardLinkSection } from "./notion-card-link-section";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
 import { addBusinessDays, addDays, getBusinessDateKeysInRange, getDateKeyMonthCursor, getDefaultSelectedDateForMonth, getInclusiveDateSpan } from "./timesheet-date-utils";
+import { buildDraftsFromMonthData, buildInitialDrafts, buildSelectedEntryIds, createDraftForDate, createEntryForDate, createFutureDraftForDate, createVacationDay, findPreviousProject, hasExistingAiFields, hasHolidayMarker, hasMissingAiFields, hasWorkContent, hasWorkContentChange, isAutoProjectOnlyDraft, isDefaultFutureVacationDraft, rebalanceDefaultWorkHours, rowFromDraft, sanitizeDayForSave, withClientIds, createClientId, type TimesheetMonthData } from "./timesheet-draft-utils";
+import { allocateDefaultNotionCards, buildNotionCardSnapshotMap, createWeekdayDefaultNotionCards, findLocalPreviousNotionCards, mergeNotionCardSnapshot, mergeNotionCardSnapshots, type NotionWeeklyDefaultCard } from "./timesheet-notion-recommendation";
 import { NotionCardWarningIcon, truncateContent } from "./timesheet-row-display";
 import { CalendarView } from "./timesheet-calendar-view";
-import { effectiveEntryHours, entryHasNotionCardWarning, entryKindLabel, entryKindTone, entryTitle, firstWorkEntry, getNotionAllocationError, listRowKey } from "./timesheet-entry-display";
+import { effectiveEntryHours, entryHasNotionCardWarning, entryKindLabel, entryKindTone, entryTitle, getNotionAllocationError, listRowKey } from "./timesheet-entry-display";
 import { ListView } from "./timesheet-list-view";
 import { AiOverwritePromptModal, AiRewritePromptModal, AiRewriteQueueModal } from "./timesheet-ai-modals";
 import { ProjectCreateModal } from "./timesheet-project-modal";
@@ -75,7 +76,7 @@ import { ConnectedVacationDeleteModal, ConnectedVacationSaveModal, VacationRange
 import { Field, Metric, ShortcutHint } from "./timesheet-ui-primitives";
 import { DeleteConfirmModal, NotionSyncErrorModal, PendingNavigationConfirmModal } from "./timesheet-simple-modals";
 import { WeekendRelaxView } from "./weekend-relax-view";
-import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidate, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
+import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
 import { adjacentListTarget, shouldIgnoreCalendarShortcut } from "@/lib/calendar-shortcuts";
 import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
 
@@ -91,15 +92,6 @@ type ManagedUser = {
   id: string;
   role: UserRole;
   username: string;
-};
-
-type TimesheetMonthData = {
-  entries: TimesheetDayDraft[];
-  holidayWarning?: string;
-  holidays: Array<{ dateKey: string; name: string }>;
-  projects: string[];
-  vacationColors: Record<string, VacationColor>;
-  vacations: Array<{ dateKey: string; hours: number; name: string }>;
 };
 
 type HolidayApiKeyTestResult = {
@@ -127,18 +119,6 @@ type UserAiSettingUpdate = {
   cleanupMode: AiCleanupMode;
   enabled: boolean;
   model: string;
-};
-
-type NotionWeeklyDefaultCard = {
-  allocatedHours: number;
-  category: string;
-  enabled: boolean;
-  endDate: string;
-  notionPageId: string;
-  startDate: string;
-  status: string;
-  title: string;
-  weekday: number;
 };
 
 type TimesheetAiCleanupResult = {
@@ -275,85 +255,6 @@ const aiModelPresets = [
   { label: "직접 입력", value: "__custom__" }
 ];
 
-function createClientId(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `entry-${Date.now()}-${Math.random()}`;
-}
-
-function createVacationDay(dateKey: string, vacationName: string, hours: number, vacationStatus: VacationStatus = "CONFIRMED"): TimesheetDayDraft {
-  return {
-    ...createEmptyDraft(dateKey),
-    entries: [
-      {
-        ...createEmptyEntryDraft(0),
-        clientId: createClientId(),
-        hours,
-        kind: "VACATION",
-        vacationName,
-        vacationStatus
-      }
-    ]
-  };
-}
-
-function withClientIds(day: TimesheetDayDraft): TimesheetDayDraft {
-  return {
-    ...day,
-    entries: day.entries
-      .map((entry, index) => ({
-        ...entry,
-        clientId: entry.clientId || entry.id || createClientId(),
-        hoursTouched: entry.hoursTouched ?? (entry.kind === "WORK" && day.entries.length === 1 && entry.hours !== 8),
-        sortOrder: index
-      }))
-      .sort((left, right) => left.sortOrder - right.sortOrder)
-  };
-}
-
-function buildDraftsFromMonthData(monthData: TimesheetMonthData): Record<string, TimesheetDayDraft> {
-  const drafts: Record<string, TimesheetDayDraft> = {};
-
-  for (const holiday of monthData.holidays) {
-    drafts[holiday.dateKey] = {
-      ...createEmptyDraft(holiday.dateKey),
-      holidayName: holiday.name
-    };
-  }
-
-  for (const entry of monthData.entries) {
-    const current = drafts[entry.dateKey] ?? createEmptyDraft(entry.dateKey);
-    drafts[entry.dateKey] = withClientIds({
-      ...current,
-      ...entry,
-      holidayName: current.holidayName || entry.holidayName
-    });
-  }
-
-  return drafts;
-}
-
-function buildInitialDrafts(monthData: TimesheetMonthData, todayKey: string): Record<string, TimesheetDayDraft> {
-  const drafts = buildDraftsFromMonthData(monthData);
-
-  if (drafts[todayKey]) {
-    return drafts;
-  }
-
-  const todayDraft = createDraftForDate(todayKey, drafts);
-
-  if (!todayDraft.entries[0]?.project) {
-    return drafts;
-  }
-
-  return {
-    ...drafts,
-    [todayKey]: todayDraft
-  };
-}
-
-function buildSelectedEntryIds(drafts: Record<string, TimesheetDayDraft>): Record<string, string> {
-  return Object.fromEntries(Object.values(drafts).flatMap((day) => day.entries[0] ? [[day.dateKey, day.entries[0].clientId]] : []));
-}
-
 function getMonthCacheKey(year: number, monthIndex: number): string {
   return `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
 }
@@ -370,383 +271,6 @@ function mergeProjects(current: string[], projects: string[]): string[] {
   }
 
   return Array.from(next).sort((left, right) => left.localeCompare(right, "ko-KR"));
-}
-
-function findPreviousProject(dateKey: string, records: Record<string, TimesheetDayDraft>): string {
-  const previousRecord = Object.values(records)
-    .flatMap((record) => record.entries.map((entry) => ({ dateKey: record.dateKey, entry })))
-    .filter((record) => record.dateKey < dateKey && record.entry.kind === "WORK" && record.entry.project.trim())
-    .sort((left, right) => right.dateKey.localeCompare(left.dateKey))[0];
-
-  return previousRecord?.entry.project ?? "";
-}
-
-function allocateDefaultNotionCards(cards: TimesheetEntryNotionCardDraft[], entryHours: number): TimesheetEntryNotionCardDraft[] {
-  return allocateNotionCardHours({
-    entryHours,
-    links: dedupeNotionCardsByPageId(cards).map((card) => ({
-      ...card,
-      allocationMode: card.source === "weekday_default" ? "manual" : "auto",
-      source: card.source === "weekday_default" ? "weekday_default" : "previous_business_day_default"
-    }))
-  });
-}
-
-function dedupeNotionCardsByPageId(cards: TimesheetEntryNotionCardDraft[]): TimesheetEntryNotionCardDraft[] {
-  const cardsByPageId = new Map<string, TimesheetEntryNotionCardDraft>();
-
-  for (const card of cards) {
-    const pageId = card.notionPageId.trim();
-
-    if (pageId && !cardsByPageId.has(pageId)) {
-      cardsByPageId.set(pageId, {
-        ...card,
-        notionPageId: pageId
-      });
-    }
-  }
-
-  return Array.from(cardsByPageId.values());
-}
-
-function getDateKeyWeekday(dateKey: string): number {
-  const [year, month, day] = dateKey.split("-").map(Number);
-
-  return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1).getDay();
-}
-
-function createWeekdayDefaultNotionCards(dateKey: string, defaults: NotionWeeklyDefaultCard[]): TimesheetEntryNotionCardDraft[] {
-  const weekday = getDateKeyWeekday(dateKey);
-
-  return defaults
-    .filter((card) => card.enabled && card.weekday === weekday && card.notionPageId.trim())
-    .map((card) => ({
-      allocatedHours: card.allocatedHours,
-      allocationMode: "manual",
-      category: card.category,
-      endDate: card.endDate,
-      notionPageId: card.notionPageId,
-      source: "weekday_default",
-      startDate: card.startDate,
-      status: card.status,
-      title: card.title
-    }));
-}
-
-function buildNotionCardSnapshotMap(params: {
-  candidatesByDate: Record<string, NotionCardCandidate[]>;
-  savedRecords: Record<string, TimesheetDayDraft>;
-}): Map<string, Partial<TimesheetEntryNotionCardDraft>> {
-  const snapshots = new Map<string, Partial<TimesheetEntryNotionCardDraft>>();
-
-  for (const day of Object.values(params.savedRecords)) {
-    for (const link of day.entries.flatMap((entry) => entry.notionCards)) {
-      snapshots.set(link.notionPageId, link);
-    }
-  }
-
-  for (const candidate of Object.values(params.candidatesByDate).flat()) {
-    snapshots.set(candidate.notionPageId, candidate);
-  }
-
-  return snapshots;
-}
-
-function mergeNotionCardSnapshot(
-  card: TimesheetEntryNotionCardDraft,
-  snapshot: Partial<TimesheetEntryNotionCardDraft> | undefined
-): TimesheetEntryNotionCardDraft {
-  if (!snapshot) {
-    return card;
-  }
-
-  return {
-    ...card,
-    category: snapshot.category ?? card.category,
-    endDate: snapshot.endDate ?? card.endDate,
-    lastWorkedDate: snapshot.lastWorkedDate ?? card.lastWorkedDate,
-    linkedHours: snapshot.linkedHours ?? card.linkedHours,
-    startDate: snapshot.startDate ?? card.startDate,
-    status: snapshot.status ?? card.status,
-    title: snapshot.title ?? card.title,
-    workDayCount: snapshot.workDayCount ?? card.workDayCount
-  };
-}
-
-function mergeNotionCardSnapshots(
-  cards: TimesheetEntryNotionCardDraft[],
-  snapshotsByPageId: Map<string, Partial<TimesheetEntryNotionCardDraft>>
-): TimesheetEntryNotionCardDraft[] {
-  return cards.map((card) => mergeNotionCardSnapshot(card, snapshotsByPageId.get(card.notionPageId)));
-}
-
-function isNotionCardOpenForDate(card: TimesheetEntryNotionCardDraft, dateKey: string, doneStatusValues: string[]): boolean {
-  if (!card.startDate || card.startDate > dateKey) {
-    return false;
-  }
-
-  if (card.endDate && card.endDate < dateKey) {
-    return false;
-  }
-
-  return Boolean(card.endDate) || !doneStatusValues.includes(card.status ?? "");
-}
-
-function findLocalPreviousNotionCards(params: {
-  dateKey: string;
-  doneStatusValues: string[];
-  savedRecords: Record<string, TimesheetDayDraft>;
-}): { cards: TimesheetEntryNotionCardDraft[]; foundPreviousEntry: boolean } {
-  const previousEntry = Object.values(params.savedRecords)
-    .flatMap((record) =>
-      record.entries.map((entry) => ({
-        dateKey: record.dateKey,
-        entry
-      }))
-    )
-    .filter((record) =>
-      record.dateKey < params.dateKey &&
-      record.entry.kind === "WORK" &&
-      record.entry.notionCards.some((card) => card.source !== "weekday_default")
-    )
-    .sort((left, right) =>
-      right.dateKey.localeCompare(left.dateKey) ||
-      left.entry.sortOrder - right.entry.sortOrder
-    )[0];
-
-  if (!previousEntry) {
-    return {
-      cards: [],
-      foundPreviousEntry: false
-    };
-  }
-
-  return {
-    cards: previousEntry.entry.notionCards
-      .filter((card) => card.source !== "weekday_default")
-      .filter((card) => isNotionCardOpenForDate(card, params.dateKey, params.doneStatusValues))
-      .map((card) => ({
-        ...card,
-        allocatedHours: 0,
-        allocationMode: "auto",
-        source: "previous_business_day_default"
-      })),
-    foundPreviousEntry: true
-  };
-}
-
-function createEntryForDate(dateKey: string, records: Record<string, TimesheetDayDraft>, kind: WorkRecordKind = "WORK"): TimesheetEntryDraft {
-  const entry = createEmptyEntryDraft(0);
-
-  return {
-    ...entry,
-    clientId: createClientId(),
-    hours: kind === "HOLIDAY" ? 0 : 8,
-    hoursTouched: false,
-    kind,
-    project: kind === "WORK" ? findPreviousProject(dateKey, records) : ""
-  };
-}
-
-function rebalanceDefaultWorkHours(entries: TimesheetEntryDraft[], newEntry: TimesheetEntryDraft): TimesheetEntryDraft[] {
-  if (newEntry.kind !== "WORK") {
-    return [...entries, newEntry];
-  }
-
-  const fixedWorkHours = entries
-    .filter((entry) => entry.kind === "WORK" && entry.hoursTouched)
-    .reduce((sum, entry) => sum + entry.hours, 0);
-  const flexibleWorkCount = entries.filter((entry) => entry.kind === "WORK" && !entry.hoursTouched).length + 1;
-  const sharedHours = Math.max(8 - fixedWorkHours, 0) / flexibleWorkCount;
-  const normalizedSharedHours = Number(sharedHours.toFixed(2));
-
-  return [
-    ...entries.map((entry) => entry.kind === "WORK" && !entry.hoursTouched ? withRebalancedNotionCards(entry, normalizedSharedHours) : entry),
-    withRebalancedNotionCards(newEntry, normalizedSharedHours)
-  ];
-}
-
-function withRebalancedNotionCards(entry: TimesheetEntryDraft, hours: number): TimesheetEntryDraft {
-  const nextEntry = {
-    ...entry,
-    hours,
-    hoursTouched: false
-  };
-
-  if (entry.kind !== "WORK" || entry.notionCards.length === 0) {
-    return nextEntry;
-  }
-
-  try {
-    return {
-      ...nextEntry,
-      notionCards: allocateNotionCardHours({
-        entryHours: hours,
-        links: entry.notionCards
-      })
-    };
-  } catch {
-    return nextEntry;
-  }
-}
-
-function createDraftForDate(dateKey: string, records: Record<string, TimesheetDayDraft>): TimesheetDayDraft {
-  const entry = createEntryForDate(dateKey, records);
-
-  return {
-    ...createEmptyDraft(dateKey),
-    entries: [entry]
-  };
-}
-
-function createFutureDraftForDate(dateKey: string): TimesheetDayDraft {
-  return createVacationDay(dateKey, "휴가", 8);
-}
-
-function firstHolidayEntry(day: TimesheetDayDraft): TimesheetEntryDraft | undefined {
-  return day.entries.find((entry) => entry.kind === "HOLIDAY");
-}
-
-function hasHolidayMarker(day: TimesheetDayDraft | undefined): boolean {
-  return Boolean(day?.holidayName || day?.entries.some((entry) => entry.kind === "HOLIDAY"));
-}
-
-function uniqueWorkProjectCount(day: TimesheetDayDraft): number {
-  return new Set(day.entries.filter((entry) => entry.kind === "WORK").map((entry) => entry.project.trim()).filter(Boolean)).size;
-}
-
-function rowFromDraft(dateKey: string, todayKey: string, draft: TimesheetDayDraft | undefined, isSaved: boolean): TimesheetRow {
-  const row = draft ?? createEmptyDraft(dateKey);
-  const firstWork = firstWorkEntry(row);
-  const firstHoliday = firstHolidayEntry(row);
-  const previewContent = firstWork ? row.shortVersion || firstWork.content : "";
-  const hasContent = isSaved && row.entries.length > 0;
-  const firstVacation = row.entries.find((entry) => entry.kind === "VACATION");
-  const hasVacation = Boolean(firstVacation);
-  const hasHoliday = Boolean(firstHoliday || row.holidayName);
-  const isVacationOnly = hasVacation && !firstWork && !hasHoliday;
-  const shouldWarnForMissingNotionCards = isSaved || !isAutoProjectOnlyDraft(row);
-  const hasUnlinkedNotionWork = shouldWarnForMissingNotionCards && row.entries.some((entry) => entry.kind === "WORK" && entry.notionCards.length === 0);
-  const hasNotionCardWarning = row.entries.some((entry) => entryHasNotionCardWarning(entry, shouldWarnForMissingNotionCards));
-
-  return {
-    ...row,
-    aiTranslation: firstWork?.aiTranslation ?? "",
-    content: firstWork?.content ?? "",
-    entryCount: row.entries.length,
-    hasNotionCardWarning,
-    hasUnlinkedNotionWork,
-    hasVacation,
-    hours: row.entries.reduce((sum, entry) => sum + effectiveEntryHours(entry), 0),
-    kind: firstWork?.kind ?? (hasHoliday ? "HOLIDAY" : hasVacation ? "VACATION" : "WORK"),
-    previewContent,
-    project: firstWork?.project ?? "",
-    projectCount: uniqueWorkProjectCount(row),
-    status: isVacationOnly
-      ? "VACATION"
-      : resolveStatus({
-          dateKey,
-          hasContent: hasContent || Boolean(row.shortVersion.trim()),
-          kind: hasHoliday ? "HOLIDAY" : "WORK",
-          todayKey
-        }),
-    holidayName: row.holidayName || firstHoliday?.holidayName || "",
-    vacationName: firstVacation?.vacationName ?? "",
-    vacationStatus: firstVacation?.vacationStatus ?? "CONFIRMED"
-  };
-}
-
-function isAutoProjectOnlyDraft(draft: TimesheetDayDraft | undefined): boolean {
-  if (!draft) {
-    return false;
-  }
-
-  const [entry] = draft.entries;
-
-  return (
-    draft.entries.length === 1 &&
-    entry !== undefined &&
-    entry.kind === "WORK" &&
-    entry.hours === 8 &&
-    Boolean(entry.project.trim()) &&
-    !entry.content.trim() &&
-    !entry.aiTranslation.trim() &&
-    !draft.shortVersion.trim()
-  );
-}
-
-function sanitizeDayForSave(day: TimesheetDayDraft): TimesheetDayDraft {
-  const hasWork = day.entries.some((entry) => entry.kind === "WORK");
-
-  return {
-    ...day,
-    shortVersion: hasWork ? day.shortVersion : "",
-    entries: day.entries.map((entry, index) => ({
-      ...entry,
-      aiTranslation: entry.kind === "WORK" ? entry.aiTranslation : "",
-      content: entry.kind === "WORK" ? entry.content : "",
-      holidayName: entry.kind === "HOLIDAY" ? entry.holidayName : "",
-      hoursTouched: undefined,
-      project: entry.kind === "WORK" ? entry.project : "",
-      sortOrder: index,
-      vacationName: entry.kind === "VACATION" ? entry.vacationName : ""
-    }))
-  };
-}
-
-function entryKey(entry: TimesheetEntryDraft): string {
-  return entry.id || entry.clientId;
-}
-
-function hasExistingAiFields(day: TimesheetDayDraft): boolean {
-  return Boolean(day.shortVersion.trim() || day.entries.some((entry) => entry.kind === "WORK" && entry.aiTranslation.trim()));
-}
-
-function hasWorkContent(day: TimesheetDayDraft): boolean {
-  return day.entries.some((entry) => entry.kind === "WORK" && entry.content.trim());
-}
-
-function hasMissingAiFields(day: TimesheetDayDraft): boolean {
-  const workEntries = day.entries.filter((entry) => entry.kind === "WORK" && entry.content.trim());
-
-  return workEntries.length > 0 && (workEntries.some((entry) => !entry.aiTranslation.trim()) || !day.shortVersion.trim());
-}
-
-function hasWorkContentChange(savedDay: TimesheetDayDraft | undefined, currentDay: TimesheetDayDraft): boolean {
-  if (!savedDay) {
-    return false;
-  }
-
-  const savedWorkEntries = new Map(savedDay.entries.filter((entry) => entry.kind === "WORK").map((entry) => [entryKey(entry), entry]));
-
-  return currentDay.entries.some((entry) => {
-    if (entry.kind !== "WORK") {
-      return false;
-    }
-
-    const savedEntry = savedWorkEntries.get(entryKey(entry));
-
-    return !savedEntry || savedEntry.content.trim() !== entry.content.trim();
-  });
-}
-
-function isDefaultFutureVacationDraft(draft: TimesheetDayDraft | undefined): boolean {
-  if (!draft) {
-    return false;
-  }
-
-  const [entry] = draft.entries;
-
-  return (
-    draft.entries.length === 1 &&
-    entry !== undefined &&
-    entry.kind === "VACATION" &&
-    entry.hours === 8 &&
-    entry.vacationName === "휴가" &&
-    !entry.content.trim() &&
-    !entry.aiTranslation.trim() &&
-    !draft.shortVersion.trim()
-  );
 }
 
 function toAiRewriteRequest(day: TimesheetDayDraft): TimesheetAiRewriteRequest | null {
