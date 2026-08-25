@@ -1,22 +1,7 @@
 "use client";
 
-import { CSS } from "@dnd-kit/utilities";
-import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent
-} from "@dnd-kit/core";
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy
-} from "@dnd-kit/sortable";
+import type { DragEndEvent } from "@dnd-kit/core";
+import { arrayMove } from "@dnd-kit/sortable";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 
 import {
@@ -38,44 +23,34 @@ import {
   type VacationStatus,
   type WorkRecordKind
 } from "@timesheet/domain";
-import { Badge, Button, Input, SegmentedControl, Textarea, cn } from "@timesheet/ui";
+import { Button, SegmentedControl, cn } from "@timesheet/ui";
 import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
   Clock3,
-  GripVertical,
   ListChecks,
-  LoaderCircle,
-  Plus,
-  Trash2,
-  ArrowDown,
-  ArrowUp,
-  RotateCcw,
   Search,
   Sparkles,
   TimerReset,
-  WrapText,
-  X
+  WrapText
 } from "lucide-react";
 
 import { AppLoadingOverlay, AppLoadingScreen } from "@/components/app-loading-screen";
-import { NotionCardLinkSection } from "./notion-card-link-section";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
 import { addBusinessDays, addDays, getBusinessDateKeysInRange, getDateKeyMonthCursor, getDefaultSelectedDateForMonth, getInclusiveDateSpan } from "./timesheet-date-utils";
 import { buildDraftsFromMonthData, buildInitialDrafts, buildSelectedEntryIds, createDraftForDate, createEntryForDate, createFutureDraftForDate, createVacationDay, findPreviousProject, hasExistingAiFields, hasHolidayMarker, hasMissingAiFields, hasWorkContent, hasWorkContentChange, isAutoProjectOnlyDraft, isDefaultFutureVacationDraft, rebalanceDefaultWorkHours, rowFromDraft, sanitizeDayForSave, withClientIds, createClientId, type TimesheetMonthData } from "./timesheet-draft-utils";
 import { allocateDefaultNotionCards, buildNotionCardSnapshotMap, createWeekdayDefaultNotionCards, findLocalPreviousNotionCards, mergeNotionCardSnapshot, mergeNotionCardSnapshots, type NotionWeeklyDefaultCard } from "./timesheet-notion-recommendation";
-import { NotionCardWarningIcon, truncateContent } from "./timesheet-row-display";
 import { CalendarView } from "./timesheet-calendar-view";
-import { effectiveEntryHours, entryHasNotionCardWarning, entryKindLabel, entryKindTone, entryTitle, getNotionAllocationError, listRowKey } from "./timesheet-entry-display";
+import { getNotionAllocationError, listRowKey } from "./timesheet-entry-display";
 import { ListView } from "./timesheet-list-view";
+import { DailyEditor } from "./timesheet-daily-editor";
 import { AiOverwritePromptModal, AiRewritePromptModal, AiRewriteQueueModal } from "./timesheet-ai-modals";
 import { ProjectCreateModal } from "./timesheet-project-modal";
 import { SettingsModal } from "./timesheet-settings-modal";
 import { ConnectedVacationDeleteModal, ConnectedVacationSaveModal, VacationRangeModal } from "./timesheet-vacation-modals";
-import { Field, Metric, ShortcutHint } from "./timesheet-ui-primitives";
+import { Metric } from "./timesheet-ui-primitives";
 import { DeleteConfirmModal, NotionSyncErrorModal, PendingNavigationConfirmModal } from "./timesheet-simple-modals";
-import { WeekendRelaxView } from "./weekend-relax-view";
 import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
 import { adjacentListTarget, shouldIgnoreCalendarShortcut } from "@/lib/calendar-shortcuts";
 import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
@@ -638,6 +613,8 @@ export function TimesheetWorkspace({
   const selectedNotionAllocationError = selectedEntry ? getNotionAllocationError(selectedEntry) : "";
   const isSelectedProjectRecommendationLoading = Boolean(selectedEntry && projectRecommendationLoadingKeys.has(`${selectedDateKey}:${selectedEntry.clientId}`));
   const isSelectedNotionRecommendationLoading = Boolean(selectedEntry && notionRecommendationLoadingKeys.has(`${selectedDateKey}:${selectedEntry.clientId}`));
+  const selectedNotionEntryClientId = selectedEntry ? selectedEntry.clientId || selectedEntry.id : "";
+  const selectedEntryLinkedNotionPageIds = selectedEntry ? selectedEntry.notionCards.map((link) => link.notionPageId) : [];
 
   const monthDateKeys = useMemo(
     () => Object.keys(rows).filter((dateKey) => dateKey.startsWith(`${monthCursor.year}-${String(monthCursor.monthIndex + 1).padStart(2, "0")}`)),
@@ -681,16 +658,6 @@ export function TimesheetWorkspace({
   const primaryVacationRangeSaveAction = vacationRangeSaveActions.find((action) => action.variant === "primary");
   const secondaryVacationRangeSaveActions = vacationRangeSaveActions.filter((action) => action.variant !== "primary");
   const isDevelopment = process.env.NODE_ENV === "development";
-  const entryDragSensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8
-      }
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates
-    })
-  );
 
   function getVisibleMonthKey() {
     return getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
@@ -3251,300 +3218,96 @@ export function TimesheetWorkspace({
         </section>
 
         {viewMode === "calendar" || isDailyEditorRequested ? (
-        <div
-          className={cn(
-            isDailyEditorRequested
-              ? "fixed inset-0 z-40 flex items-end justify-center bg-slate-950/35 sm:px-4 sm:py-6 lg:sticky lg:top-4 lg:block lg:self-start lg:bg-transparent lg:p-0"
-              : "hidden lg:sticky lg:top-4 lg:block lg:self-start"
-          )}
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget && isDailyEditorModalActive) {
-              closeDailyEditor();
-            }
-          }}
-          role="presentation"
-        >
-        <aside
-          aria-labelledby={isDailyEditorModalActive ? "daily-editor-title" : undefined}
-          aria-modal={isDailyEditorModalActive ? "true" : undefined}
-          className="max-h-[92dvh] w-full overflow-y-auto rounded-t-xl border border-slate-200 bg-white shadow-2xl outline-none sm:max-w-2xl sm:rounded-xl lg:max-h-[calc(100vh-2rem)] lg:max-w-none lg:overflow-y-auto lg:rounded-lg lg:shadow-sm"
-          data-calendar-shortcuts-ignore
-          onFocusCapture={() => {
-            setIsDailyEditorRequested(true);
-          }}
-          ref={dailyEditorRef}
-          role={isDailyEditorModalActive ? "dialog" : undefined}
-          tabIndex={isDailyEditorModalActive ? -1 : undefined}
-        >
-          <div className="sticky top-0 z-30 border-b border-slate-200 bg-white px-5 py-4 lg:static">
-            <div className="flex items-center justify-between gap-2 sm:gap-3">
-              <div className="flex min-w-0 items-center gap-1">
-                <button
-                  aria-label="이전 날짜"
-                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 lg:hidden"
-                  disabled={monthLoadState === "loading"}
-                  onClick={() => selectDate(addBusinessDays(selectedDateKey, -1))}
-                  type="button"
-                >
-                  <ChevronLeft aria-hidden="true" className="size-5" />
-                </button>
-                <h2 className="truncate text-lg font-bold text-slate-950 sm:text-xl lg:mt-1 lg:text-2xl" id="daily-editor-title">{formatKoreanDate(selectedDateKey)}</h2>
-                <button
-                  aria-label="다음 날짜"
-                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 lg:hidden"
-                  disabled={monthLoadState === "loading"}
-                  onClick={() => selectDate(addBusinessDays(selectedDateKey, 1))}
-                  type="button"
-                >
-                  <ChevronRight aria-hidden="true" className="size-5" />
-                </button>
-              </div>
-              <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-                {!isViewingToday && !isDailyEditorModalActive ? (
-                  <Button disabled={monthLoadState === "loading"} onClick={goToday} variant="secondary">
-                    <RotateCcw aria-hidden="true" className="size-4" />
-                    오늘로 돌아가기
-                  </Button>
-                ) : null}
-                {viewMode === "list" || isDailyEditorModalActive ? (
-                <button
-                  aria-label="날짜 상세 닫기"
-                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
-                  onClick={closeDailyEditor}
-                  ref={closeEditorButtonRef}
-                  type="button"
-                >
-                  <X aria-hidden="true" className="size-5" />
-                </button>
-                ) : null}
-              </div>
-            </div>
-          </div>
-
-          {isSelectedWeekend ? (
-            <WeekendRelaxView
-              dateKey={selectedDateKey}
-              onNavigateNextBusinessDay={() => selectDate(addBusinessDays(selectedDateKey, 1))}
-              onNavigatePreviousBusinessDay={() => selectDate(addBusinessDays(selectedDateKey, -1))}
-            />
-          ) : (
-            <div className={cn("space-y-5 p-5", isFutureWork && "opacity-70")}>
-            {selectedHasWork ? (
-              <Field label="짧은 버전">
-                <Input disabled={isFutureWork} onChange={(event) => updateSelectedShortVersion(event.target.value)} placeholder="월간 캘린더에 표시할 한 줄 요약" value={selectedDay.shortVersion} />
-              </Field>
-            ) : null}
-
-            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-baseline gap-2">
-                  <span className={cn("text-base font-bold", selectedTotalHours > 8 ? "text-red-600" : "text-slate-950")}>{selectedTotalHours}h</span>
-                  <span className="text-xs font-medium text-slate-400">업무시간</span>
-                </div>
-                <div className="flex gap-2">
-                  <Button className="h-9 px-3" disabled={isFutureWork} onClick={() => addEntry(selectedEditorKind)} type="button" variant="secondary">
-                    <Plus aria-hidden="true" className="size-4" />
-                    추가
-                  </Button>
-                </div>
-              </div>
-              {selectedTotalHours > 8 ? <p className="mt-2 text-sm font-semibold text-red-600">하루 합계가 8시간을 초과했습니다.</p> : null}
-            </div>
-
-            <div className="space-y-2">
-              <SegmentedControl items={editorKindOptions} onChange={updateKind} value={selectedEditorKind} />
-            </div>
-
-            {selectedDay.entries.length > 1 ? (
-              <DndContext collisionDetection={closestCenter} onDragEnd={handleEntryDragEnd} sensors={entryDragSensors}>
-                <SortableContext items={selectedDay.entries.map((entry) => entry.clientId)} strategy={verticalListSortingStrategy}>
-                  <div className="space-y-2">
-                    {selectedDay.entries.map((entry, index) => (
-                      <SortableEntryItem
-                        entry={entry}
-                        index={index}
-                        isSelected={entry.clientId === selectedEntry?.clientId}
-                        key={entry.clientId}
-                        notionCardWarning={entryHasNotionCardWarning(entry, true)}
-                        onMoveDown={() => moveEntry(entry.clientId, 1)}
-                        onMoveUp={() => moveEntry(entry.clientId, -1)}
-                        onRemove={() => removeEntry(entry.clientId)}
-                        onSelect={() => selectEntry(entry.clientId)}
-                        totalCount={selectedDay.entries.length}
-                      />
-                    ))}
-                  </div>
-                </SortableContext>
-              </DndContext>
-            ) : null}
-            {selectedDay.entries.length === 0 && !selectedIsHoliday ? <p className="rounded-md border border-dashed border-slate-200 px-3 py-5 text-center text-sm font-medium text-slate-500">등록된 업무나 휴가가 없습니다.</p> : null}
-
-            {selectedIsHoliday ? (
-              <Field label="공휴일명">
-                <Input disabled={isFutureWork} onChange={(event) => updateHolidayName(event.target.value)} placeholder="예: 어린이날" value={selectedEntry?.kind === "HOLIDAY" ? selectedEntry.holidayName : selectedDay.holidayName} />
-              </Field>
-            ) : selectedEntry ? (
-              selectedEntry.kind === "WORK" ? (
-                <>
-                  <div className="grid grid-cols-[minmax(0,1fr)_112px] gap-3">
-                    <Field label="진행한 프로젝트">
-                      <div className="relative">
-                        <select
-                          aria-busy={isSelectedProjectRecommendationLoading}
-                          className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 pr-9 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                          disabled={isFutureWork}
-                          onChange={updateProject}
-                          value={selectedEntry.project}
-                        >
-                          <option value="">프로젝트 선택</option>
-                          {projects.map((project) => (
-                            <option key={project} value={project}>
-                              {project}
-                            </option>
-                          ))}
-                          <option value={newProjectOptionValue}>새 프로젝트 등록...</option>
-                        </select>
-                        {isSelectedProjectRecommendationLoading ? (
-                          <span className="pointer-events-none absolute right-8 top-1/2 inline-flex -translate-y-1/2 text-slate-400" role="status">
-                            <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
-                            <span className="sr-only">이전 프로젝트 불러오는 중</span>
-                          </span>
-                        ) : null}
-                      </div>
-                    </Field>
-
-                    <Field label="일한 시간">
-                      <Input disabled={isFutureWork} max={24} min={0} onChange={(event) => updateSelectedEntryHours(Number(event.target.value))} step={0.5} type="number" value={selectedEntry.hours} />
-                    </Field>
-                  </div>
-
-                  <Field label="내용">
-                    <Textarea disabled={isFutureWork} onChange={(event) => updateSelectedEntry({ content: event.target.value })} placeholder="오늘 진행한 일을 간단히 적어주세요." rows={5} value={selectedEntry.content} />
-                  </Field>
-
-                  <Field label="영문 번역본">
-                    <Textarea disabled={isFutureWork} onChange={(event) => updateSelectedAiTranslation(event.target.value)} placeholder="오늘 진행한 일을 영어로 간단히 적어주세요." rows={4} value={selectedEntry.aiTranslation} />
-                  </Field>
-
-                  <NotionCardLinkSection
-                    allocationError={selectedNotionAllocationError}
-                    candidates={notionCandidates.candidatesByDate[selectedDateKey] ?? []}
-                    cardDateRanges={monthCardDateRanges}
-                    disabled={isFutureWork}
-                    entry={selectedEntry}
-                    isAutoLoading={isSelectedNotionRecommendationLoading}
-                    selectedDateKey={selectedDateKey}
-                    onAllocatedHoursChange={(notionPageId, allocatedHours) => updateNotionCardAllocatedHours(selectedEntry.clientId || selectedEntry.id, notionPageId, allocatedHours)}
-                    onOpenPicker={() => {
-                      setIncludeDoneNotionCandidates(false);
-                      setEditingNotionEntryClientId(selectedEntry.clientId || selectedEntry.id);
-                      notionCandidates.loadCandidates({
-                        dateKey: selectedDateKey,
-                        includeDone: false,
-                        linkedPageIds: selectedEntry.notionCards.map((link) => link.notionPageId)
-                      });
-                    }}
-                    onRemoveCard={(notionPageId) => toggleNotionCardForEntry(selectedEntry.clientId || selectedEntry.id, notionPageId)}
-                    onResetAutoAllocation={() => resetNotionCardAutoAllocation(selectedEntry.clientId || selectedEntry.id)}
-                  />
-                </>
-              ) : selectedEntry.kind === "VACATION" ? (
-                <>
-                  <Field label="휴가 유형">
-                    <Input disabled={isFutureWork} onChange={(event) => updateSelectedEntry({ vacationName: event.target.value })} placeholder="예: 연차, 오전 반차" value={selectedEntry.vacationName} />
-                  </Field>
-                  <Field label="휴가 시간">
-                    <Input disabled={isFutureWork} max={24} min={0} onChange={(event) => updateSelectedEntry({ hours: Number(event.target.value) })} step={0.5} type="number" value={selectedEntry.hours} />
-                  </Field>
-                </>
-              ) : null
-            ) : null}
-
-            <div className="sticky bottom-0 z-20 -mx-5 -mb-5 border-t border-slate-100 bg-white px-5 pb-5 pt-4 shadow-[0_-8px_20px_-16px_rgba(15,23,42,0.45)] lg:static lg:mx-0 lg:mb-0 lg:px-0 lg:pb-0 lg:pt-5 lg:shadow-none">
-              {isSelectedDayScheduledCleanupPending() ? (
-                <p className="mb-3 inline-flex w-full items-center justify-end gap-1 text-right text-xs font-semibold leading-5 text-amber-700">
-                  <span>AI 예약 정리 대기 ·</span>
-                  <ShortcutHint keys={[shortcutModifierKey]} />
-                  <span>저장 클릭으로 즉시 정리</span>
-                </p>
-              ) : null}
-              {selectedIsSingleVacation ? (
-                <div className="mb-3 flex justify-end">
-                  <button
-                    className="text-sm font-semibold text-slate-600 underline-offset-4 transition hover:text-slate-950 hover:underline disabled:cursor-not-allowed disabled:text-slate-300"
-                    disabled={saveState === "saving" || deleteState === "deleting" || vacationRangeState === "saving"}
-                    onClick={() => void openVacationRangeModal()}
-                    type="button"
-                  >
-                    기간 설정
-                  </button>
-                </div>
-              ) : null}
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  {canDeleteSelected ? (
-                    <button
-                      className="inline-flex items-center gap-2 text-sm font-semibold text-red-600 underline-offset-4 transition hover:text-red-700 hover:underline disabled:cursor-not-allowed disabled:text-red-300"
-                      disabled={deleteState === "deleting"}
-                      onClick={requestDeleteSelectedDate}
-                      type="button"
-                    >
-                      {deleteState === "deleting" ? "삭제 중" : "삭제"}
-                      <ShortcutHint keys={["Del"]} />
-                    </button>
-                  ) : null}
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="text-right">
-                    <p className={cn("text-sm font-medium", saveState === "error" || deleteState === "error" ? "text-red-600" : "text-slate-500")}>
-                      {deleteState === "error" ? deleteError : saveState === "saved" ? "저장됨" : saveState === "saving" ? "저장 중" : saveError}
-                    </p>
-                  </div>
-                  {selectedEntry?.kind === "VACATION" ? (
-                    <>
-                      {secondarySelectedVacationSaveActions.map((action) => (
-                        <Button
-                          className={cn("h-10", action.variant === "ghost" ? "px-2" : "px-4")}
-                          disabled={isSaveDisabled()}
-                          key={action.status}
-                          onClick={() => void saveSelectedDraft({ vacationActionLabel: action.label, vacationStatus: action.status })}
-                          type="button"
-                          variant={action.variant}
-                        >
-                          {action.label}
-                        </Button>
-                      ))}
-                      {primarySelectedVacationSaveAction ? (
-                        <Button className="h-10 px-4" disabled={isSaveDisabled()} onClick={() => void saveSelectedDraft({ vacationActionLabel: primarySelectedVacationSaveAction.label, vacationStatus: primarySelectedVacationSaveAction.status })} type="button">
-                          {saveState === "saving" ? "저장 중" : primarySelectedVacationSaveAction.label}
-                          <ShortcutHint keys={[shortcutModifierKey, "↵"]} />
-                        </Button>
-                      ) : null}
-                    </>
-                  ) : (
-                    <Button className="h-10 px-4" disabled={isSaveDisabled()} onClick={(event) => void saveSelectedDraft({ forceImmediateAiAfterSave: event.ctrlKey || event.metaKey })}>
-                      {saveState === "saving" ? "저장 중" : "저장"}
-                      <ShortcutHint keys={[shortcutModifierKey, "↵"]} />
-                    </Button>
-                  )}
-                </div>
-              </div>
-              {aiCleanupDateKey === selectedDateKey && aiCleanupState !== "idle" ? (
-                <p className={cn("mt-2 text-right text-xs font-semibold leading-5", aiCleanupState === "error" ? "text-red-600" : aiCleanupState === "running" ? "text-slate-700" : "text-emerald-700")}>
-                  {aiCleanupState === "running" ? "AI 정리 중" : aiCleanupMessage}
-                </p>
-              ) : null}
-            </div>
-          </div>
-          )}
-
-          {!isSelectedWeekend && isFutureWork ? (
-            <div className="mx-5 mb-5 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-500">
-              미래 날짜는 아직 작성하지 않습니다.
-            </div>
-          ) : null}
-        </aside>
-        </div>
+          <DailyEditor
+            ai={{
+              cleanupMessage: aiCleanupMessage,
+              cleanupState: aiCleanupState,
+              isCleanupStatusVisible: aiCleanupDateKey === selectedDateKey && aiCleanupState !== "idle",
+              isScheduledCleanupPending: isSelectedDayScheduledCleanupPending()
+            }}
+            day={{
+              dateKey: selectedDateKey,
+              draft: selectedDay,
+              editorKind: selectedEditorKind,
+              hasWork: selectedHasWork,
+              isFutureWork,
+              isHoliday: selectedIsHoliday,
+              isSingleVacation: selectedIsSingleVacation,
+              isViewingToday,
+              isWeekend: isSelectedWeekend,
+              kindOptions: editorKindOptions,
+              selectedEntry,
+              totalHours: selectedTotalHours
+            }}
+            editing={{
+              isProjectRecommendationLoading: isSelectedProjectRecommendationLoading,
+              newProjectOptionValue,
+              onAiTranslationChange: updateSelectedAiTranslation,
+              onContentChange: (value) => updateSelectedEntry({ content: value }),
+              onHolidayNameChange: updateHolidayName,
+              onHoursChange: updateSelectedEntryHours,
+              onKindChange: updateKind,
+              onProjectChange: updateProject,
+              onSelectedEntryChange: updateSelectedEntry,
+              onShortVersionChange: updateSelectedShortVersion,
+              projects
+            }}
+            entryList={{
+              onAddEntry: addEntry,
+              onDragEnd: handleEntryDragEnd,
+              onMoveEntry: moveEntry,
+              onRemoveEntry: removeEntry,
+              onSelectEntry: selectEntry
+            }}
+            navigation={{
+              closeButtonRef: closeEditorButtonRef,
+              editorRef: dailyEditorRef,
+              isActive: isDailyEditorModalActive,
+              isMonthLoading: monthLoadState === "loading",
+              isRequested: isDailyEditorRequested,
+              onClose: closeDailyEditor,
+              onFocusCapture: () => setIsDailyEditorRequested(true),
+              onGoToday: goToday,
+              onSelectDate: selectDate,
+              showCloseButton: viewMode === "list" || isDailyEditorModalActive
+            }}
+            notion={{
+              allocationError: selectedNotionAllocationError,
+              candidates: notionCandidates.candidatesByDate[selectedDateKey] ?? [],
+              cardDateRanges: monthCardDateRanges,
+              isRecommendationLoading: isSelectedNotionRecommendationLoading,
+              onAllocatedHoursChange: (notionPageId, allocatedHours) => updateNotionCardAllocatedHours(selectedNotionEntryClientId, notionPageId, allocatedHours),
+              onOpenPicker: () => {
+                setIncludeDoneNotionCandidates(false);
+                setEditingNotionEntryClientId(selectedNotionEntryClientId);
+                notionCandidates.loadCandidates({
+                  dateKey: selectedDateKey,
+                  includeDone: false,
+                  linkedPageIds: selectedEntryLinkedNotionPageIds
+                });
+              },
+              onRemoveCard: (notionPageId) => toggleNotionCardForEntry(selectedNotionEntryClientId, notionPageId),
+              onResetAutoAllocation: () => resetNotionCardAutoAllocation(selectedNotionEntryClientId)
+            }}
+            persistence={{
+              canDelete: canDeleteSelected,
+              deleteError,
+              deleteState,
+              isSaveDisabled: isSaveDisabled(),
+              onSave: (event) => void saveSelectedDraft({ forceImmediateAiAfterSave: event.ctrlKey || event.metaKey }),
+              onSaveWithVacationAction: (action) => void saveSelectedDraft({ vacationActionLabel: action.label, vacationStatus: action.status }),
+              onRequestDelete: requestDeleteSelectedDate,
+              primaryVacationSaveAction: primarySelectedVacationSaveAction,
+              saveError,
+              saveState,
+              secondaryVacationSaveActions: secondarySelectedVacationSaveActions,
+              shortcutModifierKey
+            }}
+            vacation={{
+              isRangeSaving: vacationRangeState === "saving",
+              onOpenRangeModal: () => void openVacationRangeModal()
+            }}
+          />
         ) : null}
       </div>
 
@@ -3764,76 +3527,6 @@ export function TimesheetWorkspace({
         />
       ) : null}
     </>
-  );
-}
-
-function entryContentPreview(entry: TimesheetEntryDraft): string {
-  return truncateContent(entry.content);
-}
-
-function SortableEntryItem({
-  entry,
-  index,
-  isSelected,
-  notionCardWarning,
-  onMoveDown,
-  onMoveUp,
-  onRemove,
-  onSelect,
-  totalCount
-}: {
-  entry: TimesheetEntryDraft;
-  index: number;
-  isSelected: boolean;
-  notionCardWarning: boolean;
-  onMoveDown: () => void;
-  onMoveUp: () => void;
-  onRemove: () => void;
-  onSelect: () => void;
-  totalCount: number;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: entry.clientId });
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition
-  };
-
-  return (
-    <div
-      className={cn("rounded-md border bg-white p-3 shadow-sm transition", isSelected ? "border-slate-950 ring-2 ring-slate-950/10" : "border-slate-200")}
-      ref={setNodeRef}
-      style={style}
-    >
-      <div className="flex items-start gap-2">
-        <button className="mt-0.5 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" type="button" {...attributes} {...listeners}>
-          <GripVertical aria-hidden="true" className="size-4" />
-          <span className="sr-only">순서 변경</span>
-        </button>
-        <button className="block min-w-0 flex-1 rounded-sm text-left" onClick={onSelect} type="button">
-          <div className="flex items-center gap-2">
-            <Badge tone={entryKindTone(entry)}>{entryKindLabel(entry)}</Badge>
-            <span className="min-w-0 truncate text-sm font-semibold text-slate-800">{entryTitle(entry)}</span>
-            <span className="text-sm font-bold text-slate-950">{effectiveEntryHours(entry)}h</span>
-            {notionCardWarning ? <NotionCardWarningIcon /> : null}
-          </div>
-          {entry.kind === "WORK" && entryContentPreview(entry) ? <p className="mt-1 line-clamp-2 text-xs font-medium leading-4 text-slate-500">{entryContentPreview(entry)}</p> : null}
-        </button>
-        <div className="flex shrink-0 items-center gap-1">
-          <button className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30" disabled={index === 0} onClick={onMoveUp} type="button">
-            <ArrowUp aria-hidden="true" className="size-4" />
-            <span className="sr-only">위로 이동</span>
-          </button>
-          <button className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30" disabled={index === totalCount - 1} onClick={onMoveDown} type="button">
-            <ArrowDown aria-hidden="true" className="size-4" />
-            <span className="sr-only">아래로 이동</span>
-          </button>
-          <button className="rounded-md p-1 text-red-500 transition hover:bg-red-50 hover:text-red-700" onClick={onRemove} type="button">
-            <Trash2 aria-hidden="true" className="size-4" />
-            <span className="sr-only">삭제</span>
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }
 
