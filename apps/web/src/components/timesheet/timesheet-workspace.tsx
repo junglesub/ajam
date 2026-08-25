@@ -71,7 +71,8 @@ import { effectiveEntryHours, entryHasNotionCardWarning, entryKindLabel, entryKi
 import { ListView } from "./timesheet-list-view";
 import { AiOverwritePromptModal, AiRewritePromptModal, AiRewriteQueueModal } from "./timesheet-ai-modals";
 import { ProjectCreateModal } from "./timesheet-project-modal";
-import { Field, Metric, ModalShell, ProgressBar, ShortcutHint } from "./timesheet-ui-primitives";
+import { ConnectedVacationDeleteModal, ConnectedVacationSaveModal, VacationRangeModal } from "./timesheet-vacation-modals";
+import { Field, Metric, ModalShell, ShortcutHint } from "./timesheet-ui-primitives";
 import { DeleteConfirmModal, NotionSyncErrorModal, PendingNavigationConfirmModal } from "./timesheet-simple-modals";
 import { WeekendRelaxView } from "./weekend-relax-view";
 import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidate, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
@@ -4379,133 +4380,55 @@ export function TimesheetWorkspace({
       ) : null}
 
       {isVacationRangeOpen ? (
-        <ModalShell onClose={closeVacationRangeModal} onConfirm={() => void applyVacationRange(vacationRangeConflictKeys.length > 0, primaryVacationRangeSaveAction?.status ?? vacationRangeStatus)} title="휴가 기간 설정">
-          <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              {canEditVacationRangeStart ? (
-                <Field label="시작날짜">
-                  <Input disabled={vacationRangeState === "saving"} onChange={(event) => { setVacationRangeStart(event.target.value); setVacationRangeConflictKeys([]); if (vacationRangeEnd < event.target.value) setVacationRangeEnd(event.target.value); }} type="date" value={vacationRangeStart} />
-                </Field>
-              ) : (
-                <Field label="시작날짜">
-                  <div className="flex h-10 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700">
-                    {formatKoreanDate(vacationRangeStart)}
-                  </div>
-                </Field>
-              )}
-              <Field label="끝날짜">
-                <Input disabled={vacationRangeState === "saving"} min={vacationRangeStart} onChange={(event) => { setVacationRangeEnd(event.target.value); setVacationRangeConflictKeys([]); }} type="date" value={vacationRangeEnd} />
-              </Field>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_120px]">
-              <Field label="휴가 유형">
-                <Input disabled={vacationRangeState === "saving"} onChange={(event) => setVacationRangeName(event.target.value)} placeholder="예: 연차, 오전 반차" value={vacationRangeName} />
-              </Field>
-              <Field label="휴가 시간">
-                <Input disabled={vacationRangeState === "saving"} max={24} min={0} onChange={(event) => setVacationRangeHours(Number(event.target.value))} step={0.5} type="number" value={vacationRangeHours} />
-              </Field>
-            </div>
-            {vacationRangeConflictKeys.length > 0 ? (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium leading-6 text-amber-900">
-                기존 기록이 있는 {vacationRangeConflictKeys.length}일이 휴가로 교체됩니다. 공휴일은 교체하지 않습니다.
-              </div>
-            ) : null}
-            {vacationRangeProgress.total > 0 ? (
-              <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-                <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
-                  <span>저장 진행</span>
-                  <span>{vacationRangeProgress.completed}/{vacationRangeProgress.total}</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                  <div
-                    className="h-full rounded-full bg-slate-950 transition-all"
-                    style={{ width: `${Math.round((vacationRangeProgress.completed / vacationRangeProgress.total) * 100)}%` }}
-                  />
-                </div>
-              </div>
-            ) : null}
-            {vacationRangeMessage ? <p className="text-sm font-semibold text-emerald-700">{vacationRangeMessage}</p> : null}
-            {vacationRangeState === "error" ? <p className="text-sm font-semibold text-red-600">{vacationRangeError}</p> : null}
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <Button disabled={vacationRangeState === "saving"} onClick={closeVacationRangeModal} type="button" variant="secondary">
-                취소
-                <ShortcutHint keys={["Esc"]} />
-              </Button>
-              {secondaryVacationRangeSaveActions.map((action) => (
-                <Button
-                  className={cn(action.variant === "ghost" && "px-2")}
-                  disabled={vacationRangeState === "saving"}
-                  key={action.status}
-                  onClick={() => void applyVacationRange(vacationRangeConflictKeys.length > 0, action.status)}
-                  type="button"
-                  variant={action.variant}
-                >
-                  {action.label}
-                </Button>
-              ))}
-              {primaryVacationRangeSaveAction ? (
-                <Button disabled={vacationRangeState === "saving"} onClick={() => void applyVacationRange(vacationRangeConflictKeys.length > 0, primaryVacationRangeSaveAction.status)} type="button">
-                  {vacationRangeState === "saving" ? "저장 중" : vacationRangeConflictKeys.length > 0 ? `교체하고 ${primaryVacationRangeSaveAction.label}` : primaryVacationRangeSaveAction.label}
-                  <ShortcutHint keys={["↵"]} />
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        </ModalShell>
+        <VacationRangeModal
+          canEditStart={canEditVacationRangeStart}
+          conflictCount={vacationRangeConflictKeys.length}
+          error={vacationRangeError}
+          fallbackStatus={vacationRangeStatus}
+          message={vacationRangeMessage}
+          onApply={(confirmReplace, status) => void applyVacationRange(confirmReplace, status)}
+          onClose={closeVacationRangeModal}
+          onEndChange={(value) => { setVacationRangeEnd(value); setVacationRangeConflictKeys([]); }}
+          onHoursChange={setVacationRangeHours}
+          onNameChange={setVacationRangeName}
+          onStartChange={(value) => { setVacationRangeStart(value); setVacationRangeConflictKeys([]); if (vacationRangeEnd < value) setVacationRangeEnd(value); }}
+          primaryAction={primaryVacationRangeSaveAction}
+          progress={vacationRangeProgress}
+          rangeEnd={vacationRangeEnd}
+          rangeHours={vacationRangeHours}
+          rangeName={vacationRangeName}
+          rangeStart={vacationRangeStart}
+          saving={vacationRangeState === "saving"}
+          secondaryActions={secondaryVacationRangeSaveActions}
+          showError={vacationRangeState === "error"}
+        />
       ) : null}
 
       {connectedVacationPrompt && connectedVacationAction === "delete" ? (
-        <ModalShell onClose={() => setConnectedVacationPrompt(null)} onConfirm={() => void deleteConnectedVacationPrompt()} title="연결된 휴가 삭제">
-          <div className="space-y-4">
-            <p className="text-sm leading-6 text-slate-600">
-              붙어있는 휴가 {connectedVacationPrompt.dateKeys.length}일이 있습니다. 연결된 휴가를 함께 삭제할까요?
-            </p>
-            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600">
-              {formatKoreanDate(connectedVacationPrompt.dateKeys[0]!)} - {formatKoreanDate(connectedVacationPrompt.dateKeys[connectedVacationPrompt.dateKeys.length - 1]!)}
-            </div>
-            <ProgressBar label="삭제 진행" progress={connectedVacationProgress} />
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <Button disabled={isConnectedVacationSaving} onClick={() => setConnectedVacationPrompt(null)} type="button" variant="secondary">
-                취소
-                <ShortcutHint keys={["Esc"]} />
-              </Button>
-              <Button disabled={isConnectedVacationSaving} onClick={() => { setConnectedVacationPrompt(null); void deleteSelectedEntry({ skipConnectedVacation: true }); }} type="button" variant="secondary">
-                현재 날짜만 삭제
-              </Button>
-              <Button disabled={isConnectedVacationSaving} onClick={() => void deleteConnectedVacationPrompt()} type="button" variant="danger">
-                {isConnectedVacationSaving ? "삭제 중" : "함께 삭제"}
-                <ShortcutHint keys={["↵"]} />
-              </Button>
-            </div>
-          </div>
-        </ModalShell>
+        <ConnectedVacationDeleteModal
+          dateCount={connectedVacationPrompt.dateKeys.length}
+          endDateKey={connectedVacationPrompt.dateKeys[connectedVacationPrompt.dateKeys.length - 1]!}
+          onCancel={() => setConnectedVacationPrompt(null)}
+          onDeleteAll={() => void deleteConnectedVacationPrompt()}
+          onDeleteCurrentDate={() => { setConnectedVacationPrompt(null); void deleteSelectedEntry({ skipConnectedVacation: true }); }}
+          progress={connectedVacationProgress}
+          saving={isConnectedVacationSaving}
+          startDateKey={connectedVacationPrompt.dateKeys[0]!}
+        />
       ) : null}
 
       {connectedVacationPrompt && connectedVacationAction === "save" ? (
-        <ModalShell onClose={() => setConnectedVacationPrompt(null)} onConfirm={() => void saveConnectedVacationPrompt()} title="연결된 휴가 수정">
-          <div className="space-y-4">
-            <p className="text-sm leading-6 text-slate-600">
-              붙어있는 휴가 {connectedVacationPrompt.dateKeys.length}일이 있습니다. 현재 휴가 유형과 상태를 연결된 휴가에 함께 적용할까요? 각 날짜의 휴가 시간은 유지됩니다.
-            </p>
-            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600">
-              {formatKoreanDate(connectedVacationPrompt.dateKeys[0]!)} - {formatKoreanDate(connectedVacationPrompt.dateKeys[connectedVacationPrompt.dateKeys.length - 1]!)}
-            </div>
-            <ProgressBar label="저장 진행" progress={connectedVacationProgress} />
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <Button disabled={isConnectedVacationSaving} onClick={() => setConnectedVacationPrompt(null)} type="button" variant="secondary">
-                취소
-                <ShortcutHint keys={["Esc"]} />
-              </Button>
-              <Button disabled={isConnectedVacationSaving} onClick={() => { setConnectedVacationPrompt(null); void saveSelectedDraft({ skipConnectedVacation: true, vacationStatus: connectedVacationPrompt.vacationStatus }); }} type="button" variant="secondary">
-                현재 날짜만 {connectedVacationPrompt.actionLabel}
-              </Button>
-              <Button disabled={isConnectedVacationSaving} onClick={() => void saveConnectedVacationPrompt()} type="button">
-                {isConnectedVacationSaving ? "저장 중" : `함께 ${connectedVacationPrompt.actionLabel}`}
-                <ShortcutHint keys={["↵"]} />
-              </Button>
-            </div>
-          </div>
-        </ModalShell>
+        <ConnectedVacationSaveModal
+          actionLabel={connectedVacationPrompt.actionLabel}
+          dateCount={connectedVacationPrompt.dateKeys.length}
+          endDateKey={connectedVacationPrompt.dateKeys[connectedVacationPrompt.dateKeys.length - 1]!}
+          onCancel={() => setConnectedVacationPrompt(null)}
+          onSaveAll={() => void saveConnectedVacationPrompt()}
+          onSaveCurrentDate={() => { setConnectedVacationPrompt(null); void saveSelectedDraft({ skipConnectedVacation: true, vacationStatus: connectedVacationPrompt.vacationStatus }); }}
+          progress={connectedVacationProgress}
+          saving={isConnectedVacationSaving}
+          startDateKey={connectedVacationPrompt.dateKeys[0]!}
+        />
       ) : null}
 
       {aiRewritePromptDateKey ? (
