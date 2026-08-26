@@ -40,7 +40,7 @@ import { AppLoadingOverlay, AppLoadingScreen } from "@/components/app-loading-sc
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
 import { addBusinessDays, addDays, getBusinessDateKeysInRange, getDateKeyMonthCursor, getDefaultSelectedDateForMonth, getInclusiveDateSpan } from "./timesheet-date-utils";
 import { buildDraftsFromMonthData, buildInitialDrafts, buildSelectedEntryIds, createDraftForDate, createEntryForDate, createFutureDraftForDate, createVacationDay, findPreviousProject, hasExistingAiFields, hasHolidayMarker, hasMissingAiFields, hasWorkContent, hasWorkContentChange, isAutoProjectOnlyDraft, isDefaultFutureVacationDraft, rebalanceDefaultWorkHours, rowFromDraft, sanitizeDayForSave, withClientIds, createClientId, type TimesheetMonthData } from "./timesheet-draft-utils";
-import { allocateDefaultNotionCards, buildNotionCardSnapshotMap, createWeekdayDefaultNotionCards, findLocalPreviousNotionCards, mergeNotionCardSnapshot, mergeNotionCardSnapshots, type NotionWeeklyDefaultCard } from "./timesheet-notion-recommendation";
+import { allocateDefaultNotionCards, mergeNotionCardSnapshot, type NotionWeeklyDefaultCard } from "./timesheet-notion-recommendation";
 import { CalendarView } from "./timesheet-calendar-view";
 import { getNotionAllocationError, listRowKey } from "./timesheet-entry-display";
 import { ListView } from "./timesheet-list-view";
@@ -54,6 +54,7 @@ import { DeleteConfirmModal, NotionSyncErrorModal, PendingNavigationConfirmModal
 import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
 import { useTimesheetSettings, type GeminiApiKeyTestResult, type HolidayApiKeyTestResult, type ManagedUser, type UserAiSetting, type UserAiSettingUpdate, type UserRole } from "./use-timesheet-settings";
 import { getMonthCacheKey, useTimesheetMonthLoader, type VisibleMonthLoadResult } from "./use-timesheet-month-loader";
+import { useTimesheetRecommendations, type DatabaseNotionRecommendationApplication, type LocalNotionRecommendationApplication, type ProjectRecommendationApplication } from "./use-timesheet-recommendations";
 import { adjacentListTarget, shouldIgnoreCalendarShortcut } from "@/lib/calendar-shortcuts";
 import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
 
@@ -318,9 +319,6 @@ export function TimesheetWorkspace({
     field: "summary" | "translation";
     previousValue: string;
   } | null>(null);
-  const [projectRecommendationLoadingKeys, setProjectRecommendationLoadingKeys] = useState<Set<string>>(() => new Set());
-  const [notionRecommendationLoadingKeys, setNotionRecommendationLoadingKeys] = useState<Set<string>>(() => new Set());
-  const previousNotionCardRecommendationKeys = useRef(new Set<string>());
   const settings = useTimesheetSettings({
     createUserAction,
     currentUser,
@@ -361,6 +359,26 @@ export function TimesheetWorkspace({
     onMonthDataLoaded: applyLoadedVisibleMonthData,
     vacationColorsByYear,
     year: monthCursor.year
+  });
+  const {
+    fillPreviousProjectFromDatabase,
+    isNotionRecommendationLoading: isNotionRecommendationLoadingFor,
+    isProjectRecommendationLoading: isProjectRecommendationLoadingFor,
+    recommendPreviousNotionCardsForDraft,
+    recommendPreviousProjectForDraft
+  } = useTimesheetRecommendations({
+    candidatesByDate: notionCandidates.candidatesByDate,
+    doneStatusValues: initialNotionDoneStatusValues,
+    findPreviousNotionCardsAction,
+    findPreviousProjectAction,
+    onApplyDatabaseNotionCards: applyDatabaseNotionRecommendation,
+    onApplyLocalNotionCards: applyLocalNotionRecommendation,
+    onApplyProjectRecommendation: applyProjectRecommendation,
+    records,
+    savedEntryDateKeys,
+    savedRecords,
+    selectedDateKey,
+    weeklyDefaults: initialNotionWeeklyDefaults
   });
   const isDailyEditorModalActive = isCompactViewport && isDailyEditorRequested;
 
@@ -558,8 +576,8 @@ export function TimesheetWorkspace({
   const selectedListRowKey = selectedListTarget ? listRowKey(selectedListTarget.dateKey, selectedListTarget.entryClientId) : "";
   const selectedEditorKind: WorkRecordKind = selectedEntry?.kind ?? (selectedDay.holidayName ? "HOLIDAY" : isFutureDate ? "VACATION" : "WORK");
   const selectedNotionAllocationError = selectedEntry ? getNotionAllocationError(selectedEntry) : "";
-  const isSelectedProjectRecommendationLoading = Boolean(selectedEntry && projectRecommendationLoadingKeys.has(`${selectedDateKey}:${selectedEntry.clientId}`));
-  const isSelectedNotionRecommendationLoading = Boolean(selectedEntry && notionRecommendationLoadingKeys.has(`${selectedDateKey}:${selectedEntry.clientId}`));
+  const isSelectedProjectRecommendationLoading = Boolean(selectedEntry && isProjectRecommendationLoadingFor(selectedDateKey, selectedEntry.clientId));
+  const isSelectedNotionRecommendationLoading = Boolean(selectedEntry && isNotionRecommendationLoadingFor(selectedDateKey, selectedEntry.clientId));
   const selectedNotionEntryClientId = selectedEntry ? selectedEntry.clientId || selectedEntry.id : "";
   const selectedEntryLinkedNotionPageIds = selectedEntry ? selectedEntry.notionCards.map((link) => link.notionPageId) : [];
 
@@ -810,9 +828,35 @@ export function TimesheetWorkspace({
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [isDirty]);
 
-  useEffect(() => {
-    recommendPreviousNotionCardsForDraft(selectedDateKey, records[selectedDateKey]);
-  }, [records, savedEntryDateKeys, selectedDateKey]);
+  function applyProjectRecommendation({ clientId, dateKey, project }: ProjectRecommendationApplication) {
+    setProjects((current) => mergeProjects(current, [project]));
+    setRecords((current) => {
+      const day = current[dateKey];
+
+      if (!day) {
+        return current;
+      }
+
+      const entries = day.entries.map((entry) => {
+        if (entry.clientId !== clientId || entry.kind !== "WORK" || entry.project.trim()) {
+          return entry;
+        }
+
+        return {
+          ...entry,
+          project
+        };
+      });
+
+      return {
+        ...current,
+        [dateKey]: {
+          ...day,
+          entries
+        }
+      };
+    });
+  }
 
   function resetEntryFeedback() {
     setSaveState("idle");
@@ -843,191 +887,68 @@ export function TimesheetWorkspace({
     });
   }
 
-  async function fillPreviousProjectFromDatabase(dateKey: string, clientId: string) {
-    const loadingKey = `${dateKey}:${clientId}`;
+  function applyDatabaseNotionRecommendation({ cards, clientId, dateKey }: DatabaseNotionRecommendationApplication) {
+    setRecords((current) => {
+      const day = current[dateKey];
 
-    setProjectRecommendationLoadingKeys((current) => new Set(current).add(loadingKey));
-
-    try {
-      const project = (await findPreviousProjectAction(dateKey)).trim();
-
-      if (!project) {
-        return;
+      if (!day) {
+        return current;
       }
 
-      setProjects((current) => mergeProjects(current, [project]));
-      setRecords((current) => {
-        const day = current[dateKey];
-
-        if (!day) {
-          return current;
+      const entries = day.entries.map((entry) => {
+        if (entry.clientId !== clientId || entry.kind !== "WORK" || entry.notionCards.some((card) => card.source !== "weekday_default")) {
+          return entry;
         }
 
-        const entries = day.entries.map((entry) => {
-          if (entry.clientId !== clientId || entry.kind !== "WORK" || entry.project.trim()) {
-            return entry;
-          }
+        const cardsByPageId = new Map(cards.map((card) => [card.notionPageId, card]));
+        const nextCards = entry.notionCards.map((card) => mergeNotionCardSnapshot(card, cardsByPageId.get(card.notionPageId)));
+        const nextPageIds = new Set(nextCards.map((card) => card.notionPageId));
 
-          return {
-            ...entry,
-            project
-          };
-        });
+        nextCards.push(...cards.filter((card) => !nextPageIds.has(card.notionPageId)));
 
         return {
-          ...current,
-          [dateKey]: {
-            ...day,
-            entries
-          }
+          ...entry,
+          notionCards: allocateDefaultNotionCards(nextCards, entry.hours)
         };
       });
-    } catch {
-      // Auto-fill is a convenience path; leave the draft editable if lookup fails.
-    } finally {
-      setProjectRecommendationLoadingKeys((current) => {
-        const next = new Set(current);
 
-        next.delete(loadingKey);
-
-        return next;
-      });
-    }
+      return {
+        ...current,
+        [dateKey]: {
+          ...day,
+          entries
+        }
+      };
+    });
   }
 
-  async function fillPreviousNotionCardsFromDatabase(dateKey: string, clientId: string) {
-    const loadingKey = `${dateKey}:${clientId}`;
+  function applyLocalNotionRecommendation({ cards, clientId, dateKey }: LocalNotionRecommendationApplication) {
+    setRecords((current) => {
+      const currentDay = current[dateKey];
 
-    setNotionRecommendationLoadingKeys((current) => new Set(current).add(loadingKey));
-
-    try {
-      const cards = await findPreviousNotionCardsAction(dateKey);
-
-      if (cards.length === 0) {
-        return;
+      if (!currentDay) {
+        return current;
       }
 
-      setRecords((current) => {
-        const day = current[dateKey];
-
-        if (!day) {
-          return current;
+      const entries = currentDay.entries.map((currentEntry) => {
+        if (currentEntry.clientId !== clientId || currentEntry.kind !== "WORK" || currentEntry.notionCards.length > 0) {
+          return currentEntry;
         }
 
-        const entries = day.entries.map((entry) => {
-          if (entry.clientId !== clientId || entry.kind !== "WORK" || entry.notionCards.some((card) => card.source !== "weekday_default")) {
-            return entry;
-          }
-
-          const cardsByPageId = new Map(cards.map((card) => [card.notionPageId, card]));
-          const nextCards = entry.notionCards.map((card) => mergeNotionCardSnapshot(card, cardsByPageId.get(card.notionPageId)));
-          const nextPageIds = new Set(nextCards.map((card) => card.notionPageId));
-
-          nextCards.push(...cards.filter((card) => !nextPageIds.has(card.notionPageId)));
-
-          return {
-            ...entry,
-            notionCards: allocateDefaultNotionCards(nextCards, entry.hours)
-          };
-        });
-
         return {
-          ...current,
-          [dateKey]: {
-            ...day,
-            entries
-          }
+          ...currentEntry,
+          notionCards: allocateDefaultNotionCards(cards, currentEntry.hours)
         };
       });
-    } catch {
-      // Auto-fill is a convenience path; leave the draft editable if lookup fails.
-    } finally {
-      setNotionRecommendationLoadingKeys((current) => {
-        const next = new Set(current);
 
-        next.delete(loadingKey);
-
-        return next;
-      });
-    }
-  }
-
-  function recommendPreviousProjectForDraft(dateKey: string, day: TimesheetDayDraft | undefined) {
-    if (isWeekendDateKey(dateKey) || savedEntryDateKeys.has(dateKey)) {
-      return;
-    }
-
-    const entry = day?.entries[0];
-
-    if (entry?.kind === "WORK" && !entry.project.trim()) {
-      void fillPreviousProjectFromDatabase(dateKey, entry.clientId);
-    }
-  }
-
-  function recommendPreviousNotionCardsForDraft(dateKey: string, day: TimesheetDayDraft | undefined) {
-    if (isWeekendDateKey(dateKey) || savedEntryDateKeys.has(dateKey)) {
-      return;
-    }
-
-    const entry = day?.entries[0];
-
-    if (entry?.kind === "WORK" && entry.notionCards.length === 0) {
-      const recommendationKey = `${dateKey}:${entry.clientId}`;
-
-      if (previousNotionCardRecommendationKeys.current.has(recommendationKey)) {
-        return;
-      }
-
-      previousNotionCardRecommendationKeys.current.add(recommendationKey);
-
-      const snapshotsByPageId = buildNotionCardSnapshotMap({
-        candidatesByDate: notionCandidates.candidatesByDate,
-        savedRecords
-      });
-      const weekdayCards = mergeNotionCardSnapshots(
-        createWeekdayDefaultNotionCards(dateKey, initialNotionWeeklyDefaults),
-        snapshotsByPageId
-      );
-      const previousCards = findLocalPreviousNotionCards({
-        dateKey,
-        doneStatusValues: initialNotionDoneStatusValues,
-        savedRecords
-      });
-      const localCards = [...weekdayCards, ...previousCards.cards];
-
-      if (localCards.length > 0) {
-        setRecords((current) => {
-          const currentDay = current[dateKey];
-
-          if (!currentDay) {
-            return current;
-          }
-
-          const entries = currentDay.entries.map((currentEntry) => {
-            if (currentEntry.clientId !== entry.clientId || currentEntry.kind !== "WORK" || currentEntry.notionCards.length > 0) {
-              return currentEntry;
-            }
-
-            return {
-              ...currentEntry,
-              notionCards: allocateDefaultNotionCards(localCards, currentEntry.hours)
-            };
-          });
-
-          return {
-            ...current,
-            [dateKey]: {
-              ...currentDay,
-              entries
-            }
-          };
-        });
-      }
-
-      if (!previousCards.foundPreviousEntry) {
-        void fillPreviousNotionCardsFromDatabase(dateKey, entry.clientId);
-      }
-    }
+      return {
+        ...current,
+        [dateKey]: {
+          ...currentDay,
+          entries
+        }
+      };
+    });
   }
 
   function discardSelectedDraft() {
