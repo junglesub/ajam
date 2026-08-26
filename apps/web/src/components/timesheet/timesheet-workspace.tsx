@@ -53,6 +53,7 @@ import { Metric } from "./timesheet-ui-primitives";
 import { DeleteConfirmModal, NotionSyncErrorModal, PendingNavigationConfirmModal } from "./timesheet-simple-modals";
 import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
 import { useTimesheetSettings, type GeminiApiKeyTestResult, type HolidayApiKeyTestResult, type ManagedUser, type UserAiSetting, type UserAiSettingUpdate, type UserRole } from "./use-timesheet-settings";
+import { getMonthCacheKey, useTimesheetMonthLoader, type VisibleMonthLoadResult } from "./use-timesheet-month-loader";
 import { adjacentListTarget, shouldIgnoreCalendarShortcut } from "@/lib/calendar-shortcuts";
 import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
 
@@ -94,7 +95,6 @@ type AiCleanupState = "idle" | "running" | "done" | "skipped" | "error";
 type DeleteState = "idle" | "deleting" | "error";
 type ProjectAddState = "idle" | "saving" | "error";
 type VacationRangeSaveState = "idle" | "saving" | "error";
-type MonthLoadState = "idle" | "loading" | "error";
 type PendingNavigation =
   | { kind: "closeEditor" }
   | { kind: "date"; dateKey: string; entryClientId?: string }
@@ -178,10 +178,6 @@ function getVacationSaveActions(mode: "create" | "edit", status: VacationStatus)
     { label: "저장", status: "CONFIRMED", variant: "primary" },
     { label: "임시로 변경", status: "TEMPORARY", variant: "ghost" }
   ];
-}
-
-function getMonthCacheKey(year: number, monthIndex: number): string {
-  return `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
 }
 
 function mergeProjects(current: string[], projects: string[]): string[] {
@@ -277,9 +273,6 @@ export function TimesheetWorkspace({
   const [vacationColorsByYear, setVacationColorsByYear] = useState<Record<number, Record<string, VacationColor>>>(() => ({
     [initialYear]: initialMonthData.vacationColors
   }));
-  const [loadedMonthKeys, setLoadedMonthKeys] = useState(() => {
-    return new Set([getMonthCacheKey(initialYear, initialMonthIndex)]);
-  });
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState("");
   const [notionSyncError, setNotionSyncError] = useState("");
@@ -325,9 +318,6 @@ export function TimesheetWorkspace({
     field: "summary" | "translation";
     previousValue: string;
   } | null>(null);
-  const [monthLoadState, setMonthLoadState] = useState<MonthLoadState>("idle");
-  const [monthLoadError, setMonthLoadError] = useState("");
-  const [isInitialMonthSyncing, setIsInitialMonthSyncing] = useState(true);
   const [projectRecommendationLoadingKeys, setProjectRecommendationLoadingKeys] = useState<Set<string>>(() => new Set());
   const [notionRecommendationLoadingKeys, setNotionRecommendationLoadingKeys] = useState<Set<string>>(() => new Set());
   const previousNotionCardRecommendationKeys = useRef(new Set<string>());
@@ -352,6 +342,26 @@ export function TimesheetWorkspace({
     updateProfileAction
   });
   const { aiSetting, isOpen: isSettingsOpen, modalProps: settingsModalProps, rewriteQueueCleanupMode } = settings;
+  const {
+    finishInitialSync,
+    getVisibleMonthKey,
+    isInitialMonthSyncing,
+    isMonthLoaded,
+    loadVisibleMonthData,
+    markMonthIdle,
+    markMonthLoaded,
+    markMonthLoading,
+    monthLoadError,
+    monthLoadState,
+    replaceLoadedMonths
+  } = useTimesheetMonthLoader({
+    initialLoadedMonthKey: getMonthCacheKey(initialYear, initialMonthIndex),
+    loadMonthAction,
+    monthIndex: monthCursor.monthIndex,
+    onMonthDataLoaded: applyLoadedVisibleMonthData,
+    vacationColorsByYear,
+    year: monthCursor.year
+  });
   const isDailyEditorModalActive = isCompactViewport && isDailyEditorRequested;
 
   useEffect(() => {
@@ -379,7 +389,7 @@ export function TimesheetWorkspace({
     const browserYear = browserToday.getFullYear();
 
     if (browserTodayKey === initialTodayKey && browserYear === initialYear && browserMonthIndex === initialMonthIndex) {
-      setIsInitialMonthSyncing(false);
+      finishInitialSync();
       return;
     }
 
@@ -449,7 +459,7 @@ export function TimesheetWorkspace({
 
           return next;
         });
-        setLoadedMonthKeys((current) => new Set(current).add(monthKey));
+        markMonthLoaded(monthKey);
         updateAiRewriteRequestsFromDays(monthData.entries);
       } catch {
         // Midnight refresh is opportunistic; normal month navigation still reports load errors.
@@ -594,10 +604,6 @@ export function TimesheetWorkspace({
   const primaryVacationRangeSaveAction = vacationRangeSaveActions.find((action) => action.variant === "primary");
   const secondaryVacationRangeSaveActions = vacationRangeSaveActions.filter((action) => action.variant !== "primary");
 
-  function getVisibleMonthKey() {
-    return getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
-  }
-
   function rememberVacationColors(year: number, monthData: TimesheetMonthData) {
     setVacationColorsByYear((current) => ({ ...current, [year]: monthData.vacationColors }));
   }
@@ -651,7 +657,11 @@ export function TimesheetWorkspace({
 
       return next;
     });
-    setLoadedMonthKeys((current) => (scope === "all" ? new Set([monthKey]) : new Set(current).add(monthKey)));
+    if (scope === "all") {
+      replaceLoadedMonths(monthKey);
+    } else {
+      markMonthLoaded(monthKey);
+    }
   }
 
   async function refreshVacationColors(dateKeys: string[]) {
@@ -713,23 +723,9 @@ export function TimesheetWorkspace({
 
       return next;
     });
-    setLoadedMonthKeys((current) => new Set(current).add(monthKey));
-    setMonthLoadState("idle");
-    setIsInitialMonthSyncing(false);
-  }
-
-  async function loadVisibleMonthData() {
-    setMonthLoadState("loading");
-    setMonthLoadError("");
-
-    try {
-      return await loadMonthAction(monthCursor.year, monthCursor.monthIndex);
-    } catch (error) {
-      setMonthLoadState("error");
-      setMonthLoadError(error instanceof Error ? error.message : "월 데이터를 불러오지 못했습니다.");
-      setIsInitialMonthSyncing(false);
-      throw error;
-    }
+    markMonthLoaded(monthKey);
+    markMonthIdle();
+    finishInitialSync();
   }
 
   async function saveEntryAndNotify(entry: TimesheetDayDraft): Promise<TimesheetSaveResult> {
@@ -759,86 +755,45 @@ export function TimesheetWorkspace({
     scope: "timesheet"
   });
 
-  useEffect(() => {
-    const monthKey = getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
+  function applyLoadedVisibleMonthData({ monthData, monthKey, year }: VisibleMonthLoadResult) {
+    rememberVacationColors(year, monthData);
+    const monthDrafts = buildDraftsFromMonthData(monthData);
 
-    if (loadedMonthKeys.has(monthKey) && vacationColorsByYear[monthCursor.year]) {
-      setMonthLoadState("idle");
-      setMonthLoadError("");
-      setIsInitialMonthSyncing(false);
-      return;
-    }
+    setHolidayWarning(monthData.holidayWarning ?? "");
+    setHolidayWarningMonthKeys((current) => {
+      const next = new Set(current);
 
-    let isActive = true;
-
-    async function loadMonth() {
-      setMonthLoadState("loading");
-      setMonthLoadError("");
-
-      try {
-        const monthData = await loadMonthAction(monthCursor.year, monthCursor.monthIndex);
-
-        if (!isActive) {
-          return;
-        }
-
-        rememberVacationColors(monthCursor.year, monthData);
-        const monthDrafts = buildDraftsFromMonthData(monthData);
-
-        setHolidayWarning(monthData.holidayWarning ?? "");
-        setHolidayWarningMonthKeys((current) => {
-          const next = new Set(current);
-
-          if (monthData.holidayWarning) {
-            next.add(monthKey);
-          } else {
-            next.delete(monthKey);
-          }
-
-          return next;
-        });
-        setRecords((current) => ({
-          ...current,
-          ...monthDrafts
-        }));
-        setSavedRecords((current) => ({
-          ...current,
-          ...monthDrafts
-        }));
-        setSelectedEntryIdByDate((current) => ({
-          ...current,
-          ...Object.fromEntries(Object.values(monthDrafts).flatMap((day) => day.entries[0] ? [[day.dateKey, day.entries[0].clientId]] : []))
-        }));
-        setProjects((current) => mergeProjects(current, monthData.projects));
-        setSavedEntryDateKeys((current) => {
-          const next = new Set(current);
-
-          for (const entry of monthData.entries) {
-            next.add(entry.dateKey);
-          }
-
-          return next;
-        });
-        setLoadedMonthKeys((current) => new Set(current).add(monthKey));
-        setMonthLoadState("idle");
-        setIsInitialMonthSyncing(false);
-      } catch (error) {
-        if (!isActive) {
-          return;
-        }
-
-        setMonthLoadState("error");
-        setMonthLoadError(error instanceof Error ? error.message : "월 데이터를 불러오지 못했습니다.");
-        setIsInitialMonthSyncing(false);
+      if (monthData.holidayWarning) {
+        next.add(monthKey);
+      } else {
+        next.delete(monthKey);
       }
-    }
 
-    void loadMonth();
+      return next;
+    });
+    setRecords((current) => ({
+      ...current,
+      ...monthDrafts
+    }));
+    setSavedRecords((current) => ({
+      ...current,
+      ...monthDrafts
+    }));
+    setSelectedEntryIdByDate((current) => ({
+      ...current,
+      ...Object.fromEntries(Object.values(monthDrafts).flatMap((day) => day.entries[0] ? [[day.dateKey, day.entries[0].clientId]] : []))
+    }));
+    setProjects((current) => mergeProjects(current, monthData.projects));
+    setSavedEntryDateKeys((current) => {
+      const next = new Set(current);
 
-    return () => {
-      isActive = false;
-    };
-  }, [loadMonthAction, loadedMonthKeys, monthCursor.monthIndex, monthCursor.year, vacationColorsByYear]);
+      for (const entry of monthData.entries) {
+        next.add(entry.dateKey);
+      }
+
+      return next;
+    });
+  }
 
   useEffect(() => {
     function warnBeforeUnload(event: BeforeUnloadEvent) {
@@ -1150,10 +1105,7 @@ export function TimesheetWorkspace({
   }
 
   function updateMonthCursor(nextCursor: { monthIndex: number; year: number }) {
-    if (!loadedMonthKeys.has(getMonthCacheKey(nextCursor.year, nextCursor.monthIndex))) {
-      setMonthLoadState("loading");
-      setMonthLoadError("");
-    }
+    markMonthLoading(getMonthCacheKey(nextCursor.year, nextCursor.monthIndex));
 
     setMonthCursor(nextCursor);
   }
@@ -1291,12 +1243,11 @@ export function TimesheetWorkspace({
       const cursor = getDateKeyMonthCursor(dateKey);
       return getMonthCacheKey(cursor.year, cursor.monthIndex);
     }));
-    const knownMonthKeys = new Set(loadedMonthKeys);
     const warningMonthKeys = new Set(holidayWarningMonthKeys);
     let loadedDrafts: Record<string, TimesheetDayDraft> = {};
 
     for (const monthKey of monthKeys) {
-      if (knownMonthKeys.has(monthKey) && !warningMonthKeys.has(monthKey)) {
+      if (isMonthLoaded(monthKey) && !warningMonthKeys.has(monthKey)) {
         continue;
       }
 
@@ -1310,7 +1261,6 @@ export function TimesheetWorkspace({
         ...loadedDrafts,
         ...monthDrafts
       };
-      knownMonthKeys.add(monthKey);
 
       setRecords((current) => ({
         ...current,
@@ -1346,7 +1296,7 @@ export function TimesheetWorkspace({
 
         return next;
       });
-      setLoadedMonthKeys((current) => new Set(current).add(monthKey));
+      markMonthLoaded(monthKey);
     }
 
     return loadedDrafts;
