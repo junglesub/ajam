@@ -52,49 +52,13 @@ import { ConnectedVacationDeleteModal, ConnectedVacationSaveModal, VacationRange
 import { Metric } from "./timesheet-ui-primitives";
 import { DeleteConfirmModal, NotionSyncErrorModal, PendingNavigationConfirmModal } from "./timesheet-simple-modals";
 import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
+import { useTimesheetSettings, type GeminiApiKeyTestResult, type HolidayApiKeyTestResult, type ManagedUser, type UserAiSetting, type UserAiSettingUpdate, type UserRole } from "./use-timesheet-settings";
 import { adjacentListTarget, shouldIgnoreCalendarShortcut } from "@/lib/calendar-shortcuts";
 import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
 
 type ViewMode = "calendar" | "list";
 
 const fullListContentStorageKey = "timesheet:list:show-full-content";
-
-type UserRole = "ADMIN" | "USER";
-type AiCleanupMode = "immediate" | "manual" | "scheduled";
-
-type ManagedUser = {
-  email: string;
-  id: string;
-  role: UserRole;
-  username: string;
-};
-
-type HolidayApiKeyTestResult = {
-  holidays: Array<{ dateKey: string; name: string }>;
-  ok: boolean;
-};
-
-type UserAiSetting = {
-  apiKeySaved: boolean;
-  backfillLimit: number;
-  backfillMissing: boolean;
-  contextDays: number;
-  cleanupMode: AiCleanupMode;
-  enabled: boolean;
-  model: string;
-  provider: "GEMINI";
-};
-
-type UserAiSettingUpdate = {
-  apiKey?: string;
-  backfillLimit: number;
-  backfillMissing: boolean;
-  clearApiKey?: boolean;
-  contextDays: number;
-  cleanupMode: AiCleanupMode;
-  enabled: boolean;
-  model: string;
-};
 
 type TimesheetAiCleanupResult = {
   appliedDateKeys: string[];
@@ -125,16 +89,10 @@ type AiCleanupOptions = {
   overwriteCurrentDate?: boolean;
 };
 
-type GeminiApiKeyTestResult = {
-  ok: boolean;
-};
-
 type SaveState = "idle" | "saving" | "saved" | "error";
 type AiCleanupState = "idle" | "running" | "done" | "skipped" | "error";
 type DeleteState = "idle" | "deleting" | "error";
 type ProjectAddState = "idle" | "saving" | "error";
-type SettingsSaveState = "idle" | "saving" | "saved" | "error";
-type HolidayResetState = "idle" | "saving" | "saved" | "error";
 type VacationRangeSaveState = "idle" | "saving" | "error";
 type MonthLoadState = "idle" | "loading" | "error";
 type PendingNavigation =
@@ -221,14 +179,6 @@ function getVacationSaveActions(mode: "create" | "edit", status: VacationStatus)
     { label: "임시로 변경", status: "TEMPORARY", variant: "ghost" }
   ];
 }
-
-const aiModelPresets = [
-  { label: "빠름/저렴 - gemini-3.1-flash-lite", value: "gemini-3.1-flash-lite" },
-  { label: "균형 - gemini-3.5-flash", value: "gemini-3.5-flash" },
-  { label: "안정 대안 - gemini-2.5-flash", value: "gemini-2.5-flash" },
-  { label: "품질 우선 - gemini-2.5-pro", value: "gemini-2.5-pro" },
-  { label: "직접 입력", value: "__custom__" }
-];
 
 function getMonthCacheKey(year: number, monthIndex: number): string {
   return `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
@@ -344,48 +294,14 @@ export function TimesheetWorkspace({
   const [projectAddState, setProjectAddState] = useState<ProjectAddState>("idle");
   const [projectAddError, setProjectAddError] = useState("");
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [profileUsername, setProfileUsername] = useState(initialCurrentUser.username);
-  const [profileEmail, setProfileEmail] = useState(initialCurrentUser.email);
-  const [profilePassword, setProfilePassword] = useState("");
-  const [profileState, setProfileState] = useState<SettingsSaveState>("idle");
-  const [profileError, setProfileError] = useState("");
-  const [holidayApiKey, setHolidayApiKey] = useState(initialHolidayApiKey);
-  const [holidayApiKeyState, setHolidayApiKeyState] = useState<SettingsSaveState>("idle");
-  const [holidayApiKeyError, setHolidayApiKeyError] = useState("");
-  const [holidayApiKeyTestState, setHolidayApiKeyTestState] = useState<SettingsSaveState>("idle");
-  const [holidayApiKeyTestMessage, setHolidayApiKeyTestMessage] = useState("");
-  const [aiSetting, setAiSetting] = useState(initialAiSetting);
   const [aiRewriteRequests, setAiRewriteRequests] = useState(initialAiRewriteRequests);
   const [isAiRewriteQueueOpen, setIsAiRewriteQueueOpen] = useState(false);
-  const [aiEnabled, setAiEnabled] = useState(initialAiSetting.enabled);
-  const [aiApiKey, setAiApiKey] = useState("");
-  const [aiClearApiKey, setAiClearApiKey] = useState(false);
-  const [aiModel, setAiModel] = useState(initialAiSetting.model);
-  const [aiCustomModel, setAiCustomModel] = useState(aiModelPresets.some((preset) => preset.value === initialAiSetting.model) ? "" : initialAiSetting.model);
-  const [aiContextDays, setAiContextDays] = useState(initialAiSetting.contextDays);
-  const [aiBackfillMissing, setAiBackfillMissing] = useState(initialAiSetting.backfillMissing);
-  const [aiBackfillLimit, setAiBackfillLimit] = useState(initialAiSetting.backfillLimit);
-  const [aiCleanupMode, setAiCleanupMode] = useState<AiCleanupMode>(initialAiSetting.cleanupMode);
-  const [aiSettingState, setAiSettingState] = useState<SettingsSaveState>("idle");
-  const [aiSettingMessage, setAiSettingMessage] = useState("");
-  const [aiTestState, setAiTestState] = useState<SettingsSaveState>("idle");
-  const [aiTestMessage, setAiTestMessage] = useState("");
   const [holidayWarning, setHolidayWarning] = useState(initialMonthData.holidayWarning ?? "");
   const [holidayWarningMonthKeys, setHolidayWarningMonthKeys] = useState(() => {
     const initialMonthKey = getMonthCacheKey(initialYear, initialMonthIndex);
 
     return new Set(initialMonthData.holidayWarning ? [initialMonthKey] : []);
   });
-  const [holidayResetState, setHolidayResetState] = useState<HolidayResetState>("idle");
-  const [holidayResetError, setHolidayResetError] = useState("");
-  const [managedUsers, setManagedUsers] = useState(initialManagedUsers);
-  const [newUserUsername, setNewUserUsername] = useState("");
-  const [newUserEmail, setNewUserEmail] = useState("");
-  const [newUserPassword, setNewUserPassword] = useState("");
-  const [newUserRole, setNewUserRole] = useState<UserRole>("USER");
-  const [userCreateState, setUserCreateState] = useState<SettingsSaveState>("idle");
-  const [userCreateError, setUserCreateError] = useState("");
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
   const [isVacationRangeOpen, setIsVacationRangeOpen] = useState(false);
   const [vacationRangeStart, setVacationRangeStart] = useState(todayKey);
@@ -415,6 +331,27 @@ export function TimesheetWorkspace({
   const [projectRecommendationLoadingKeys, setProjectRecommendationLoadingKeys] = useState<Set<string>>(() => new Set());
   const [notionRecommendationLoadingKeys, setNotionRecommendationLoadingKeys] = useState<Set<string>>(() => new Set());
   const previousNotionCardRecommendationKeys = useRef(new Set<string>());
+  const settings = useTimesheetSettings({
+    createUserAction,
+    currentUser,
+    currentMonth: { monthIndex: monthCursor.monthIndex, year: monthCursor.year },
+    initialAiSetting,
+    initialHolidayApiKey,
+    initialManagedUsers,
+    onHolidayCacheReset: applyHolidayCacheReset,
+    onOpenRewriteQueue: () => setIsAiRewriteQueueOpen(true),
+    onProfileUpdated: setCurrentUser,
+    refreshRewriteQueue: refreshAiRewriteRequests,
+    resetAllHolidayCacheAction,
+    resetCurrentMonthHolidayCacheAction: resetHolidayCacheAction,
+    rewriteQueueCount: aiRewriteRequests.length,
+    saveHolidayApiKeyAction,
+    testGeminiApiKeyAction,
+    testHolidayApiKeyAction,
+    updateAiSettingAction,
+    updateProfileAction
+  });
+  const { aiSetting, isOpen: isSettingsOpen, modalProps: settingsModalProps, rewriteQueueCleanupMode } = settings;
   const isDailyEditorModalActive = isCompactViewport && isDailyEditorRequested;
 
   useEffect(() => {
@@ -642,7 +579,6 @@ export function TimesheetWorkspace({
   const shortcutModifierKey = useMemo(() => getSystemModifierKey(), []);
   const editorKindOptions = isFutureDate ? kindOptions.filter((option) => option.value !== "WORK") : kindOptions;
   const canDeleteSelected = savedEntryDateKeys.has(selectedDateKey);
-  const isAdmin = currentUser.role === "ADMIN";
   const selectedTotalHours = selectedDay.entries.reduce((sum, entry) => sum + entry.hours, 0);
   const selectedHasWork = selectedDay.entries.some((entry) => entry.kind === "WORK");
   const selectedIsHoliday = selectedEditorKind === "HOLIDAY";
@@ -657,7 +593,6 @@ export function TimesheetWorkspace({
   const vacationRangeSaveActions = getVacationSaveActions(selectedVacationMode, vacationRangeStatus);
   const primaryVacationRangeSaveAction = vacationRangeSaveActions.find((action) => action.variant === "primary");
   const secondaryVacationRangeSaveActions = vacationRangeSaveActions.filter((action) => action.variant !== "primary");
-  const isDevelopment = process.env.NODE_ENV === "development";
 
   function getVisibleMonthKey() {
     return getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
@@ -665,6 +600,58 @@ export function TimesheetWorkspace({
 
   function rememberVacationColors(year: number, monthData: TimesheetMonthData) {
     setVacationColorsByYear((current) => ({ ...current, [year]: monthData.vacationColors }));
+  }
+
+  function applyHolidayCacheReset(scope: "all" | "currentMonth", monthData: TimesheetMonthData) {
+    const monthKey = getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
+    const monthDrafts = buildDraftsFromMonthData(monthData);
+
+    rememberVacationColors(monthCursor.year, monthData);
+
+    const removeApiHolidayDrafts = (current: Record<string, TimesheetDayDraft>) => {
+      const next = { ...current };
+
+      for (const [dateKey, draft] of Object.entries(next)) {
+        if ((scope === "all" || dateKey.startsWith(`${monthKey}-`)) && draft.entries.length === 0 && draft.holidayName) {
+          delete next[dateKey];
+        }
+      }
+
+      return {
+        ...next,
+        ...monthDrafts
+      };
+    };
+
+    setRecords(removeApiHolidayDrafts);
+    setSavedRecords(removeApiHolidayDrafts);
+    setHolidayWarning(monthData.holidayWarning ?? "");
+    setHolidayWarningMonthKeys((current) => {
+      if (scope === "all") {
+        return new Set<string>();
+      }
+
+      const next = new Set(current);
+
+      if (monthData.holidayWarning) {
+        next.add(monthKey);
+      } else {
+        next.delete(monthKey);
+      }
+
+      return next;
+    });
+    setProjects((current) => mergeProjects(current, monthData.projects));
+    setSavedEntryDateKeys((current) => {
+      const next = new Set(current);
+
+      for (const entry of monthData.entries) {
+        next.add(entry.dateKey);
+      }
+
+      return next;
+    });
+    setLoadedMonthKeys((current) => (scope === "all" ? new Set([monthKey]) : new Set(current).add(monthKey)));
   }
 
   async function refreshVacationColors(dateKeys: string[]) {
@@ -2381,10 +2368,6 @@ export function TimesheetWorkspace({
     }
   }
 
-  function getSelectedAiModel(): string {
-    return aiModel === "__custom__" ? aiCustomModel.trim() || "gemini-3.1-flash-lite" : aiModel;
-  }
-
   function mergeSavedDays(days: TimesheetDayDraft[]) {
     if (days.length === 0) {
       return;
@@ -2828,272 +2811,6 @@ export function TimesheetWorkspace({
     }
   }
 
-  function openSettings() {
-    setProfileUsername(currentUser.username);
-    setProfileEmail(currentUser.email);
-    setProfilePassword("");
-    setProfileState("idle");
-    setProfileError("");
-    setHolidayApiKeyState("idle");
-    setHolidayApiKeyError("");
-    setHolidayApiKeyTestState("idle");
-    setHolidayApiKeyTestMessage("");
-    setAiEnabled(aiSetting.enabled);
-    setAiApiKey("");
-    setAiClearApiKey(false);
-    setAiModel(aiModelPresets.some((preset) => preset.value === aiSetting.model) ? aiSetting.model : "__custom__");
-    setAiCustomModel(aiModelPresets.some((preset) => preset.value === aiSetting.model) ? "" : aiSetting.model);
-    setAiContextDays(aiSetting.contextDays);
-    setAiBackfillMissing(aiSetting.backfillMissing);
-    setAiBackfillLimit(aiSetting.backfillLimit);
-    setAiCleanupMode(aiSetting.cleanupMode);
-    setAiSettingState("idle");
-    setAiSettingMessage("");
-    setAiTestState("idle");
-    setAiTestMessage("");
-    void refreshAiRewriteRequests();
-    setHolidayResetState("idle");
-    setHolidayResetError("");
-    setUserCreateState("idle");
-    setUserCreateError("");
-    setIsSettingsOpen(true);
-  }
-
-  useEffect(() => {
-    function openTimesheetSettings(event: Event) {
-      event.preventDefault();
-      openSettings();
-    }
-
-    window.addEventListener("ajam:open-settings", openTimesheetSettings);
-    return () => window.removeEventListener("ajam:open-settings", openTimesheetSettings);
-  });
-
-  async function saveProfile() {
-    setProfileState("saving");
-    setProfileError("");
-
-    try {
-      const updatedUser = await updateProfileAction({
-        email: profileEmail,
-        password: profilePassword || undefined,
-        username: profileUsername
-      });
-
-      setCurrentUser(updatedUser);
-      setProfilePassword("");
-      setManagedUsers((current) => current.map((user) => (user.id === updatedUser.id ? updatedUser : user)));
-      setProfileState("saved");
-    } catch (error) {
-      setProfileState("error");
-      setProfileError(error instanceof Error ? error.message : "계정 정보를 저장하지 못했습니다.");
-    }
-  }
-
-  async function saveHolidayApiKey() {
-    setHolidayApiKeyState("saving");
-    setHolidayApiKeyError("");
-
-    try {
-      await saveHolidayApiKeyAction(holidayApiKey);
-      setHolidayApiKeyState("saved");
-    } catch (error) {
-      setHolidayApiKeyState("error");
-      setHolidayApiKeyError(error instanceof Error ? error.message : "API 키를 저장하지 못했습니다.");
-    }
-  }
-
-  async function testHolidayApiKey() {
-    setHolidayApiKeyTestState("saving");
-    setHolidayApiKeyTestMessage("");
-
-    try {
-      const result = await testHolidayApiKeyAction(holidayApiKey, monthCursor.year, monthCursor.monthIndex);
-      const label = getMonthLabel(monthCursor.year, monthCursor.monthIndex);
-      setHolidayApiKeyTestState("saved");
-      setHolidayApiKeyTestMessage(result.holidays.length > 0 ? label + " 공휴일 " + result.holidays.length + "건 확인됨" : label + " 응답은 정상이며 공휴일은 없습니다.");
-    } catch (error) {
-      setHolidayApiKeyTestState("error");
-      setHolidayApiKeyTestMessage(error instanceof Error ? error.message : "API 키 테스트에 실패했습니다.");
-    }
-  }
-
-  async function saveAiSetting() {
-    setAiSettingState("saving");
-    setAiSettingMessage("");
-
-    try {
-      const updated = await updateAiSettingAction({
-        apiKey: aiApiKey || undefined,
-        backfillLimit: aiBackfillLimit,
-        backfillMissing: aiBackfillMissing,
-        clearApiKey: aiClearApiKey,
-        contextDays: aiContextDays,
-        cleanupMode: aiCleanupMode,
-        enabled: aiEnabled,
-        model: getSelectedAiModel()
-      });
-
-      setAiSetting(updated);
-      setAiApiKey("");
-      setAiClearApiKey(false);
-      setAiSettingState("saved");
-      setAiSettingMessage("AI 자동 정리 설정을 저장했습니다.");
-    } catch (error) {
-      setAiSettingState("error");
-      setAiSettingMessage(error instanceof Error ? error.message : "AI 설정을 저장하지 못했습니다.");
-    }
-  }
-
-  async function testAiSetting() {
-    setAiTestState("saving");
-    setAiTestMessage("");
-
-    try {
-      await testGeminiApiKeyAction({ apiKey: aiApiKey || undefined, model: getSelectedAiModel() });
-      setAiTestState("saved");
-      setAiTestMessage("Gemini API key를 확인했습니다.");
-    } catch (error) {
-      setAiTestState("error");
-      setAiTestMessage(error instanceof Error ? error.message : "Gemini API key 테스트에 실패했습니다.");
-    }
-  }
-
-  async function createUser() {
-    setUserCreateState("saving");
-    setUserCreateError("");
-
-    try {
-      const user = await createUserAction({
-        email: newUserEmail,
-        password: newUserPassword,
-        role: newUserRole,
-        username: newUserUsername
-      });
-
-      setManagedUsers((current) => [...current, user].sort((left, right) => left.username.localeCompare(right.username, "ko-KR")));
-      setNewUserUsername("");
-      setNewUserEmail("");
-      setNewUserPassword("");
-      setNewUserRole("USER");
-      setUserCreateState("saved");
-    } catch (error) {
-      setUserCreateState("error");
-      setUserCreateError(error instanceof Error ? error.message : "사용자를 추가하지 못했습니다.");
-    }
-  }
-
-  async function resetCurrentMonthHolidays() {
-    if (!isAdmin) {
-      return;
-    }
-
-    setHolidayResetState("saving");
-    setHolidayResetError("");
-
-    try {
-      const monthData = await resetHolidayCacheAction(monthCursor.year, monthCursor.monthIndex);
-      const monthKey = getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
-      const monthDrafts = buildDraftsFromMonthData(monthData);
-      rememberVacationColors(monthCursor.year, monthData);
-      const mergeResetMonth = (current: Record<string, TimesheetDayDraft>) => {
-        const next = { ...current };
-
-        for (const [dateKey, draft] of Object.entries(next)) {
-          if (dateKey.startsWith(monthKey + "-") && draft.entries.length === 0 && draft.holidayName) {
-            delete next[dateKey];
-          }
-        }
-
-        return {
-          ...next,
-          ...monthDrafts
-        };
-      };
-
-      setRecords(mergeResetMonth);
-      setSavedRecords(mergeResetMonth);
-      setHolidayWarning(monthData.holidayWarning ?? "");
-      setHolidayWarningMonthKeys((current) => {
-        const next = new Set(current);
-
-        if (monthData.holidayWarning) {
-          next.add(monthKey);
-        } else {
-          next.delete(monthKey);
-        }
-
-        return next;
-      });
-      setProjects((current) => mergeProjects(current, monthData.projects));
-      setSavedEntryDateKeys((current) => {
-        const next = new Set(current);
-
-        for (const entry of monthData.entries) {
-          next.add(entry.dateKey);
-        }
-
-        return next;
-      });
-      setLoadedMonthKeys((current) => new Set(current).add(monthKey));
-      setHolidayResetState("saved");
-      broadcastViewRefresh(["timesheet", "vacations", "ai-summary"], "mutation");
-    } catch {
-      setHolidayResetState("error");
-      setHolidayResetError("공휴일 정보를 다시 불러오지 못했습니다.");
-    }
-  }
-
-  async function resetAllHolidays() {
-    if (!isAdmin || !isDevelopment) {
-      return;
-    }
-
-    setHolidayResetState("saving");
-    setHolidayResetError("");
-
-    try {
-      const monthData = await resetAllHolidayCacheAction(monthCursor.year, monthCursor.monthIndex);
-      const monthDrafts = buildDraftsFromMonthData(monthData);
-      rememberVacationColors(monthCursor.year, monthData);
-      const removeApiHolidayDrafts = (current: Record<string, TimesheetDayDraft>) => {
-        const next = { ...current };
-
-        for (const [dateKey, draft] of Object.entries(next)) {
-          if (draft.entries.length === 0 && draft.holidayName) {
-            delete next[dateKey];
-          }
-        }
-
-        return {
-          ...next,
-          ...monthDrafts
-        };
-      };
-
-      setRecords(removeApiHolidayDrafts);
-      setSavedRecords(removeApiHolidayDrafts);
-      setHolidayWarning(monthData.holidayWarning ?? "");
-      setHolidayWarningMonthKeys(new Set());
-      setProjects((current) => mergeProjects(current, monthData.projects));
-      setSavedEntryDateKeys((current) => {
-        const next = new Set(current);
-
-        for (const entry of monthData.entries) {
-          next.add(entry.dateKey);
-        }
-
-        return next;
-      });
-      setLoadedMonthKeys(new Set([getMonthCacheKey(monthCursor.year, monthCursor.monthIndex)]));
-      setHolidayResetState("saved");
-      broadcastViewRefresh(["timesheet", "vacations", "ai-summary"], "mutation");
-    } catch (error) {
-      setHolidayResetState("error");
-      setHolidayResetError(error instanceof Error ? error.message : "공휴일 정보를 삭제하지 못했습니다.");
-    }
-  }
-
   if (isInitialMonthSyncing) {
     return (
       <AppLoadingScreen
@@ -3312,87 +3029,12 @@ export function TimesheetWorkspace({
       </div>
 
       {isSettingsOpen ? (
-        <SettingsModal
-          ai={{
-            apiKey: aiApiKey,
-            backfillLimit: aiBackfillLimit,
-            backfillMissing: aiBackfillMissing,
-            cleanupMode: aiCleanupMode,
-            clearApiKey: aiClearApiKey,
-            contextDays: aiContextDays,
-            customModel: aiCustomModel,
-            enabled: aiEnabled,
-            keySaved: aiSetting.apiKeySaved,
-            model: aiModel,
-            modelPresets: aiModelPresets,
-            onApiKeyChange: (value) => { setAiApiKey(value); if (value) { setAiClearApiKey(false); } },
-            onBackfillLimitChange: setAiBackfillLimit,
-            onBackfillMissingChange: setAiBackfillMissing,
-            onCleanupModeChange: setAiCleanupMode,
-            onClearApiKeyChange: setAiClearApiKey,
-            onContextDaysChange: setAiContextDays,
-            onCustomModelChange: setAiCustomModel,
-            onEnabledChange: setAiEnabled,
-            onModelChange: setAiModel,
-            onOpenRewriteQueue: () => setIsAiRewriteQueueOpen(true),
-            onSave: () => void saveAiSetting(),
-            onTest: () => void testAiSetting(),
-            rewriteQueueCount: aiRewriteRequests.length,
-            saveMessage: aiSettingMessage,
-            saveState: aiSettingState,
-            testMessage: aiTestMessage,
-            testState: aiTestState
-          }}
-          holidayApi={{
-            apiKey: holidayApiKey,
-            onApiKeyChange: setHolidayApiKey,
-            onSave: () => void saveHolidayApiKey(),
-            onTest: () => void testHolidayApiKey(),
-            saveError: holidayApiKeyError,
-            saveState: holidayApiKeyState,
-            testMessage: holidayApiKeyTestMessage,
-            testState: holidayApiKeyTestState
-          }}
-          holidayCache={{
-            error: holidayResetError,
-            onResetAll: () => void resetAllHolidays(),
-            onResetCurrentMonth: () => void resetCurrentMonthHolidays(),
-            state: holidayResetState
-          }}
-          isAdmin={isAdmin}
-          isDevelopment={isDevelopment}
-          onClose={() => setIsSettingsOpen(false)}
-          profile={{
-            email: profileEmail,
-            error: profileError,
-            onEmailChange: setProfileEmail,
-            onPasswordChange: setProfilePassword,
-            onSave: () => void saveProfile(),
-            onUsernameChange: setProfileUsername,
-            password: profilePassword,
-            state: profileState,
-            username: profileUsername
-          }}
-          users={{
-            createError: userCreateError,
-            createState: userCreateState,
-            existingUsers: managedUsers,
-            newEmail: newUserEmail,
-            newPassword: newUserPassword,
-            newRole: newUserRole,
-            newUsername: newUserUsername,
-            onCreate: () => void createUser(),
-            onNewEmailChange: setNewUserEmail,
-            onNewPasswordChange: setNewUserPassword,
-            onNewRoleChange: setNewUserRole,
-            onNewUsernameChange: setNewUserUsername
-          }}
-        />
+        <SettingsModal {...settingsModalProps} />
       ) : null}
 
       {isAiRewriteQueueOpen ? (
         <AiRewriteQueueModal
-          cleanupMode={aiCleanupMode}
+          cleanupMode={rewriteQueueCleanupMode}
           onClose={() => setIsAiRewriteQueueOpen(false)}
           requests={aiRewriteRequests}
         />

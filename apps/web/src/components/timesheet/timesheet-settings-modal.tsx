@@ -9,16 +9,7 @@ import { Field, ModalShell } from "./timesheet-ui-primitives";
 
 type SettingsSaveStatus = "error" | "idle" | "saved" | "saving";
 
-export function SettingsModal({
-  ai,
-  holidayApi,
-  holidayCache,
-  isAdmin,
-  isDevelopment,
-  onClose,
-  profile,
-  users
-}: {
+export type SettingsModalProps = {
   ai: {
     apiKey: string;
     backfillLimit: number;
@@ -93,7 +84,18 @@ export function SettingsModal({
     onNewRoleChange: (role: "ADMIN" | "USER") => void;
     onNewUsernameChange: (value: string) => void;
   };
-}) {
+};
+
+export function SettingsModal({
+  ai,
+  holidayApi,
+  holidayCache,
+  isAdmin,
+  isDevelopment,
+  onClose,
+  profile,
+  users
+}: SettingsModalProps) {
   return (
     <ModalShell onClose={onClose} title="설정">
       <div className="max-h-[78vh] space-y-5 overflow-y-auto pr-1">
