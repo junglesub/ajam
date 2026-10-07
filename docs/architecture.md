@@ -75,6 +75,8 @@
 
 ### 추가 로그 강화 구현 내역
 
+후속 UI 조회 기능은 [설정 로그 팝업 기획](superpowers/specs/2026-10-07-log-viewer-design.md)과 [구현 계획](superpowers/plans/2026-10-07-log-viewer.md)에 정리한다. 현재는 계획 단계이며 범용 로그 영속 저장/미읽음/설정 로그 팝업은 아직 구현되지 않았다.
+
 | 우선순위 | 위치 | 구현한 로그 |
 | --- | --- | --- |
 | 높음 | `apps/web/src/server/timesheet-ai-cleanup.ts` | 수동/예약 실행 시작·완료·실패, 사용자별 결과와 생략 사유, 대상·적용 날짜 수, Gemini HTTP 상태·소요 시간·Retry-After. 실패 사용자가 있는 배치 완료는 warn이다. |
