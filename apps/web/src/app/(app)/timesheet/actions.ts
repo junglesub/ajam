@@ -1,6 +1,8 @@
 "use server";
 
 import {
+  createNotionLog,
+  notionErrorMessage,
   addProject,
   countLinkedNotionWorkDaysByPage,
   createManagedUser,
@@ -398,12 +400,16 @@ async function syncNotionWorkHoursAfterTimesheetSave(params: {
   notionPageIds: string[];
   userId: string;
 }): Promise<string> {
+  const log = createNotionLog("timesheet_save", { userId: params.userId, source: "timesheet_save" });
+  log.write("info", "started", { pagesRequested: params.notionPageIds.length });
   if (params.notionPageIds.length === 0) {
+    log.write("info", "skipped", { skippedReason: "no_changed_pages" });
     return "";
   }
 
   try {
-    const result = await syncNotionWorkHoursForPages(params);
+    const result = await syncNotionWorkHoursForPages({ ...params, context: log.context });
+    log.write(result.errors.length ? "warn" : "info", "completed", { updated: result.updated, failed: result.failed, skippedReason: result.skippedReason });
 
     if (result.errors.length > 0) {
       return result.errors.map((error) => `${error.notionPageId}: ${error.message}`).join("\n");
@@ -411,7 +417,7 @@ async function syncNotionWorkHoursAfterTimesheetSave(params: {
 
     return "";
   } catch (error) {
-    console.warn("Failed to sync Notion work hours after timesheet save.", error);
+    log.write("error", "failed", { error: notionErrorMessage(error) });
     return error instanceof Error ? error.message : "Notion 필드 업데이트에 실패했습니다.";
   }
 }
@@ -437,6 +443,7 @@ export async function loadNotionCardCandidatesAction(input: LoadNotionCardCandid
       getDateNotionSyncRun({ dateKey, userId: user.id })
     ]);
 
+    createNotionLog("candidates", { userId: user.id, dateKey, source: "card_picker" }).write("info", "cache_hit", { cardsFetched: candidates.length, lastSuccessAt: latestSuccess.finishedAt });
     return buildNotionCardCandidatesResult({
       candidates,
       dateKey,
@@ -477,8 +484,10 @@ async function syncNotionCardCandidatesForDate(params: {
   linkedPageIds?: string[];
   userId: string;
 }): Promise<NotionCardCandidatesResult> {
+  const log = createNotionLog("candidates", { userId: params.userId, dateKey: params.dateKey, source: "card_picker" });
+  log.write("info", "started");
   try {
-    const candidates = await syncNotionCardsForDate(params);
+    const candidates = await syncNotionCardsForDate({ ...params, context: log.context });
     const latestSuccess = await getDateNotionSyncRun({ dateKey: params.dateKey, status: "success", userId: params.userId });
     const candidatesWithLinked = await mergeCandidateCardsWithLinked({
       candidates,
@@ -486,6 +495,7 @@ async function syncNotionCardCandidatesForDate(params: {
       userId: params.userId
     });
 
+    log.write("info", "completed", { cardsFetched: candidates.length });
     return buildNotionCardCandidatesResult({
       candidates: candidatesWithLinked,
       dateKey: params.dateKey,
@@ -497,6 +507,7 @@ async function syncNotionCardCandidatesForDate(params: {
       userId: params.userId
     });
   } catch (error) {
+    log.write("error", "sync_failed", { error: notionErrorMessage(error) });
     const [candidates, latestRun, latestSuccess] = await Promise.all([
       listCandidateCardsWithLinked({
         dateKey: params.dateKey,
@@ -507,6 +518,7 @@ async function syncNotionCardCandidatesForDate(params: {
       getDateNotionSyncRun({ dateKey: params.dateKey, status: "success", userId: params.userId })
     ]);
 
+    log.write("warn", "cache_fallback", { cardsFetched: candidates.length, lastSuccessAt: latestSuccess?.finishedAt });
     return buildNotionCardCandidatesResult({
       candidates,
       dateKey: params.dateKey,

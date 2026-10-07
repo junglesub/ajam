@@ -1,3 +1,4 @@
+import { createNotionLog, notionErrorMessage } from "./notion-log";
 import { syncNotionCardsForDate } from "./notion-sync";
 import { getUserNotionConnection } from "./notion-store";
 import { syncNotionWorkHoursForPages } from "./notion-work-hours-sync";
@@ -32,109 +33,122 @@ export async function runNotionDailyMaintenance(params: {
   dateKey: string;
   lookbackDays?: number;
 }): Promise<NotionDailyMaintenanceResult> {
-  const users = await listManagedUsers();
-  const lookbackDays = normalizeLookbackDays(params.lookbackDays);
-  const syncDateKeys = buildLookbackDateKeys(params.dateKey, lookbackDays);
-  const lookbackStartDateKey = syncDateKeys[0] ?? params.dateKey;
-  const userResults: NotionDailyMaintenanceUserResult[] = [];
-  let cardsSynced = 0;
-  let cardsUpdated = 0;
-  let usersSkipped = 0;
-  let usersUpdated = 0;
+  const log = createNotionLog("maintenance", { source: "maintenance", dateKey: params.dateKey });
+  log.write("info", "started");
+  try {
+    const users = await listManagedUsers();
+    const lookbackDays = normalizeLookbackDays(params.lookbackDays);
+    const syncDateKeys = buildLookbackDateKeys(params.dateKey, lookbackDays);
+    const lookbackStartDateKey = syncDateKeys[0] ?? params.dateKey;
+    const userResults: NotionDailyMaintenanceUserResult[] = [];
+    let cardsSynced = 0;
+    let cardsUpdated = 0;
+    let usersSkipped = 0;
+    let usersUpdated = 0;
 
-  for (const user of users) {
-    const connection = await getUserNotionConnection(user.id);
+    for (const user of users) {
+      const connection = await getUserNotionConnection(user.id);
 
-    if (!connection?.hasToken || !connection.dataSourceId) {
-      usersSkipped += 1;
-      userResults.push({
-        cardsSynced: 0,
-        cardsUpdated: 0,
-        error: "",
-        skippedReason: "missing_connection",
-        userId: user.id,
-        username: user.username
-      });
-      continue;
-    }
-
-    try {
-      const syncedCards: Awaited<ReturnType<typeof syncNotionCardsForDate>> = [];
-
-      for (const dateKey of syncDateKeys) {
-        syncedCards.push(...await syncNotionCardsForDate({
-          dateKey,
-          userId: user.id
-        }));
-      }
-
-      const updatePageIds = Array.from(new Map(
-        syncedCards
-          .filter((card) => shouldUpdateCardDuringMaintenance({
-            card,
-            currentDateKey: params.dateKey,
-            doneStatusValues: connection.doneStatusValues,
-            lookbackStartDateKey
-          }))
-          .map((card) => [card.notionPageId, card.notionPageId])
-      ).values());
-      const syncResult = await syncNotionWorkHoursForPages({
-        includeLastWorkedDate: false,
-        notionPageIds: updatePageIds,
-        userId: user.id
-      });
-
-      cardsSynced += syncedCards.length;
-      cardsUpdated += syncResult.updated;
-
-      if (syncResult.updated > 0) {
-        usersUpdated += 1;
-      }
-
-      if (syncResult.skippedReason || syncResult.errors.length > 0) {
+      if (!connection?.hasToken || !connection.dataSourceId) {
+        log.write("info", "user_skipped", { userId: user.id, reason: "missing_connection" });
         usersSkipped += 1;
+        userResults.push({
+          cardsSynced: 0,
+          cardsUpdated: 0,
+          error: "",
+          skippedReason: "missing_connection",
+          userId: user.id,
+          username: user.username
+        });
+        continue;
       }
 
-      userResults.push({
-        cardsSynced: syncedCards.length,
-        cardsUpdated: syncResult.updated,
-        error: syncResult.errors.map((error) => `${error.notionPageId}: ${error.message}`).join("\n"),
-        skippedReason: syncResult.skippedReason ?? "",
-        userId: user.id,
-        username: user.username
-      });
-    } catch (error) {
-      usersSkipped += 1;
-      userResults.push({
-        cardsSynced: 0,
-        cardsUpdated: 0,
-        error: error instanceof Error ? error.message : "Notion daily maintenance failed.",
-        skippedReason: "",
-        userId: user.id,
-        username: user.username
-      });
-    }
-  }
+      try {
+        const syncedCards: Awaited<ReturnType<typeof syncNotionCardsForDate>> = [];
 
-  return {
-    cardsSynced,
-    cardsUpdated,
-    dateKey: params.dateKey,
-    errors: userResults.flatMap((result) =>
-      result.error
-        ? [{
-            message: result.error,
-            userId: result.userId,
-            username: result.username
-          }]
-        : []
-    ),
-    lookbackDays,
-    userResults,
-    usersChecked: users.length,
-    usersSkipped,
-    usersUpdated
-  };
+        for (const dateKey of syncDateKeys) {
+          syncedCards.push(...await syncNotionCardsForDate({
+            context: log.context,
+            dateKey,
+            userId: user.id
+          }));
+        }
+
+        const updatePageIds = Array.from(new Map(
+          syncedCards
+            .filter((card) => shouldUpdateCardDuringMaintenance({
+              card,
+              currentDateKey: params.dateKey,
+              doneStatusValues: connection.doneStatusValues,
+              lookbackStartDateKey
+            }))
+            .map((card) => [card.notionPageId, card.notionPageId])
+        ).values());
+        const syncResult = await syncNotionWorkHoursForPages({
+          context: log.context,
+          includeLastWorkedDate: false,
+          notionPageIds: updatePageIds,
+          userId: user.id
+        });
+
+        log.write(syncResult.errors.length ? "warn" : "info", "user_completed", { userId: user.id, cardsSynced: syncedCards.length, updated: syncResult.updated, failed: syncResult.failed, skippedReason: syncResult.skippedReason });
+        cardsSynced += syncedCards.length;
+        cardsUpdated += syncResult.updated;
+
+        if (syncResult.updated > 0) {
+          usersUpdated += 1;
+        }
+
+        if (syncResult.skippedReason || syncResult.errors.length > 0) {
+          usersSkipped += 1;
+        }
+
+        userResults.push({
+          cardsSynced: syncedCards.length,
+          cardsUpdated: syncResult.updated,
+          error: syncResult.errors.map((error) => `${error.notionPageId}: ${error.message}`).join("\n"),
+          skippedReason: syncResult.skippedReason ?? "",
+          userId: user.id,
+          username: user.username
+        });
+      } catch (error) {
+        log.write("error", "user_failed", { userId: user.id, error: notionErrorMessage(error) });
+        usersSkipped += 1;
+        userResults.push({
+          cardsSynced: 0,
+          cardsUpdated: 0,
+          error: error instanceof Error ? error.message : "Notion daily maintenance failed.",
+          skippedReason: "",
+          userId: user.id,
+          username: user.username
+        });
+      }
+    }
+
+    log.write(userResults.some((result) => result.error) ? "warn" : "info", "completed", { cardsSynced, cardsUpdated, usersChecked: users.length, usersSkipped, usersUpdated, lookbackDays, failedUsers: userResults.filter((result) => result.error).length });
+    return {
+      cardsSynced,
+      cardsUpdated,
+      dateKey: params.dateKey,
+      errors: userResults.flatMap((result) =>
+        result.error
+          ? [{
+              message: result.error,
+              userId: result.userId,
+              username: result.username
+            }]
+          : []
+      ),
+      lookbackDays,
+      userResults,
+      usersChecked: users.length,
+      usersSkipped,
+      usersUpdated
+    };
+  } catch (error) {
+    log.write("error", "failed", { error: notionErrorMessage(error) });
+    throw error;
+  }
 }
 
 function shouldUpdateCardDuringMaintenance(params: {

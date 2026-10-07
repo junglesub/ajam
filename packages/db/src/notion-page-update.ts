@@ -1,3 +1,6 @@
+import { requestNotionApi } from "./notion-api";
+import type { NotionLogContext } from "./notion-log";
+
 export type NotionPagePropertyPatch =
   | {
       number: number;
@@ -8,13 +11,12 @@ export type NotionPagePropertyPatch =
       } | null;
     };
 
-const notionApiVersion = "2026-03-11";
-
 export async function updateNotionPageProperties(params: {
   ajamLastUpdatePropertyKey?: string;
   pageId: string;
   properties: Record<string, NotionPagePropertyPatch>;
   token: string;
+  context?: NotionLogContext;
 }) {
   const requestedAt = new Date().toISOString();
   const properties = {
@@ -29,22 +31,10 @@ export async function updateNotionPageProperties(params: {
         }
       : {})
   };
-  const response = await fetch(`https://api.notion.com/v1/pages/${encodeURIComponent(params.pageId)}`, {
-    body: JSON.stringify({
-      properties
-    }),
-    cache: "no-store",
-    headers: {
-      Authorization: `Bearer ${params.token}`,
-      "Content-Type": "application/json",
-      "Notion-Version": notionApiVersion
-    },
-    method: "PATCH"
+  await requestNotionApi({
+    method: "PATCH", path: `/v1/pages/${encodeURIComponent(params.pageId)}`,
+    body: { properties }, token: params.token, context: params.context, errorMessage: mapNotionStatus
   });
-
-  if (!response.ok) {
-    throw new Error(mapNotionStatus(response.status));
-  }
 }
 
 function mapNotionStatus(status: number): string {

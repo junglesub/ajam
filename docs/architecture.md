@@ -51,6 +51,30 @@
 - verification token은 일반 설정 조회에 포함하지 않고 존재 여부만 반환한다. 인증된 사용자가 `보기`를 요청할 때만 별도 action에서 복호화한다. Webhook event는 처리 전에 `processing`으로 원자적 claim하고 성공 시 `complete`, 실패 시 claim을 제거해 재시도를 허용한다.
 - `ReminderLog`: 사용자별 날짜와 리마인더 유형의 발송 기록을 저장해 n8n 재시도나 중복 실행 시 같은 리마인더가 반복 발송되지 않게 한다.
 
+## Notion 운영 로그
+
+- Notion 서버 로그는 콘솔에 JSON 한 줄로 출력한다. Docker에서는 `docker compose logs -f --tail=200 ajam` 또는 `docker logs -f --tail=200 ajam`으로 확인한다. 별도 환경변수 없이 성공/시작은 info, 생략/부분 동기화/요청 거절은 info 또는 warn, 실패는 error로 기록한다.
+- 공통 필드는 `timestamp`, `level`, `component: "notion"`, `operation`, `result`, `operationId`, `durationMs`이다. 가능한 경로에는 `source`, `userId`, `dateKey`, `pageId`, `connectionId`, `eventId`를 추가한다. 같은 작업의 API 호출과 하위 동기화는 `operationId`를 공유하며 각 operation의 소요 시간은 독립 측정한다.
+- `source`는 `card_picker`, `timesheet_save`, `webhook`, `maintenance`, `notion_cards`, `manual_field_update`, `connection_settings`로 호출 계기를 구분한다.
+- 팝업 후보 조회는 캐시 사용, 동기화 시작/완료/실패, 실패 후 캐시 fallback과 카드 수/마지막 성공 시각을 기록한다. 저장 후 필드 업데이트는 페이지별 성공/실패, 필드 종류, 업데이트/실패 수, 연결·토큰·매핑 부족으로 생략한 이유를 기록한다.
+- 날짜별 동기화는 조회 카드 수, API 요청 횟수, data source와 부분 결과 여부를 기록한다. 최대 20회 조회 상한에 도달한 부분 동기화는 warn으로 남긴다. 단일 카드 동기화도 시작/완료/실패를 기록한다.
+- Webhook은 수신과 최종 HTTP 상태, verification 완료, 중복/처리 중 충돌, 카드 삭제 처리, 처리 실패를 기록한다. 무시 사유는 지원하지 않는 이벤트, 연결 없음, 다른 data source, 입력 필드 변경 없음으로 나눈다. 서명 검증 등 이벤트 처리 이전의 오류도 route에서 기록한다.
+- Daily maintenance는 시작/완료/전체 실패, 사용자별 성공/실패/생략, 조회 기간과 총 처리 수를 기록한다. 연결 테스트, 연결/매핑 저장, Webhook 재설정 및 verification token 저장도 성공/실패를 기록한다.
+- API 호출은 method, path, 응답 시간, HTTP 상태를 기록하고 실패 시 Notion 오류 코드, 사람이 읽을 수 있는 기존 상태별 오류 메시지, request ID, `Retry-After`를 추가한다. API 응답의 원본 message/body, 요청 body, 카드 제목/업무 본문, token, signature는 기록하지 않는다. JSON 파싱 오류는 응답 일부를 노출하지 않도록 고정 메시지로 기록하며 Prisma 오류는 클래스 이름만 기록한다. 기타 예외 메시지의 Bearer/Notion token 패턴은 마스킹하며 최대 1,000자로 제한한다.
+- 회귀 검증은 `pnpm --filter @timesheet/db test`로 실행한다. Notion API 성공/429/네트워크 오류/비JSON 오류, 비밀값 제외, 페이지별 업데이트 실패, 생략 사유, 부분 동기화, Webhook 무시 사유·중복 처리를 확인한다.
+
+### 추가 로그 강화 후보 (아직 구현하지 않음)
+
+| 우선순위 | 위치 | 추가할 로그와 이유 |
+| --- | --- | --- |
+| 높음 | `apps/web/src/server/timesheet-ai-cleanup.ts` | AI 예약 실행 시작/종료, 사용자별 실패/생략, Gemini HTTP 상태·소요 시간. 현재 오류를 결과 배열로 반환하므로 콘솔만 보면 실패를 놓친다. 프롬프트/업무 본문/API key는 제외한다. |
+| 높음 | `packages/db/src/timesheet-store.ts` 및 호출부 | 공휴일 API 실패·캐시 사용·서비스 키 없음, 공휴일 조회 실패 후 빈 목록 fallback. 가용 시간 계산이 어떤 데이터로 이루어졌는지 추적한다. 서비스 키가 포함된 URL은 제외한다. |
+| 높음 | 내부 API route | 인증 실패, 토큰 미설정, 잘못된 날짜/payload, 처리 상태와 응답 시간. n8n 요청이 처리 함수에 도달하지 못한 원인을 구분한다. Authorization은 제외한다. |
+| 중간 | 업무 저장/삭제/JSON import action | 저장 성공/실패, 날짜·entry 수, 충돌 검출, DB 소요 시간. 업무 자체 저장 실패와 저장 후 외부 동기화 실패를 구분한다. 업무 내용은 제외한다. |
+| 중간 | `apps/web/src/server/extension-auth.ts`, `session.ts` | 인증 실패 원인 분류와 서버 예외. 현재 catch 후 null로 반환되는 원인을 구분한다. 예상 가능한 만료/미로그인은 집계 또는 debug로 제한하고 쿠키/인증 토큰은 제외한다. |
+| 중간 | schema bootstrap/DB 초기화 | 스키마 보장 실패, DB 열기·권한·잠금 오류, 초기화 시간. `/api/health`는 DB를 검사하지 않아 별도 진단이 필요하다. |
+| 낮음 | 실행 환경 및 전역 요청 처리 | 서버 시작 시 build version/환경, 일반 API의 처리 식별자·상태·소요 시간, 느린 요청. 일반 요청 로그가 생기면 healthcheck 성공 요청은 제외해 잡음을 줄인다. |
+
 ## Holiday Sync
 
 - 관리자가 설정에서 공공데이터포털 서비스 키를 저장한다.

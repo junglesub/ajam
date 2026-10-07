@@ -1,3 +1,6 @@
+import { requestNotionApi } from "./notion-api";
+import { createNotionLog, notionErrorMessage, type NotionLogContext } from "./notion-log";
+
 import { normalizeNotionDateToDateKey } from "@timesheet/domain";
 
 import {
@@ -34,15 +37,16 @@ type QueryResponse = {
   results?: NotionPage[];
 };
 
-const notionApiVersion = "2026-03-11";
 const pageSize = 100;
 const maxPagesPerSync = 20;
 
 export async function retrieveNotionDataSourceSchema(params: {
   dataSourceId: string;
   token: string;
+  context?: NotionLogContext;
 }): Promise<NotionDataSourceSchema> {
   const response = await notionFetch({
+    context: params.context,
     method: "GET",
     path: `/v1/data_sources/${encodeURIComponent(params.dataSourceId)}`,
     token: params.token
@@ -54,19 +58,25 @@ export async function retrieveNotionDataSourceSchema(params: {
 export async function syncNotionCardsForDate(params: {
   dateKey: string;
   userId: string;
+  context?: NotionLogContext;
 }): Promise<NotionCardCacheRecord[]> {
-  const connection = await requireConnection(params.userId);
-  const token = await getUserNotionAccessToken(params.userId);
-
+  const log = createNotionLog("date_sync", { ...params.context, userId: params.userId, dateKey: params.dateKey });
+  log.write("info", "started");
+  let failedConnection: UserNotionConnection | undefined;
   try {
+    const connection = await requireConnection(params.userId);
+    failedConnection = connection;
+    const token = await getUserNotionAccessToken(params.userId);
     const result = await queryDataSourcePages({
       connection,
+      context: log.context,
       filter: buildDateCandidateFilter({ connection, dateKey: params.dateKey }),
       token
     });
     const cards = result.pages.map((page) => normalizePage({ connection, page }));
 
     if (result.partial) {
+      log.write("warn", "partial", { cardsFetched: cards.length, requestLimit: maxPagesPerSync, requestCount: result.requestCount });
       await upsertNotionCardCache({
         analysisConfigVersion: connection.analysisConfigVersion,
         cards,
@@ -91,10 +101,12 @@ export async function syncNotionCardsForDate(params: {
       userId: params.userId
     });
 
+    log.write("info", "completed", { cardsFetched: cards.length, partial: result.partial, requestCount: result.requestCount, dataSourceId: connection.dataSourceId });
     return cards;
   } catch (error) {
-    await recordNotionSyncRun({
-      analysisConfigVersion: connection.analysisConfigVersion,
+    log.write("error", "failed", { error: notionErrorMessage(error) });
+    if (failedConnection) await recordNotionSyncRun({
+      analysisConfigVersion: failedConnection.analysisConfigVersion,
       cardsFetched: 0,
       errorCode: getNotionErrorCode(error),
       errorMessage: getNotionErrorMessage(error),
@@ -109,49 +121,61 @@ export async function syncNotionCardsForDate(params: {
   }
 }
 
-export async function syncSingleNotionCard(params: { pageId: string; userId: string }): Promise<NotionCardCacheRecord> {
-  const connection = await requireConnection(params.userId);
-  const token = await getUserNotionAccessToken(params.userId);
-  const page = await notionFetch({
-    method: "GET",
-    path: `/v1/pages/${encodeURIComponent(params.pageId)}`,
-    token
-  }) as NotionPage;
-  const parentDataSourceId = page.parent?.data_source_id ?? (page.parent?.type === "data_source_id" ? page.parent.id : "");
+export async function syncSingleNotionCard(params: { pageId: string; userId: string; context?: NotionLogContext }): Promise<NotionCardCacheRecord> {
+  const log = createNotionLog("single_sync", { ...params.context, userId: params.userId });
+  log.write("info", "started", { pageId: params.pageId });
+  try {
+    const connection = await requireConnection(params.userId);
+    const token = await getUserNotionAccessToken(params.userId);
+    const page = await notionFetch({
+      method: "GET",
+      context: log.context,
+      path: `/v1/pages/${encodeURIComponent(params.pageId)}`,
+      token
+    }) as NotionPage;
+    const parentDataSourceId = page.parent?.data_source_id ?? (page.parent?.type === "data_source_id" ? page.parent.id : "");
 
-  if (parentDataSourceId !== connection.dataSourceId) {
-    throw new Error("설정된 Notion 데이터 소스의 카드가 아닙니다.");
+    if (parentDataSourceId !== connection.dataSourceId) {
+      throw new Error("설정된 Notion 데이터 소스의 카드가 아닙니다.");
+    }
+
+    const card = normalizePage({ connection, page });
+    await upsertNotionCardCache({
+      analysisConfigVersion: connection.analysisConfigVersion,
+      cards: [card],
+      userId: params.userId
+    });
+    const fieldResult = await syncNotionWorkHoursForPages({
+      context: log.context,
+      notionPageIds: [params.pageId],
+      userId: params.userId
+    });
+
+    if (fieldResult.failed > 0 && !fieldResult.skippedReason) {
+      throw new Error(fieldResult.errors[0]?.message ?? "Notion 집계 필드 업데이트에 실패했습니다.");
+    }
+
+    log.write("info", "completed", { pageId: params.pageId, fieldsUpdated: fieldResult.updated, skippedReason: fieldResult.skippedReason });
+    return card;
+  } catch (error) {
+    log.write("error", "failed", { pageId: params.pageId, error: notionErrorMessage(error) });
+    throw error;
   }
-
-  const card = normalizePage({ connection, page });
-  await upsertNotionCardCache({
-    analysisConfigVersion: connection.analysisConfigVersion,
-    cards: [card],
-    userId: params.userId
-  });
-  const fieldResult = await syncNotionWorkHoursForPages({
-    notionPageIds: [params.pageId],
-    userId: params.userId
-  });
-
-  if (fieldResult.failed > 0 && !fieldResult.skippedReason) {
-    throw new Error(fieldResult.errors[0]?.message ?? "Notion 집계 필드 업데이트에 실패했습니다.");
-  }
-
-  return card;
 }
 
 async function queryDataSourcePages(params: {
   connection: UserNotionConnection;
+  context?: NotionLogContext;
   filter: unknown;
   token: string;
-}): Promise<{ pages: NotionPage[]; partial: boolean }> {
+}): Promise<{ pages: NotionPage[]; partial: boolean; requestCount: number }> {
   const pages: NotionPage[] = [];
   let startCursor = "";
   let requestCount = 0;
 
   while (requestCount < maxPagesPerSync) {
     const response = (await notionFetch({
+      context: params.context,
       body: {
         filter: params.filter,
         page_size: pageSize,
@@ -166,13 +190,13 @@ async function queryDataSourcePages(params: {
     requestCount += 1;
 
     if (!response.has_more || !response.next_cursor) {
-      return { pages, partial: false };
+      return { pages, partial: false, requestCount };
     }
 
     startCursor = response.next_cursor;
   }
 
-  return { pages, partial: true };
+  return { pages, partial: true, requestCount };
 }
 
 function buildDateCandidateFilter(params: { connection: UserNotionConnection; dateKey: string }): unknown {
@@ -302,21 +326,9 @@ async function notionFetch(params: {
   method: "GET" | "POST";
   path: string;
   token: string;
+  context?: NotionLogContext;
 }): Promise<unknown> {
-  const response = await fetch(`https://api.notion.com${params.path}`, {
-    body: params.body ? JSON.stringify(params.body) : undefined,
-    cache: "no-store",
-    headers: {
-      Authorization: `Bearer ${params.token}`,
-      "Content-Type": "application/json",
-      "Notion-Version": notionApiVersion
-    },
-    method: params.method
-  });
-
-  if (!response.ok) {
-    throw new Error(mapNotionStatus(response.status));
-  }
+  const response = await requestNotionApi({ ...params, errorMessage: mapNotionStatus });
 
   return response.json();
 }

@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import { createNotionLog, notionErrorMessage, type NotionLogContext } from "./notion-log";
 import { syncSingleNotionCard } from "./notion-sync";
 import {
   claimNotionWebhookEvent,
@@ -53,10 +54,12 @@ export function shouldSyncNotionPropertyEvent(event: NotionWebhookEvent, connect
 }
 
 export async function handleNotionWebhook(params: {
+  context?: NotionLogContext;
   connectionId: string;
   rawBody: string;
   signature: string;
 }): Promise<"duplicate" | "ignored" | "processed" | "verified"> {
+  const log = createNotionLog("webhook_event", params.context);
   const webhook = await getNotionWebhookById(params.connectionId);
 
   if (!webhook) {
@@ -75,6 +78,7 @@ export async function handleNotionWebhook(params: {
       throw new NotionWebhookError(409, "이미 verification token을 받은 Webhook입니다.");
     }
     await saveNotionWebhookVerificationToken(params.connectionId, event.verification_token);
+    log.write("info", "verified", { connectionId: params.connectionId, userId: webhook.userId });
     return "verified";
   }
 
@@ -86,12 +90,16 @@ export async function handleNotionWebhook(params: {
     throw new NotionWebhookError(400, "지원하지 않는 Webhook payload입니다.");
   }
 
+  const fields = { connectionId: params.connectionId, userId: webhook.userId, eventId: event.id, eventType: event.type, pageId: event.entity.id };
+  log.write("info", "received", fields);
   const claim = await claimNotionWebhookEvent({ connectionId: params.connectionId, eventId: event.id });
   if (claim === "complete") {
+    log.write("info", "duplicate", fields);
     return "duplicate";
   }
   // TODO: Reclaim stale processing claims if crash recovery becomes necessary.
   if (claim === "processing") {
+    log.write("warn", "processing_conflict", fields);
     throw new NotionWebhookError(409, "Webhook 이벤트가 이미 처리 중입니다.");
   }
 
@@ -99,23 +107,30 @@ export async function handleNotionWebhook(params: {
     if (event.type === "page.deleted") {
       await markNotionCardStale({ notionPageId: event.entity.id, userId: webhook.userId });
       await completeNotionWebhookEvent({ connectionId: params.connectionId, eventId: event.id });
+      log.write("info", "processed", { ...fields, action: "mark_stale" });
       return "processed";
     }
 
     if (!["page.created", "page.properties_updated", "page.undeleted"].includes(event.type)) {
       await completeNotionWebhookEvent({ connectionId: params.connectionId, eventId: event.id });
+      log.write("info", "ignored", { ...fields, reason: "unsupported_event" });
       return "ignored";
     }
 
     const connection = await getUserNotionConnection(webhook.userId);
     if (!connection || (event.data?.parent?.data_source_id && event.data.parent.data_source_id !== connection.dataSourceId) || !shouldSyncNotionPropertyEvent(event, connection)) {
       await completeNotionWebhookEvent({ connectionId: params.connectionId, eventId: event.id });
+      const reason = !connection ? "missing_connection"
+        : event.data?.parent?.data_source_id && event.data.parent.data_source_id !== connection.dataSourceId
+          ? "different_data_source" : "no_input_property_changes";
+      log.write("info", "ignored", { ...fields, reason });
       return "ignored";
     }
 
-    await syncSingleNotionCard({ pageId: event.entity.id, userId: webhook.userId });
+    await syncSingleNotionCard({ pageId: event.entity.id, userId: webhook.userId, context: log.context });
     await completeNotionWebhookEvent({ connectionId: params.connectionId, eventId: event.id });
   } catch (error) {
+    log.write("error", "failed", { ...fields, error: notionErrorMessage(error) });
     await releaseNotionWebhookEvent({
       connectionId: params.connectionId,
       error: error instanceof Error ? error.message : "Notion 자동 동기화에 실패했습니다.",
@@ -123,6 +138,7 @@ export async function handleNotionWebhook(params: {
     });
     throw error;
   }
+  log.write("info", "processed", fields);
   return "processed";
 }
 

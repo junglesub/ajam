@@ -98,3 +98,4 @@ export type {
 } from "./timesheet-store";
 export { prefillDummyTimesheetData } from "./dummy-prefill";
 export type { DummyPrefillOptions, DummyPrefillResult } from "./dummy-prefill";
+export { createNotionLog, notionErrorMessage } from "./notion-log";

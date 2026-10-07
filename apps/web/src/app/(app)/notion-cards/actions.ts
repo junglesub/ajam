@@ -8,6 +8,8 @@ import {
   type NotionCategorySummary
 } from "@timesheet/domain";
 import {
+  createNotionLog,
+  notionErrorMessage,
   getManagedUser,
   getOrCreateNotionWebhookSettings,
   getLatestLinkedNotionWorkDateByPage,
@@ -128,6 +130,19 @@ function getAvailabilityRange(cards: NotionCardCacheRecord[], todayDateKey: stri
   };
 }
 
+async function logNotionSettingAction<T>(operation: string, userId: string, action: () => Promise<T>, fields: Record<string, string | boolean> = {}): Promise<T> {
+  const log = createNotionLog(operation, { userId, source: "connection_settings" });
+  log.write("info", "started", fields);
+  try {
+    const result = await action();
+    log.write("info", "completed", fields);
+    return result;
+  } catch (error) {
+    log.write("error", "failed", { ...fields, error: notionErrorMessage(error) });
+    throw error;
+  }
+}
+
 export async function getNotionConnectionAction() {
   const user = await requireSession();
 
@@ -143,13 +158,13 @@ export async function getNotionWebhookSettingsAction() {
 export async function resetNotionWebhookSettingsAction() {
   const user = await requireSession();
 
-  return resetNotionWebhookSettings(user.id);
+  return logNotionSettingAction("webhook_reset", user.id, () => resetNotionWebhookSettings(user.id));
 }
 
 export async function saveNotionWebhookVerificationTokenAction(token: string) {
   const user = await requireSession();
 
-  return setNotionWebhookVerificationToken({ token, userId: user.id });
+  return logNotionSettingAction("webhook_token_saved", user.id, () => setNotionWebhookVerificationToken({ token, userId: user.id }));
 }
 
 export async function revealNotionWebhookVerificationTokenAction() {
@@ -177,27 +192,36 @@ export async function saveNotionConnectionAction(params: {
 }) {
   const user = await requireSession();
 
-  return upsertUserNotionConnection({ ...params, userId: user.id });
+  return logNotionSettingAction("connection_saved", user.id, () => upsertUserNotionConnection({ ...params, userId: user.id }), { dataSourceId: params.connection.dataSourceId, tokenChanged: Boolean(params.accessToken || params.clearToken) });
 }
 
 export async function testNotionDataSourceAction(params: { dataSourceId: string; token?: string }) {
   const user = await requireSession();
-  const token = params.token?.trim() || await getUserNotionAccessToken(user.id);
+  const log = createNotionLog("connection_test", { userId: user.id, source: "connection_settings" });
+  log.write("info", "started", { dataSourceId: params.dataSourceId.trim() });
+  try {
+    const token = params.token?.trim() || await getUserNotionAccessToken(user.id);
 
-  if (!token) {
-    throw new Error("토큰을 입력하거나 기존 토큰을 먼저 저장해 주세요.");
+    if (!token) {
+      throw new Error("토큰을 입력하거나 기존 토큰을 먼저 저장해 주세요.");
+    }
+
+    const schema = await retrieveNotionDataSourceSchema({
+      context: log.context,
+      dataSourceId: params.dataSourceId.trim(),
+      token
+    });
+
+    log.write("info", "completed", { dataSourceId: schema.id, fieldCount: Object.keys(schema.properties).length });
+    return {
+      id: schema.id,
+      name: schema.name ?? "",
+      properties: schema.properties
+    };
+  } catch (error) {
+    log.write("error", "failed", { error: notionErrorMessage(error) });
+    throw error;
   }
-
-  const schema = await retrieveNotionDataSourceSchema({
-    dataSourceId: params.dataSourceId.trim(),
-    token
-  });
-
-  return {
-    id: schema.id,
-    name: schema.name ?? "",
-    properties: schema.properties
-  };
 }
 
 export async function syncNotionDateCandidatesAction(dateKey: string): Promise<NotionDateCandidatesSyncResult> {
@@ -209,7 +233,7 @@ export async function syncNotionDateCandidatesAction(dateKey: string): Promise<N
 
   const [connection, cards] = await Promise.all([
     getUserNotionConnection(user.id),
-    syncNotionCardsForDate({ dateKey, userId: user.id })
+    syncNotionCardsForDate({ dateKey, userId: user.id, context: { source: "notion_cards" } })
   ]);
 
   return {
@@ -229,7 +253,7 @@ export async function syncNotionCardFieldsAction(notionPageIds: string[]) {
     return { errors: [], failed: 0, updated: 0 };
   }
 
-  return syncNotionWorkHoursForPages({ notionPageIds: uniquePageIds, userId: user.id });
+  return syncNotionWorkHoursForPages({ notionPageIds: uniquePageIds, userId: user.id, context: { source: "manual_field_update" } });
 }
 
 function buildNotionFieldUpdatePrompt(params: {

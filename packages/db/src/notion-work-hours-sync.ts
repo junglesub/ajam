@@ -1,3 +1,5 @@
+import { createNotionLog, notionErrorMessage, type NotionLogContext } from "./notion-log";
+
 import {
   buildNotionCardAvailableHours,
   toBrowserDateKey
@@ -32,147 +34,164 @@ export type NotionWorkHoursSyncResult = {
 type NotionWorkHoursSkipReason = NonNullable<NotionWorkHoursSyncResult["skippedReason"]>;
 
 export async function syncNotionWorkHoursForPages(params: {
+  context?: NotionLogContext;
   includeLastWorkedDate?: boolean;
   notionPageIds: string[];
   userId: string;
 }): Promise<NotionWorkHoursSyncResult> {
+  const log = createNotionLog("field_update", { ...params.context, userId: params.userId });
   const notionPageIds = [...new Set(params.notionPageIds.map((pageId) => pageId.trim()).filter(Boolean))];
 
-  if (notionPageIds.length === 0) {
-    return { errors: [], failed: 0, updated: 0 };
-  }
-
-  const [connection, token] = await Promise.all([
-    getUserNotionConnection(params.userId),
-    getUserNotionAccessToken(params.userId)
-  ]);
-
-  if (!connection) {
-    return buildSkippedResult({ notionPageIds, skippedReason: "missing_connection" });
-  }
-
-  if (!token) {
-    return buildSkippedResult({ notionPageIds, skippedReason: "missing_token" });
-  }
-
-  const ajamLastUpdatePropertyKey = isMappedNotionPropertyType(connection.ajamLastUpdateProperty, "date")
-    ? getNotionPropertyKey(connection.ajamLastUpdateProperty)
-    : undefined;
-  const properties = [
-    {
-      descriptor: connection.availableHoursProperty,
-      kind: "availableHours" as const
-    },
-    {
-      descriptor: connection.workHoursProperty,
-      kind: "hours" as const
-    },
-    {
-      descriptor: connection.workDayCountProperty,
-      kind: "workDayCount" as const
-    },
-    ...(params.includeLastWorkedDate === false
-      ? []
-      : [{
-          descriptor: connection.lastWorkedDateProperty,
-          kind: "lastWorkedDate" as const
-        }])
-  ].filter((property) => Boolean(getNotionPropertyKey(property.descriptor)));
-
-  const validProperties = properties.filter((property) => {
-    if (!property.descriptor?.type) {
-      return true;
+  log.write("info", "started", { pagesRequested: notionPageIds.length });
+  const skip = (skippedReason: NotionWorkHoursSkipReason) => {
+    log.write("warn", "skipped", { skippedReason, pagesRequested: notionPageIds.length });
+    return buildSkippedResult({ notionPageIds, skippedReason });
+  };
+  try {
+    if (notionPageIds.length === 0) {
+      log.write("info", "skipped", { skippedReason: "no_pages" });
+      return { errors: [], failed: 0, updated: 0 };
     }
 
-    return property.kind === "lastWorkedDate"
-      ? property.descriptor.type === "date"
-      : property.descriptor.type === "number";
-  });
+    const [connection, token] = await Promise.all([
+      getUserNotionConnection(params.userId),
+      getUserNotionAccessToken(params.userId)
+    ]);
 
-  if (properties.length === 0) {
-    return buildSkippedResult({ notionPageIds, skippedReason: "missing_number_properties" });
-  }
+    if (!connection) {
+      return skip("missing_connection");
+    }
 
-  if (validProperties.length === 0) {
-    return buildSkippedResult({ notionPageIds, skippedReason: "invalid_number_properties" });
-  }
+    if (!token) {
+      return skip("missing_token");
+    }
 
-  const shouldSyncAvailableHours = validProperties.some((property) => property.kind === "availableHours");
-  const shouldSyncLastWorkedDate = validProperties.some((property) => property.kind === "lastWorkedDate");
-  const todayDateKey = toBrowserDateKey(new Date());
-  const [hourTotals, workDayCounts, availableHoursByPage, lastWorkedDatesByPage] = await Promise.all([
-    sumLinkedNotionHoursByPage({
-      notionPageIds,
-      userId: params.userId
-    }),
-    countLinkedNotionWorkDaysByPage({
-      notionPageIds,
-      userId: params.userId
-    }),
-    shouldSyncAvailableHours
-      ? buildAvailableHoursByPage({
-          notionPageIds,
-          todayDateKey,
-          userId: params.userId
-        })
-      : Promise.resolve(new Map<string, number>()),
-    shouldSyncLastWorkedDate
-      ? getLatestLinkedNotionWorkDateByPage({
-          notionPageIds,
-          userId: params.userId
-        })
-      : Promise.resolve(new Map<string, string>())
-  ]);
-  const errors: NotionWorkHoursSyncResult["errors"] = [];
-  let updated = 0;
+    const ajamLastUpdatePropertyKey = isMappedNotionPropertyType(connection.ajamLastUpdateProperty, "date")
+      ? getNotionPropertyKey(connection.ajamLastUpdateProperty)
+      : undefined;
+    const properties = [
+      {
+        descriptor: connection.availableHoursProperty,
+        kind: "availableHours" as const
+      },
+      {
+        descriptor: connection.workHoursProperty,
+        kind: "hours" as const
+      },
+      {
+        descriptor: connection.workDayCountProperty,
+        kind: "workDayCount" as const
+      },
+      ...(params.includeLastWorkedDate === false
+        ? []
+        : [{
+            descriptor: connection.lastWorkedDateProperty,
+            kind: "lastWorkedDate" as const
+          }])
+    ].filter((property) => Boolean(getNotionPropertyKey(property.descriptor)));
 
-  for (const pageId of notionPageIds) {
-    const pageProperties: Record<string, NotionPagePropertyPatch> = {};
-
-    for (const property of validProperties) {
-      const propertyKey = getNotionPropertyKey(property.descriptor);
-
-      if (!propertyKey) {
-        continue;
+    const validProperties = properties.filter((property) => {
+      if (!property.descriptor?.type) {
+        return true;
       }
 
-      if (property.kind === "lastWorkedDate") {
-        const lastWorkedDate = lastWorkedDatesByPage.get(pageId) ?? "";
+      return property.kind === "lastWorkedDate"
+        ? property.descriptor.type === "date"
+        : property.descriptor.type === "number";
+    });
+
+    if (properties.length === 0) {
+      return skip("missing_number_properties");
+    }
+
+    if (validProperties.length === 0) {
+      return skip("invalid_number_properties");
+    }
+
+    const shouldSyncAvailableHours = validProperties.some((property) => property.kind === "availableHours");
+    const shouldSyncLastWorkedDate = validProperties.some((property) => property.kind === "lastWorkedDate");
+    const todayDateKey = toBrowserDateKey(new Date());
+    const [hourTotals, workDayCounts, availableHoursByPage, lastWorkedDatesByPage] = await Promise.all([
+      sumLinkedNotionHoursByPage({
+        notionPageIds,
+        userId: params.userId
+      }),
+      countLinkedNotionWorkDaysByPage({
+        notionPageIds,
+        userId: params.userId
+      }),
+      shouldSyncAvailableHours
+        ? buildAvailableHoursByPage({
+            notionPageIds,
+            todayDateKey,
+            userId: params.userId
+          })
+        : Promise.resolve(new Map<string, number>()),
+      shouldSyncLastWorkedDate
+        ? getLatestLinkedNotionWorkDateByPage({
+            notionPageIds,
+            userId: params.userId
+          })
+        : Promise.resolve(new Map<string, string>())
+    ]);
+    const errors: NotionWorkHoursSyncResult["errors"] = [];
+    let updated = 0;
+
+    for (const pageId of notionPageIds) {
+      const pageProperties: Record<string, NotionPagePropertyPatch> = {};
+
+      for (const property of validProperties) {
+        const propertyKey = getNotionPropertyKey(property.descriptor);
+
+        if (!propertyKey) {
+          continue;
+        }
+
+        if (property.kind === "lastWorkedDate") {
+          const lastWorkedDate = lastWorkedDatesByPage.get(pageId) ?? "";
+
+          pageProperties[propertyKey] = {
+            date: lastWorkedDate ? { start: lastWorkedDate } : null
+          };
+          continue;
+        }
+
+        const value = property.kind === "hours"
+          ? hourTotals.get(pageId) ?? 0
+          : property.kind === "workDayCount"
+            ? workDayCounts.get(pageId) ?? 0
+            : availableHoursByPage.get(pageId) ?? 0;
 
         pageProperties[propertyKey] = {
-          date: lastWorkedDate ? { start: lastWorkedDate } : null
+          number: value
         };
-        continue;
       }
 
-      const value = property.kind === "hours"
-        ? hourTotals.get(pageId) ?? 0
-        : property.kind === "workDayCount"
-          ? workDayCounts.get(pageId) ?? 0
-          : availableHoursByPage.get(pageId) ?? 0;
-
-      pageProperties[propertyKey] = {
-        number: value
-      };
+      try {
+        await updateNotionPageProperties({
+          context: log.context,
+          ajamLastUpdatePropertyKey,
+          pageId,
+          properties: pageProperties,
+          token
+        });
+        updated += 1;
+        log.write("info", "page_updated", { pageId, fieldCount: Object.keys(pageProperties).length });
+      } catch (error) {
+        log.write("error", "page_failed", { pageId, fieldKinds: validProperties.map((property) => property.kind).join(","), error: notionErrorMessage(error) });
+        errors.push({
+          message: error instanceof Error ? error.message : "Notion 페이지 업데이트에 실패했습니다.",
+          notionPageId: pageId
+        });
+      }
     }
 
-    try {
-      await updateNotionPageProperties({
-        ajamLastUpdatePropertyKey,
-        pageId,
-        properties: pageProperties,
-        token
-      });
-      updated += 1;
-    } catch (error) {
-      errors.push({
-        message: error instanceof Error ? error.message : "Notion 페이지 업데이트에 실패했습니다.",
-        notionPageId: pageId
-      });
-    }
+    log.write(errors.length ? "warn" : "info", "completed", { pagesRequested: notionPageIds.length, updated, failed: errors.length });
+    return { errors, failed: errors.length, updated };
+  } catch (error) {
+    log.write("error", "failed", { error: notionErrorMessage(error) });
+    throw error;
   }
-
-  return { errors, failed: errors.length, updated };
 }
 
 function buildSkippedResult(params: {
