@@ -1,7 +1,8 @@
+import { withRequestLog } from "@timesheet/db/logging";
 import { createNotionLog, notionErrorMessage, handleNotionWebhook, NotionWebhookError } from "@timesheet/db";
 import { NextResponse } from "next/server";
 
-export async function POST(request: Request, context: { params: Promise<{ connectionId: string }> }) {
+export const POST = withRequestLog("/api/notion/webhook/[connectionId]", async (request: Request, context: { params: Promise<{ connectionId: string }> }) => {
   const { connectionId } = await context.params;
   const log = createNotionLog("webhook_request", { source: "webhook" });
   log.write("info", "received", { connectionId });
@@ -22,4 +23,4 @@ export async function POST(request: Request, context: { params: Promise<{ connec
       error: error instanceof NotionWebhookError ? error.message : "Notion Webhook 처리에 실패했습니다."
     }, { status });
   }
-}
+});

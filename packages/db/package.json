@@ -4,13 +4,14 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./logging": "./src/operation-log.ts"
   },
   "scripts": {
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:dummy": "tsx prisma/seed-dummy.ts",
-    "test": "node --import tsx --test src/timesheet-store.test.ts src/vacation-color-store.test.ts src/vacation-name-store.test.ts src/dummy-prefill.test.ts src/notion-log.test.ts src/notion-webhook.test.ts src/notion-sync-logging.test.ts",
+    "test": "node --import tsx --test src/timesheet-store.test.ts src/vacation-color-store.test.ts src/vacation-name-store.test.ts src/dummy-prefill.test.ts src/notion-log.test.ts src/notion-webhook.test.ts src/notion-sync-logging.test.ts src/operation-log.test.ts src/operational-logging.test.ts",
     "typecheck": "tsc --noEmit",
     "db:deploy": "pnpm db:seed"
   },

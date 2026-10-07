@@ -1,5 +1,7 @@
 "use server";
 
+import { createOperationLog, logHolidayFallback } from "@timesheet/db/logging";
+
 import {
   getMonthlyAiSummaryPatches,
   buildMonthlyAiSummaryExport,
@@ -111,7 +113,7 @@ async function loadMonthData(params: { monthIndex: number; userId: string; year:
   const range = getMonthRange(params.year, params.monthIndex);
   const [entries, holidays, projects, vacations] = await Promise.all([
     listTimesheetEntries({ endDateKey: range.endDateKey, startDateKey: range.startDateKey, userId: params.userId }),
-    listHolidays({ endDateKey: range.endDateKey, startDateKey: range.startDateKey }).catch(() => []),
+    listHolidays({ endDateKey: range.endDateKey, startDateKey: range.startDateKey }).catch(logHolidayFallback),
     listProjects({ userId: params.userId }),
     listVacations({ endDateKey: range.endDateKey, startDateKey: range.startDateKey, userId: params.userId })
   ]);
@@ -156,24 +158,28 @@ export async function applyMonthlyAiSummaryAction(params: {
   year: number;
 }): Promise<MonthlyAiSummaryApplyResult> {
   const user = await requireSession();
-  const { days, month } = await loadMonthData({ monthIndex: params.monthIndex, userId: user.id, year: params.year });
-  const currentPayload = buildMonthlyAiSummaryExport({ days, month });
-  const baselineValidation = validateMonthlyAiSummaryBaseline({ baseline: params.baseline, current: currentPayload });
+  return createOperationLog("timesheet", "json_import", { userId: user.id, source: "json_import" }).run(async () => {
+    const { days, month } = await loadMonthData({ monthIndex: params.monthIndex, userId: user.id, year: params.year });
+    const currentPayload = buildMonthlyAiSummaryExport({ days, month });
+    const baselineValidation = validateMonthlyAiSummaryBaseline({ baseline: params.baseline, current: currentPayload });
 
-  if (baselineValidation.errors.length > 0) {
-    throw new Error(baselineValidation.errors[0]);
-  }
+    if (baselineValidation.errors.length > 0) {
+      createOperationLog("timesheet", "json_import").write("warn", "rejected", { reason: "invalid_or_stale_baseline" });
+      throw new Error(baselineValidation.errors[0]);
+    }
 
-  const validation = validateMonthlyAiSummaryImport({ baseline: params.baseline, imported: params.imported });
+    const validation = validateMonthlyAiSummaryImport({ baseline: params.baseline, imported: params.imported });
 
-  if (validation.errors.length > 0) {
-    throw new Error(validation.errors[0]);
-  }
+    if (validation.errors.length > 0) {
+      createOperationLog("timesheet", "json_import").write("warn", "rejected", { reason: "invalid_import" });
+      throw new Error(validation.errors[0]);
+    }
 
-  const patches = getMonthlyAiSummaryPatches({ baseline: params.baseline, imported: params.imported });
-  await applyTimesheetAiSummaryPatches({ baseline: params.baseline, days, patches, userId: user.id });
+    const patches = getMonthlyAiSummaryPatches({ baseline: params.baseline, imported: params.imported });
+    await applyTimesheetAiSummaryPatches({ baseline: params.baseline, days, patches, userId: user.id });
 
-  return {
-    appliedDateKeys: patches.map((patch) => patch.dateKey)
-  };
+    return {
+      appliedDateKeys: patches.map((patch) => patch.dateKey)
+    };
+  }, { year: params.year, month: params.monthIndex + 1 }, (result) => ({ daysApplied: result.appliedDateKeys.length }));
 }

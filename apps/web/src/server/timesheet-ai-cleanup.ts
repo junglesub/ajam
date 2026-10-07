@@ -1,3 +1,4 @@
+import { createOperationLog, safeErrorFields } from "@timesheet/db/logging";
 import {
   applyTimesheetAiSummaryPatches,
   clearTimesheetAiRewriteRequests,
@@ -67,167 +68,178 @@ export async function runTimesheetAiCleanupForUser(params: {
   options?: AiCleanupOptions;
   userId: string;
 }): Promise<TimesheetAiCleanupResult> {
-  const setting = await getUserAiSetting(params.userId);
-  const apiKey = await getUserGeminiApiKey(params.userId);
+  return createOperationLog("ai", "cleanup", { userId: params.userId, dateKey: params.dateKey, source: "manual_ai" }).run(async () => {
+    const setting = await getUserAiSetting(params.userId);
+    const apiKey = await getUserGeminiApiKey(params.userId);
 
-  if (!setting.enabled || !apiKey) {
-    return {
-      appliedDateKeys: [],
-      days: [],
-      message: !setting.enabled ? "AI 자동 정리가 꺼져 있습니다." : "Gemini API key가 없어 AI 정리를 건너뛰었습니다.",
-      skipped: true
-    };
-  }
+    if (!setting.enabled || !apiKey) {
+      createOperationLog("ai", "cleanup").write("info", "skipped", { reason: !setting.enabled ? "disabled" : "missing_api_key" });
+      return {
+        appliedDateKeys: [],
+        days: [],
+        message: !setting.enabled ? "AI 자동 정리가 꺼져 있습니다." : "Gemini API key가 없어 AI 정리를 건너뛰었습니다.",
+        skipped: true
+      };
+    }
 
-  const year = Number(params.dateKey.slice(0, 4));
-  const monthIndex = Number(params.dateKey.slice(5, 7)) - 1;
-  const range = getMonthRange(year, monthIndex);
-  const days = await listTimesheetEntries({ ...range, userId: params.userId });
-  const overwriteDateKey = params.options?.overwriteCurrentDate ? params.dateKey : undefined;
-  const targetDays = selectAiCleanupTargets({
-    currentDateKey: params.dateKey,
-    days,
-    overwriteCurrentDate: Boolean(overwriteDateKey),
-    setting
-  });
-  const currentDay = days.find((day) => day.dateKey === params.dateKey);
+    const year = Number(params.dateKey.slice(0, 4));
+    const monthIndex = Number(params.dateKey.slice(5, 7)) - 1;
+    const range = getMonthRange(year, monthIndex);
+    const days = await listTimesheetEntries({ ...range, userId: params.userId });
+    const overwriteDateKey = params.options?.overwriteCurrentDate ? params.dateKey : undefined;
+    const targetDays = selectAiCleanupTargets({
+      currentDateKey: params.dateKey,
+      days,
+      overwriteCurrentDate: Boolean(overwriteDateKey),
+      setting
+    });
+    const currentDay = days.find((day) => day.dateKey === params.dateKey);
 
-  if (targetDays.length === 0) {
-    return {
-      appliedDateKeys: [],
-      days: [],
-      message: currentDay && hasSavedWorkContent(currentDay) && !needsAiCleanup(currentDay) && !overwriteDateKey
-        ? getAiNoChangeMessage("protected-existing")
-        : "AI로 채울 빈 번역/요약이 없습니다.",
-      skipped: true
-    };
-  }
+    if (targetDays.length === 0) {
+      createOperationLog("ai", "cleanup").write("info", "skipped", { reason: "no_targets" });
+      return {
+        appliedDateKeys: [],
+        days: [],
+        message: currentDay && hasSavedWorkContent(currentDay) && !needsAiCleanup(currentDay) && !overwriteDateKey
+          ? getAiNoChangeMessage("protected-existing")
+          : "AI로 채울 빈 번역/요약이 없습니다.",
+        skipped: true
+      };
+    }
 
-  return runAiCleanupForTargets({
-    apiKey,
-    currentDateKey: params.dateKey,
-    days,
-    overwriteDateKey,
-    setting,
-    targetDays,
-    userId: params.userId
-  });
+    return runAiCleanupForTargets({
+      apiKey,
+      currentDateKey: params.dateKey,
+      days,
+      overwriteDateKey,
+      setting,
+      targetDays,
+      userId: params.userId
+    });
+  }, {}, (result) => ({ skipped: result.skipped, daysApplied: result.appliedDateKeys.length }));
 }
 
 export async function runScheduledTimesheetAiCleanup(params: {
   dateKey: string;
   lookbackDays?: number;
 }): Promise<ScheduledTimesheetAiCleanupResult> {
-  const lookbackDays = normalizeLookbackDays(params.lookbackDays);
-  const startDateKey = addDays(params.dateKey, -(lookbackDays - 1));
-  const users = await listManagedUsers();
-  const userResults: ScheduledTimesheetAiCleanupUserResult[] = [];
-  const errors: ScheduledTimesheetAiCleanupResult["errors"] = [];
+  return createOperationLog("ai", "scheduled_cleanup", { dateKey: params.dateKey, source: "scheduled_ai" }).run(async () => {
+    const lookbackDays = normalizeLookbackDays(params.lookbackDays);
+    const startDateKey = addDays(params.dateKey, -(lookbackDays - 1));
+    const users = await listManagedUsers();
+    const userResults: ScheduledTimesheetAiCleanupUserResult[] = [];
+    const errors: ScheduledTimesheetAiCleanupResult["errors"] = [];
 
-  for (const user of users) {
-    try {
-      const setting = await getUserAiSetting(user.id);
+    for (const user of users) {
+      try {
+        const setting = await getUserAiSetting(user.id);
 
-      if (!setting.enabled || setting.cleanupMode !== "scheduled") {
+        if (!setting.enabled || setting.cleanupMode !== "scheduled") {
+          createOperationLog("ai", "scheduled_user", { userId: user.id }).write("debug", "skipped", { reason: !setting.enabled ? "disabled" : "not_scheduled" });
+          userResults.push({
+            appliedDateKeys: [],
+            failed: false,
+            message: !setting.enabled ? "AI 자동 정리 꺼짐" : "예약 실행 대상 아님",
+            skipped: true,
+            userId: user.id,
+            username: user.username
+          });
+          continue;
+        }
+
+        const apiKey = await getUserGeminiApiKey(user.id);
+
+        if (!apiKey) {
+          createOperationLog("ai", "scheduled_user", { userId: user.id }).write("warn", "skipped", { reason: "missing_api_key" });
+          userResults.push({
+            appliedDateKeys: [],
+            failed: false,
+            message: "Gemini API key 없음",
+            skipped: true,
+            userId: user.id,
+            username: user.username
+          });
+          continue;
+        }
+
+        const rewriteRequests = await listTimesheetAiRewriteRequests(user.id);
+        const rewriteDateKeys = rewriteRequests
+          .filter((request) => request.cleanupType === "rewrite" && request.dateKey <= params.dateKey)
+          .map((request) => request.dateKey);
+        const scheduledStartDateKey = rewriteDateKeys.reduce(
+          (earliestDateKey, dateKey) => dateKey < earliestDateKey ? dateKey : earliestDateKey,
+          startDateKey
+        );
+        const days = await listTimesheetEntries({
+          endDateKey: params.dateKey,
+          startDateKey: scheduledStartDateKey,
+          userId: user.id
+        });
+        const targetDays = selectScheduledAiCleanupTargets({
+          currentDateKey: params.dateKey,
+          days,
+          setting
+        });
+
+        if (targetDays.length === 0) {
+          createOperationLog("ai", "scheduled_user", { userId: user.id }).write("info", "skipped", { reason: "no_targets" });
+          userResults.push({
+            appliedDateKeys: [],
+            failed: false,
+            message: "AI로 채울 빈 번역/요약이 없습니다.",
+            skipped: true,
+            userId: user.id,
+            username: user.username
+          });
+          continue;
+        }
+
+        const result = await runAiCleanupForTargets({
+          apiKey,
+          currentDateKey: params.dateKey,
+          days,
+          overwriteDateKeys: new Set(targetDays.filter((day) => day.aiRewriteRequested).map((day) => day.dateKey)),
+          setting,
+          targetDays,
+          userId: user.id
+        });
+
+        createOperationLog("ai", "scheduled_user", { userId: user.id }).write("info", "completed", { skipped: result.skipped, daysApplied: result.appliedDateKeys.length });
         userResults.push({
-          appliedDateKeys: [],
+          appliedDateKeys: result.appliedDateKeys,
           failed: false,
-          message: !setting.enabled ? "AI 자동 정리 꺼짐" : "예약 실행 대상 아님",
-          skipped: true,
+          message: result.message,
+          skipped: result.skipped,
           userId: user.id,
           username: user.username
         });
-        continue;
-      }
+      } catch (error) {
+        createOperationLog("ai", "scheduled_user", { userId: user.id }).write("error", "failed", safeErrorFields(error));
+        const message = error instanceof Error ? error.message : "AI 예약 정리에 실패했습니다.";
 
-      const apiKey = await getUserGeminiApiKey(user.id);
-
-      if (!apiKey) {
-        userResults.push({
-          appliedDateKeys: [],
-          failed: false,
-          message: "Gemini API key 없음",
-          skipped: true,
+        errors.push({
+          message,
           userId: user.id,
           username: user.username
         });
-        continue;
-      }
-
-      const rewriteRequests = await listTimesheetAiRewriteRequests(user.id);
-      const rewriteDateKeys = rewriteRequests
-        .filter((request) => request.cleanupType === "rewrite" && request.dateKey <= params.dateKey)
-        .map((request) => request.dateKey);
-      const scheduledStartDateKey = rewriteDateKeys.reduce(
-        (earliestDateKey, dateKey) => dateKey < earliestDateKey ? dateKey : earliestDateKey,
-        startDateKey
-      );
-      const days = await listTimesheetEntries({
-        endDateKey: params.dateKey,
-        startDateKey: scheduledStartDateKey,
-        userId: user.id
-      });
-      const targetDays = selectScheduledAiCleanupTargets({
-        currentDateKey: params.dateKey,
-        days,
-        setting
-      });
-
-      if (targetDays.length === 0) {
         userResults.push({
           appliedDateKeys: [],
-          failed: false,
-          message: "AI로 채울 빈 번역/요약이 없습니다.",
-          skipped: true,
+          failed: true,
+          message,
+          skipped: false,
           userId: user.id,
           username: user.username
         });
-        continue;
       }
-
-      const result = await runAiCleanupForTargets({
-        apiKey,
-        currentDateKey: params.dateKey,
-        days,
-        overwriteDateKeys: new Set(targetDays.filter((day) => day.aiRewriteRequested).map((day) => day.dateKey)),
-        setting,
-        targetDays,
-        userId: user.id
-      });
-
-      userResults.push({
-        appliedDateKeys: result.appliedDateKeys,
-        failed: false,
-        message: result.message,
-        skipped: result.skipped,
-        userId: user.id,
-        username: user.username
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "AI 예약 정리에 실패했습니다.";
-
-      errors.push({
-        message,
-        userId: user.id,
-        username: user.username
-      });
-      userResults.push({
-        appliedDateKeys: [],
-        failed: true,
-        message,
-        skipped: false,
-        userId: user.id,
-        username: user.username
-      });
     }
-  }
 
-  return {
-    dateKey: params.dateKey,
-    errors,
-    lookbackDays,
-    userResults
-  };
+    return {
+      dateKey: params.dateKey,
+      errors,
+      lookbackDays,
+      userResults
+    };
+  }, { lookbackDays: normalizeLookbackDays(params.lookbackDays) }, (result) => ({ usersChecked: result.userResults.length, failedUsers: result.errors.length, skippedUsers: result.userResults.filter((user) => user.skipped).length, daysApplied: result.userResults.reduce((sum, user) => sum + user.appliedDateKeys.length, 0) }));
 }
 
 export async function testGeminiAiCleanupConnection(params: {
@@ -361,45 +373,49 @@ async function requestGeminiAiCleanup(params: {
 }
 
 async function requestGeminiText(params: { apiKey: string; model: string; prompt: string }): Promise<string> {
-  const model = params.model.trim() || "gemini-3.1-flash-lite";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(params.apiKey)}`;
-  const response = await fetch(url, {
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [{ text: params.prompt }]
+  const log = createOperationLog("ai", "gemini_api");
+  return log.run(async () => {
+    const model = params.model.trim() || "gemini-3.1-flash-lite";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(params.apiKey)}`;
+    const response = await fetch(url, {
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [{ text: params.prompt }]
+          }
+        ],
+        generationConfig: {
+          responseMimeType: "application/json",
+          temperature: 0.2
         }
-      ],
-      generationConfig: {
-        responseMimeType: "application/json",
-        temperature: 0.2
-      }
-    }),
-    cache: "no-store",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    method: "POST"
-  });
+      }),
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      method: "POST"
+    });
 
-  if (!response.ok) {
-    throw new Error(`Gemini 요청에 실패했습니다. (${response.status})`);
-  }
+    log.write(response.ok ? "info" : "error", "received", { status: response.status, retryAfter: response.headers.get("retry-after") ?? undefined });
+    if (!response.ok) {
+      throw new Error(`Gemini 요청에 실패했습니다. (${response.status})`);
+    }
 
-  const data = (await response.json()) as {
-    candidates?: Array<{
-      content?: {
-        parts?: Array<{ text?: string }>;
-      };
-    }>;
-  };
-  const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim();
+    const data = (await response.json()) as {
+      candidates?: Array<{
+        content?: {
+          parts?: Array<{ text?: string }>;
+        };
+      }>;
+    };
+    const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim();
 
-  if (!text) {
-    throw new Error("Gemini 응답이 비어 있습니다.");
-  }
+    if (!text) {
+      throw new Error("Gemini 응답이 비어 있습니다.");
+    }
 
-  return text;
+    return text;
+  }, {}, (text) => ({ responsePresent: Boolean(text) }));
 }
 
 function buildAiCleanupPrompt(params: {
@@ -647,95 +663,98 @@ async function runAiCleanupForTargets(params: {
   targetDays: AiCleanupTargetDay[];
   userId: string;
 }): Promise<TimesheetAiCleanupResult> {
-  const contextDays = selectAiCleanupContext({
-    currentDateKey: params.currentDateKey,
-    days: params.days,
-    excludeDateKeys: new Set(params.targetDays.map((day) => day.dateKey)),
-    limit: params.setting.contextDays
-  });
-  const payload = params.overwriteDateKey
-    ? await requestGeminiAiCleanup({
-        apiKey: params.apiKey,
-        contextDays,
-        model: params.setting.model,
-        overwriteDateKey: params.overwriteDateKey,
-        targetDays: params.targetDays
-      })
-    : await requestGeminiAiCleanup({
-        apiKey: params.apiKey,
-        contextDays,
-        model: params.setting.model,
-        overwriteExisting: params.overwriteExisting,
-        overwriteDateKeys: params.overwriteDateKeys,
-        targetDays: params.targetDays
-      });
-  const patchResult = params.overwriteDateKey
-    ? buildAiCleanupPatches({
-        overwriteDateKey: params.overwriteDateKey,
-        payload,
-        targetDays: params.targetDays
-      })
-    : buildAiCleanupPatches({
-        overwriteExisting: params.overwriteExisting,
-        overwriteDateKeys: params.overwriteDateKeys,
-        payload,
-        targetDays: params.targetDays
-      });
-  const patches = patchResult.patches;
-  const rewriteRequestDateKeys = [
-    ...new Set([
-      ...(params.overwriteDateKeys ?? new Set<string>()),
-      ...(params.overwriteDateKey ? [params.overwriteDateKey] : [])
-    ])
-  ];
+  return createOperationLog("ai", "apply_cleanup", { userId: params.userId, dateKey: params.currentDateKey }).run(async () => {
+    const contextDays = selectAiCleanupContext({
+      currentDateKey: params.currentDateKey,
+      days: params.days,
+      excludeDateKeys: new Set(params.targetDays.map((day) => day.dateKey)),
+      limit: params.setting.contextDays
+    });
+    const payload = params.overwriteDateKey
+      ? await requestGeminiAiCleanup({
+          apiKey: params.apiKey,
+          contextDays,
+          model: params.setting.model,
+          overwriteDateKey: params.overwriteDateKey,
+          targetDays: params.targetDays
+        })
+      : await requestGeminiAiCleanup({
+          apiKey: params.apiKey,
+          contextDays,
+          model: params.setting.model,
+          overwriteExisting: params.overwriteExisting,
+          overwriteDateKeys: params.overwriteDateKeys,
+          targetDays: params.targetDays
+        });
+    const patchResult = params.overwriteDateKey
+      ? buildAiCleanupPatches({
+          overwriteDateKey: params.overwriteDateKey,
+          payload,
+          targetDays: params.targetDays
+        })
+      : buildAiCleanupPatches({
+          overwriteExisting: params.overwriteExisting,
+          overwriteDateKeys: params.overwriteDateKeys,
+          payload,
+          targetDays: params.targetDays
+        });
+    const patches = patchResult.patches;
+    const rewriteRequestDateKeys = [
+      ...new Set([
+        ...(params.overwriteDateKeys ?? new Set<string>()),
+        ...(params.overwriteDateKey ? [params.overwriteDateKey] : [])
+      ])
+    ];
 
-  if (patches.length === 0) {
+    if (patches.length === 0) {
+      createOperationLog("ai", "apply_cleanup").write("info", "skipped", { reason: patchResult.reason });
+      await clearTimesheetAiRewriteRequests({
+        dateKeys: rewriteRequestDateKeys,
+        userId: params.userId
+      });
+      const refreshedDays = rewriteRequestDateKeys.length > 0
+        ? await listTimesheetEntries({
+            endDateKey: rewriteRequestDateKeys.sort((left, right) => left.localeCompare(right))[rewriteRequestDateKeys.length - 1]!,
+            startDateKey: rewriteRequestDateKeys[0]!,
+            userId: params.userId
+          })
+        : [];
+
+      return {
+        appliedDateKeys: [],
+        days: refreshedDays.filter((day) => rewriteRequestDateKeys.includes(day.dateKey)),
+        message: getAiNoChangeMessage(patchResult.reason),
+        skipped: true
+      };
+    }
+
+    await applyTimesheetAiSummaryPatches({
+      baseline: { days: params.targetDays.map(toAiCleanupBaselineDay) },
+      days: params.targetDays,
+      patches,
+      userId: params.userId
+    });
     await clearTimesheetAiRewriteRequests({
       dateKeys: rewriteRequestDateKeys,
       userId: params.userId
     });
-    const refreshedDays = rewriteRequestDateKeys.length > 0
-      ? await listTimesheetEntries({
-          endDateKey: rewriteRequestDateKeys.sort((left, right) => left.localeCompare(right))[rewriteRequestDateKeys.length - 1]!,
-          startDateKey: rewriteRequestDateKeys[0]!,
-          userId: params.userId
-        })
-      : [];
+
+    const appliedDateKeys = patches.map((patch) => patch.dateKey);
+    const sortedAppliedDateKeys = [...appliedDateKeys].sort((left, right) => left.localeCompare(right));
+    const refreshedDays = await listTimesheetEntries({
+      endDateKey: sortedAppliedDateKeys[sortedAppliedDateKeys.length - 1]!,
+      startDateKey: sortedAppliedDateKeys[0]!,
+      userId: params.userId
+    });
+    const previousCount = appliedDateKeys.filter((appliedDateKey) => appliedDateKey < params.currentDateKey).length;
 
     return {
-      appliedDateKeys: [],
-      days: refreshedDays.filter((day) => rewriteRequestDateKeys.includes(day.dateKey)),
-      message: getAiNoChangeMessage(patchResult.reason),
-      skipped: true
+      appliedDateKeys,
+      days: refreshedDays.filter((day) => appliedDateKeys.includes(day.dateKey)),
+      message: previousCount > 0 ? `AI 정리 완료 · 이전 ${previousCount}일 보정됨` : "AI 정리 완료",
+      skipped: false
     };
-  }
-
-  await applyTimesheetAiSummaryPatches({
-    baseline: { days: params.targetDays.map(toAiCleanupBaselineDay) },
-    days: params.targetDays,
-    patches,
-    userId: params.userId
-  });
-  await clearTimesheetAiRewriteRequests({
-    dateKeys: rewriteRequestDateKeys,
-    userId: params.userId
-  });
-
-  const appliedDateKeys = patches.map((patch) => patch.dateKey);
-  const sortedAppliedDateKeys = [...appliedDateKeys].sort((left, right) => left.localeCompare(right));
-  const refreshedDays = await listTimesheetEntries({
-    endDateKey: sortedAppliedDateKeys[sortedAppliedDateKeys.length - 1]!,
-    startDateKey: sortedAppliedDateKeys[0]!,
-    userId: params.userId
-  });
-  const previousCount = appliedDateKeys.filter((appliedDateKey) => appliedDateKey < params.currentDateKey).length;
-
-  return {
-    appliedDateKeys,
-    days: refreshedDays.filter((day) => appliedDateKeys.includes(day.dateKey)),
-    message: previousCount > 0 ? `AI 정리 완료 · 이전 ${previousCount}일 보정됨` : "AI 정리 완료",
-    skipped: false
-  };
+  }, { targetDays: params.targetDays.length }, (result) => ({ skipped: result.skipped, daysApplied: result.appliedDateKeys.length }));
 }
 
 function normalizeLookbackDays(value: number | undefined): number {

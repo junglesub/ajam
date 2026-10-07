@@ -1,3 +1,4 @@
+import { withRequestLog } from "@timesheet/db/logging";
 import { getMonthlyTimeMacroExportForUser } from "@timesheet/db";
 import { NextResponse } from "next/server";
 
@@ -22,7 +23,7 @@ function isValidMonth(month: string): boolean {
   return year >= 1000 && monthNumber >= 1 && monthNumber <= 12;
 }
 
-export async function GET(request: Request) {
+export const GET = withRequestLog("/api/extension/monthly-time-macro", async (request: Request) => {
   const auth = await authenticateExtensionRequest(request, "monthly_time_macro:read");
 
   if (!auth) {
@@ -44,4 +45,4 @@ export async function GET(request: Request) {
     ...data,
     ok: true
   });
-}
+});

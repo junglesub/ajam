@@ -1,3 +1,4 @@
+import { createOperationLog } from "./operation-log";
 import { randomUUID } from "node:crypto";
 
 import { prisma } from "./client";
@@ -42,42 +43,43 @@ export async function ensureApplicationSchema() {
   if (applicationSchemaReady) {
     return;
   }
+  return createOperationLog("db", "schema_settings").run(async () => {
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "User" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "username" TEXT NOT NULL,
+      "email" TEXT NOT NULL DEFAULT '',
+      "passwordHash" TEXT NOT NULL,
+      "role" TEXT NOT NULL DEFAULT 'USER',
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "User_username_key" ON "User"("username")`);
 
-  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "User" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "username" TEXT NOT NULL,
-    "email" TEXT NOT NULL DEFAULT '',
-    "passwordHash" TEXT NOT NULL,
-    "role" TEXT NOT NULL DEFAULT 'USER',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`);
-  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "User_username_key" ON "User"("username")`);
+    const userColumns = await prisma.$queryRawUnsafe<Array<{ name: string }>>(`PRAGMA table_info("User")`);
+    const hasRole = userColumns.some((column) => column.name === "role");
+    const hasEmail = userColumns.some((column) => column.name === "email");
 
-  const userColumns = await prisma.$queryRawUnsafe<Array<{ name: string }>>(`PRAGMA table_info("User")`);
-  const hasRole = userColumns.some((column) => column.name === "role");
-  const hasEmail = userColumns.some((column) => column.name === "email");
+    if (!hasRole) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "User" ADD COLUMN "role" TEXT NOT NULL DEFAULT 'USER'`);
+      await prisma.$executeRawUnsafe(`UPDATE "User" SET "role" = 'ADMIN' WHERE "username" = 'admin'`);
+    }
 
-  if (!hasRole) {
-    await prisma.$executeRawUnsafe(`ALTER TABLE "User" ADD COLUMN "role" TEXT NOT NULL DEFAULT 'USER'`);
-    await prisma.$executeRawUnsafe(`UPDATE "User" SET "role" = 'ADMIN' WHERE "username" = 'admin'`);
-  }
+    if (!hasEmail) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "User" ADD COLUMN "email" TEXT NOT NULL DEFAULT ''`);
+    }
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "User_email_key" ON "User"("email") WHERE trim("email") <> ''`);
 
-  if (!hasEmail) {
-    await prisma.$executeRawUnsafe(`ALTER TABLE "User" ADD COLUMN "email" TEXT NOT NULL DEFAULT ''`);
-  }
-  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "User_email_key" ON "User"("email") WHERE trim("email") <> ''`);
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "AppSetting" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "key" TEXT NOT NULL,
+      "value" TEXT NOT NULL,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "AppSetting_key_key" ON "AppSetting"("key")`);
 
-  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "AppSetting" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "key" TEXT NOT NULL,
-    "value" TEXT NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`);
-  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "AppSetting_key_key" ON "AppSetting"("key")`);
-
-  applicationSchemaReady = true;
+    applicationSchemaReady = true;
+  }, {});
 }
 
 export async function getAppSetting(key: string): Promise<string | null> {

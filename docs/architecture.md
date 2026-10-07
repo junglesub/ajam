@@ -63,17 +63,27 @@
 - API 호출은 method, path, 응답 시간, HTTP 상태를 기록하고 실패 시 Notion 오류 코드, 사람이 읽을 수 있는 기존 상태별 오류 메시지, request ID, `Retry-After`를 추가한다. API 응답의 원본 message/body, 요청 body, 카드 제목/업무 본문, token, signature는 기록하지 않는다. JSON 파싱 오류는 응답 일부를 노출하지 않도록 고정 메시지로 기록하며 Prisma 오류는 클래스 이름만 기록한다. 기타 예외 메시지의 Bearer/Notion token 패턴은 마스킹하며 최대 1,000자로 제한한다.
 - 회귀 검증은 `pnpm --filter @timesheet/db test`로 실행한다. Notion API 성공/429/네트워크 오류/비JSON 오류, 비밀값 제외, 페이지별 업데이트 실패, 생략 사유, 부분 동기화, Webhook 무시 사유·중복 처리를 확인한다.
 
-### 추가 로그 강화 후보 (아직 구현하지 않음)
+## 공통 운영 로그
 
-| 우선순위 | 위치 | 추가할 로그와 이유 |
+- 공통 구현은 `packages/db/src/operation-log.ts`이며 `@timesheet/db/logging`으로 DB 초기화 없이 사용할 수 있다. Notion 로그도 같은 출력을 재사용한다. Node.js `AsyncLocalStorage`로 API/업무 action/AI 작업과 하위 DB·외부 API 로그의 `operationId`를 연결한다. 동시에 실행되는 요청은 서로 다른 ID를 유지한다.
+- `AJAM_LOG_LEVEL`은 `debug`, `info`, `warn`, `error`를 지원하며 기본값은 `info`이다. Docker Compose의 environment에 `AJAM_LOG_LEVEL: debug`를 설정하면 상세 진단 로그를 볼 수 있다. 유효하지 않은 값은 `info`로 처리한다.
+- 모든 현재 API route에서 수신, 최종 HTTP 상태와 소요 시간을 기록한다. 4xx는 warn, 5xx/예외는 error이며 2초 이상 걸린 요청·작업은 `slow: true`와 warn으로 기록한다. 응답 body/header와 처리 결과는 변경하지 않는다. `/api/health`는 요청 로그에서 제외한다.
+- Next.js instrumentation은 Node 런타임 초기화 시 환경/build version/Node 버전을 기록하고, 처리되지 않은 render/API/server action 오류도 기록한다. 초기화 로그는 HTTP나 DB가 정상이라는 healthcheck 결과를 뜻하지 않는다. 정상 페이지 렌더 전체에 대한 access log는 추가하지 않는다.
+- 새 공통 오류 로그에는 임의의 예외 메시지 대신 안전한 오류 클래스·DB/네트워크 코드와 고정 사유만 기록한다. query string, 인증 header/cookie, 이메일/아이디/비밀번호, SQL 값, AI 프롬프트·응답, 업무 본문 및 API 키는 제외한다. `dateKey`는 유효한 날짜 형식일 때만 기록하며 객체/배열 metadata와 숫자가 아닌 year/month는 출력하지 않는다. schema 준비와 client 생성 로그는 DB 경로·접속 문자열을 출력하지 않는다.
+- 기본 로그에서 정상 미로그인·세션 만료·확장 인증 만료와 예약 대상이 아닌 AI 사용자, 공휴일 cache hit는 제외하며 debug에서 확인한다. 실제 잘못된 인증과 서버 예외는 warn/error로 남긴다. 공휴일 cache 조회 작업 자체의 시작/완료 및 결과 수는 info로 남긴다.
+- 회귀 검증은 `pnpm --filter @timesheet/db test`로 실행한다. 동시 요청의 ID 분리, 하위 Notion 로그의 ID 상속, 응답/예외 보존, healthcheck 제외, 느린 요청·일부 실패 배치 분류, debug 기본 비활성화, 내부 API 인증/날짜 오류, 공휴일 장애 fallback, Gemini 장애의 사용자별 결과와 민감정보 제외를 확인한다.
+
+### 추가 로그 강화 구현 내역
+
+| 우선순위 | 위치 | 구현한 로그 |
 | --- | --- | --- |
-| 높음 | `apps/web/src/server/timesheet-ai-cleanup.ts` | AI 예약 실행 시작/종료, 사용자별 실패/생략, Gemini HTTP 상태·소요 시간. 현재 오류를 결과 배열로 반환하므로 콘솔만 보면 실패를 놓친다. 프롬프트/업무 본문/API key는 제외한다. |
-| 높음 | `packages/db/src/timesheet-store.ts` 및 호출부 | 공휴일 API 실패·캐시 사용·서비스 키 없음, 공휴일 조회 실패 후 빈 목록 fallback. 가용 시간 계산이 어떤 데이터로 이루어졌는지 추적한다. 서비스 키가 포함된 URL은 제외한다. |
-| 높음 | 내부 API route | 인증 실패, 토큰 미설정, 잘못된 날짜/payload, 처리 상태와 응답 시간. n8n 요청이 처리 함수에 도달하지 못한 원인을 구분한다. Authorization은 제외한다. |
-| 중간 | 업무 저장/삭제/JSON import action | 저장 성공/실패, 날짜·entry 수, 충돌 검출, DB 소요 시간. 업무 자체 저장 실패와 저장 후 외부 동기화 실패를 구분한다. 업무 내용은 제외한다. |
-| 중간 | `apps/web/src/server/extension-auth.ts`, `session.ts` | 인증 실패 원인 분류와 서버 예외. 현재 catch 후 null로 반환되는 원인을 구분한다. 예상 가능한 만료/미로그인은 집계 또는 debug로 제한하고 쿠키/인증 토큰은 제외한다. |
-| 중간 | schema bootstrap/DB 초기화 | 스키마 보장 실패, DB 열기·권한·잠금 오류, 초기화 시간. `/api/health`는 DB를 검사하지 않아 별도 진단이 필요하다. |
-| 낮음 | 실행 환경 및 전역 요청 처리 | 서버 시작 시 build version/환경, 일반 API의 처리 식별자·상태·소요 시간, 느린 요청. 일반 요청 로그가 생기면 healthcheck 성공 요청은 제외해 잡음을 줄인다. |
+| 높음 | `apps/web/src/server/timesheet-ai-cleanup.ts` | 수동/예약 실행 시작·완료·실패, 사용자별 결과와 생략 사유, 대상·적용 날짜 수, Gemini HTTP 상태·소요 시간·Retry-After. 실패 사용자가 있는 배치 완료는 warn이다. |
+| 높음 | `packages/db/src/timesheet-store.ts` 및 호출부 | 공휴일 API 상태·실패, 월별 cache hit, 서비스 키 없음, 조회/반환 수, 조회 실패 후 빈 목록 fallback. 관리자 키 테스트 경로도 기록한다. |
+| 높음 | 내부 API route | 인증 실패·토큰 미설정, 잘못된 날짜·본문 형태, JSON 파싱 실패 후 기존 기본값 사용, 최종 HTTP 상태와 응답 시간. 기존 입력 처리와 응답은 유지한다. |
+| 중간 | 업무 저장/삭제/JSON import action 및 DB | action과 DB 단계별 시작·완료·실패, 사용자·날짜·entry/날짜 수, 잘못된 import/baseline 거절, 동시 변경 충돌 검출. 저장 후 Notion 실패는 `notionFailed`로 구분한다. |
+| 중간 | 로그인 action, `extension-auth.ts`, `session.ts` | 로그인 입력/인증 거절, 세션 생성/삭제, 인증 실패 사유, secret 조회·서명 실패, payload/DB 예외. 정상 미로그인·만료는 debug이다. |
+| 중간 | DB client 및 application/timesheet/Notion/AI schema bootstrap | client 구성 성공/실패, 최초 schema 준비 시작·완료·실패·시간, DB/SQLite 오류 코드. 실제 DB 연결 오류는 최초 schema/query 단계에서 기록한다. |
+| 낮음 | Next instrumentation 및 현재 API routes | 런타임 초기화 시 build version/환경/Node 버전, API의 처리 ID·HTTP 상태·소요 시간·느린 요청, 처리되지 않은 요청 오류. |
 
 ## Holiday Sync
 

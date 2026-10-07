@@ -1,3 +1,4 @@
+import { withRequestLog } from "@timesheet/db/logging";
 import { getManagedUser, rotateExtensionRefreshToken } from "@timesheet/db";
 import { NextResponse } from "next/server";
 
@@ -9,7 +10,7 @@ async function readJsonObject(request: Request): Promise<Record<string, unknown>
   return body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
 }
 
-export async function POST(request: Request) {
+export const POST = withRequestLog("/api/extension/auth/refresh", async (request: Request) => {
   const body = await readJsonObject(request);
   const refreshToken = typeof body.refreshToken === "string" ? body.refreshToken : "";
   const result = refreshToken ? await rotateExtensionRefreshToken(refreshToken) : null;
@@ -33,4 +34,4 @@ export async function POST(request: Request) {
     refreshToken: result.refreshToken,
     scopes
   });
-}
+});

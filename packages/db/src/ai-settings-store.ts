@@ -1,3 +1,4 @@
+import { createOperationLog } from "./operation-log";
 import { randomUUID } from "node:crypto";
 
 import { prisma } from "./client";
@@ -59,28 +60,29 @@ export async function ensureUserAiSettingSchema() {
   if (aiSchemaReady) {
     return;
   }
+  return createOperationLog("db", "schema_ai-settings").run(async () => {
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "UserAiSetting" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "userId" TEXT NOT NULL,
+      "provider" TEXT NOT NULL DEFAULT 'GEMINI',
+      "apiKeyEncrypted" TEXT NOT NULL DEFAULT '',
+      "model" TEXT NOT NULL DEFAULT 'gemini-3.1-flash-lite',
+      "enabled" INTEGER NOT NULL DEFAULT 0,
+      "contextDays" INTEGER NOT NULL DEFAULT 5,
+      "backfillMissing" INTEGER NOT NULL DEFAULT 1,
+      "backfillLimit" INTEGER NOT NULL DEFAULT 3,
+      "cleanupMode" TEXT NOT NULL DEFAULT 'immediate',
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "UserAiSetting_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    )`);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "UserAiSetting_userId_provider_key" ON "UserAiSetting"("userId", "provider")`);
+    if (!(await hasColumn("UserAiSetting", "cleanupMode"))) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "UserAiSetting" ADD COLUMN "cleanupMode" TEXT NOT NULL DEFAULT 'immediate'`);
+    }
 
-  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "UserAiSetting" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "userId" TEXT NOT NULL,
-    "provider" TEXT NOT NULL DEFAULT 'GEMINI',
-    "apiKeyEncrypted" TEXT NOT NULL DEFAULT '',
-    "model" TEXT NOT NULL DEFAULT 'gemini-3.1-flash-lite',
-    "enabled" INTEGER NOT NULL DEFAULT 0,
-    "contextDays" INTEGER NOT NULL DEFAULT 5,
-    "backfillMissing" INTEGER NOT NULL DEFAULT 1,
-    "backfillLimit" INTEGER NOT NULL DEFAULT 3,
-    "cleanupMode" TEXT NOT NULL DEFAULT 'immediate',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "UserAiSetting_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-  )`);
-  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "UserAiSetting_userId_provider_key" ON "UserAiSetting"("userId", "provider")`);
-  if (!(await hasColumn("UserAiSetting", "cleanupMode"))) {
-    await prisma.$executeRawUnsafe(`ALTER TABLE "UserAiSetting" ADD COLUMN "cleanupMode" TEXT NOT NULL DEFAULT 'immediate'`);
-  }
-
-  aiSchemaReady = true;
+    aiSchemaReady = true;
+  }, {});
 }
 
 export async function getUserAiSetting(userId: string): Promise<UserAiSetting> {

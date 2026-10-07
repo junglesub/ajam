@@ -1,3 +1,4 @@
+import { withRequestLog, createOperationLog } from "@timesheet/db/logging";
 import { listDailyTimesheetReminderTargets, markDailyTimesheetReminderSent } from "@timesheet/db";
 import { NextResponse } from "next/server";
 
@@ -44,21 +45,31 @@ function verifyToken(request: Request): boolean {
   const expectedToken = process.env.AJAM_INTERNAL_API_TOKEN?.trim();
 
   if (!expectedToken) {
+    createOperationLog("auth", "internal_api").write("warn", "rejected", { reason: "token_not_configured" });
     return false;
   }
 
-  return getBearerToken(request) === expectedToken;
+  const valid = getBearerToken(request) === expectedToken;
+  if (!valid) createOperationLog("auth", "internal_api").write("warn", "rejected", { reason: "missing_or_invalid_token" });
+  return valid;
 }
 
 async function parseBody(request: Request): Promise<ReminderRequestBody> {
   try {
-    return (await request.json()) as ReminderRequestBody;
+    const body = await request.json() as ReminderRequestBody;
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      createOperationLog("http", "internal_body").write("warn", "invalid_shape");
+    } else if (body.dateKey !== undefined && typeof body.dateKey !== "string") {
+      createOperationLog("http", "internal_body").write("warn", "invalid_date_type");
+    }
+    return body;
   } catch {
+    createOperationLog("http", "internal_body").write("warn", "defaulted", { reason: "invalid_json" });
     return {};
   }
 }
 
-export async function POST(request: Request) {
+export const POST = withRequestLog("/api/internal/reminders/daily-timesheet", async (request: Request) => {
   if (!verifyToken(request)) {
     return unauthorized();
   }
@@ -67,10 +78,12 @@ export async function POST(request: Request) {
 
   if (body.action === "mark-sent") {
     if (!isValidDateKey(body.dateKey)) {
+      createOperationLog("http", "internal_input").write("warn", "rejected", { reason: "invalid_date" });
       return NextResponse.json({ error: "Invalid dateKey" }, { status: 400 });
     }
 
     if (!body.email?.trim() || !body.userId?.trim()) {
+      createOperationLog("http", "internal_input").write("warn", "rejected", { reason: "missing_recipient" });
       return NextResponse.json({ error: "Missing email or userId" }, { status: 400 });
     }
 
@@ -86,6 +99,7 @@ export async function POST(request: Request) {
   const dateKey = body.dateKey?.trim() || getSeoulDateKey();
 
   if (!isValidDateKey(dateKey)) {
+    createOperationLog("http", "internal_input").write("warn", "rejected", { reason: "invalid_date" });
     return NextResponse.json({ error: "Invalid dateKey" }, { status: 400 });
   }
 
@@ -98,4 +112,4 @@ export async function POST(request: Request) {
     ...result,
     ok: true
   });
-}
+});

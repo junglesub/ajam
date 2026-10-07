@@ -1,5 +1,7 @@
 "use server";
 
+import { createOperationLog } from "@timesheet/db/logging";
+
 import { ensureApplicationSchema, prisma, verifyPassword } from "@timesheet/db";
 import { redirect } from "next/navigation";
 
@@ -57,6 +59,7 @@ export async function loginAction(_previousState: LoginState, formData: FormData
   const next = normalizeLoginNext(formData.get("next")?.toString());
 
   if (!username || !password) {
+    createOperationLog("auth", "login").write("warn", "rejected", { reason: "missing_credentials" });
     return {
       error: "아이디와 비밀번호를 모두 입력해 주세요.",
       username
@@ -72,6 +75,7 @@ export async function loginAction(_previousState: LoginState, formData: FormData
   });
 
   if (!user || !verifyPassword(password, user.passwordHash)) {
+    createOperationLog("auth", "login").write("warn", "rejected", { reason: "invalid_credentials" });
     return {
       error: "계정 정보를 다시 확인해 주세요.",
       username

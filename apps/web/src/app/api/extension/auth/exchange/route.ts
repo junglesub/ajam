@@ -1,3 +1,4 @@
+import { withRequestLog } from "@timesheet/db/logging";
 import { exchangeExtensionConnectionCode, getManagedUser } from "@timesheet/db";
 import { NextResponse } from "next/server";
 
@@ -9,7 +10,7 @@ async function readJsonObject(request: Request): Promise<Record<string, unknown>
   return body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
 }
 
-export async function POST(request: Request) {
+export const POST = withRequestLog("/api/extension/auth/exchange", async (request: Request) => {
   const body = await readJsonObject(request);
   const code = typeof body.code === "string" ? body.code : "";
   const result = code ? await exchangeExtensionConnectionCode(code) : null;
@@ -33,4 +34,4 @@ export async function POST(request: Request) {
     refreshToken: result.refreshToken,
     scopes
   });
-}
+});

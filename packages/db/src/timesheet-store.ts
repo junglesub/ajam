@@ -1,3 +1,4 @@
+import { createOperationLog } from "./operation-log";
 import { randomUUID } from "node:crypto";
 
 import { allocateNotionCardHours, normalizeVacationName, type TimesheetEntryNotionCardDraft, type VacationStatus } from "@timesheet/domain";
@@ -265,112 +266,113 @@ export async function ensureTimesheetSchema() {
   if (schemaReady) {
     return;
   }
+  return createOperationLog("db", "schema_timesheet").run(async () => {
+    await ensureApplicationSchema();
+    await ensureNotionSchema();
 
-  await ensureApplicationSchema();
-  await ensureNotionSchema();
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "TimesheetEntry" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "userId" TEXT NOT NULL,
+      "dateKey" TEXT NOT NULL,
+      "kind" TEXT NOT NULL,
+      "project" TEXT NOT NULL DEFAULT '',
+      "hours" REAL NOT NULL DEFAULT 8,
+      "content" TEXT NOT NULL DEFAULT '',
+      "aiTranslation" TEXT NOT NULL DEFAULT '',
+      "shortVersion" TEXT NOT NULL DEFAULT '',
+      "vacationName" TEXT NOT NULL DEFAULT '',
+      "vacationStatus" TEXT NOT NULL DEFAULT 'CONFIRMED',
+      "holidayName" TEXT NOT NULL DEFAULT '',
+      "sortOrder" INTEGER NOT NULL DEFAULT 0,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "TimesheetEntry_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    )`);
+    if (!(await hasColumn("TimesheetEntry", "sortOrder"))) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "TimesheetEntry" ADD COLUMN "sortOrder" INTEGER NOT NULL DEFAULT 0`);
+    }
+    if (!(await hasColumn("TimesheetEntry", "vacationStatus"))) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "TimesheetEntry" ADD COLUMN "vacationStatus" TEXT NOT NULL DEFAULT 'CONFIRMED'`);
+    }
+    await prisma.$executeRawUnsafe(`DROP INDEX IF EXISTS "TimesheetEntry_userId_dateKey_key"`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "TimesheetEntry_userId_dateKey_idx" ON "TimesheetEntry"("userId", "dateKey")`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "TimesheetEntry_dateKey_idx" ON "TimesheetEntry"("dateKey")`);
 
-  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "TimesheetEntry" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "userId" TEXT NOT NULL,
-    "dateKey" TEXT NOT NULL,
-    "kind" TEXT NOT NULL,
-    "project" TEXT NOT NULL DEFAULT '',
-    "hours" REAL NOT NULL DEFAULT 8,
-    "content" TEXT NOT NULL DEFAULT '',
-    "aiTranslation" TEXT NOT NULL DEFAULT '',
-    "shortVersion" TEXT NOT NULL DEFAULT '',
-    "vacationName" TEXT NOT NULL DEFAULT '',
-    "vacationStatus" TEXT NOT NULL DEFAULT 'CONFIRMED',
-    "holidayName" TEXT NOT NULL DEFAULT '',
-    "sortOrder" INTEGER NOT NULL DEFAULT 0,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "TimesheetEntry_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-  )`);
-  if (!(await hasColumn("TimesheetEntry", "sortOrder"))) {
-    await prisma.$executeRawUnsafe(`ALTER TABLE "TimesheetEntry" ADD COLUMN "sortOrder" INTEGER NOT NULL DEFAULT 0`);
-  }
-  if (!(await hasColumn("TimesheetEntry", "vacationStatus"))) {
-    await prisma.$executeRawUnsafe(`ALTER TABLE "TimesheetEntry" ADD COLUMN "vacationStatus" TEXT NOT NULL DEFAULT 'CONFIRMED'`);
-  }
-  await prisma.$executeRawUnsafe(`DROP INDEX IF EXISTS "TimesheetEntry_userId_dateKey_key"`);
-  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "TimesheetEntry_userId_dateKey_idx" ON "TimesheetEntry"("userId", "dateKey")`);
-  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "TimesheetEntry_dateKey_idx" ON "TimesheetEntry"("dateKey")`);
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "TimesheetDay" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "userId" TEXT NOT NULL,
+      "dateKey" TEXT NOT NULL,
+      "shortVersion" TEXT NOT NULL DEFAULT '',
+      "aiRewriteRequested" INTEGER NOT NULL DEFAULT 0,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "TimesheetDay_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    )`);
+    if (!(await hasColumn("TimesheetDay", "aiRewriteRequested"))) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "TimesheetDay" ADD COLUMN "aiRewriteRequested" INTEGER NOT NULL DEFAULT 0`);
+    }
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "TimesheetDay_userId_dateKey_key" ON "TimesheetDay"("userId", "dateKey")`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "TimesheetDay_dateKey_idx" ON "TimesheetDay"("dateKey")`);
+    await migrateTimesheetDaySummaries();
 
-  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "TimesheetDay" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "userId" TEXT NOT NULL,
-    "dateKey" TEXT NOT NULL,
-    "shortVersion" TEXT NOT NULL DEFAULT '',
-    "aiRewriteRequested" INTEGER NOT NULL DEFAULT 0,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "TimesheetDay_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-  )`);
-  if (!(await hasColumn("TimesheetDay", "aiRewriteRequested"))) {
-    await prisma.$executeRawUnsafe(`ALTER TABLE "TimesheetDay" ADD COLUMN "aiRewriteRequested" INTEGER NOT NULL DEFAULT 0`);
-  }
-  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "TimesheetDay_userId_dateKey_key" ON "TimesheetDay"("userId", "dateKey")`);
-  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "TimesheetDay_dateKey_idx" ON "TimesheetDay"("dateKey")`);
-  await migrateTimesheetDaySummaries();
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Holiday" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "dateKey" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "source" TEXT NOT NULL DEFAULT 'data-go-kr',
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "Holiday_dateKey_key" ON "Holiday"("dateKey")`);
 
-  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Holiday" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "dateKey" TEXT NOT NULL,
-    "name" TEXT NOT NULL,
-    "source" TEXT NOT NULL DEFAULT 'data-go-kr',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`);
-  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "Holiday_dateKey_key" ON "Holiday"("dateKey")`);
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Vacation" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "userId" TEXT NOT NULL,
+      "dateKey" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "hours" REAL NOT NULL DEFAULT 0,
+      "status" TEXT NOT NULL DEFAULT 'CONFIRMED',
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "Vacation_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    )`);
+    if (!(await hasColumn("Vacation", "status"))) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "Vacation" ADD COLUMN "status" TEXT NOT NULL DEFAULT 'CONFIRMED'`);
+    }
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "Vacation_userId_dateKey_key" ON "Vacation"("userId", "dateKey")`);
 
-  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Vacation" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "userId" TEXT NOT NULL,
-    "dateKey" TEXT NOT NULL,
-    "name" TEXT NOT NULL,
-    "hours" REAL NOT NULL DEFAULT 0,
-    "status" TEXT NOT NULL DEFAULT 'CONFIRMED',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "Vacation_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-  )`);
-  if (!(await hasColumn("Vacation", "status"))) {
-    await prisma.$executeRawUnsafe(`ALTER TABLE "Vacation" ADD COLUMN "status" TEXT NOT NULL DEFAULT 'CONFIRMED'`);
-  }
-  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "Vacation_userId_dateKey_key" ON "Vacation"("userId", "dateKey")`);
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "VacationAllowance" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "userId" TEXT NOT NULL,
+      "year" INTEGER NOT NULL,
+      "days" REAL NOT NULL DEFAULT 0,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "VacationAllowance_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    )`);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "VacationAllowance_userId_year_key" ON "VacationAllowance"("userId", "year")`);
 
-  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "VacationAllowance" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "userId" TEXT NOT NULL,
-    "year" INTEGER NOT NULL,
-    "days" REAL NOT NULL DEFAULT 0,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "VacationAllowance_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-  )`);
-  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "VacationAllowance_userId_year_key" ON "VacationAllowance"("userId", "year")`);
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Project" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "userId" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "Project_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    )`);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "Project_userId_name_key" ON "Project"("userId", "name")`);
 
-  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Project" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "userId" TEXT NOT NULL,
-    "name" TEXT NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "Project_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-  )`);
-  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "Project_userId_name_key" ON "Project"("userId", "name")`);
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "HolidayFetchLog" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "solYear" INTEGER NOT NULL,
+      "solMonth" INTEGER NOT NULL,
+      "source" TEXT NOT NULL DEFAULT 'data-go-kr',
+      "fetchedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`);
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "HolidayFetchLog_solYear_solMonth_source_key" ON "HolidayFetchLog"("solYear", "solMonth", "source")`);
 
-  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "HolidayFetchLog" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "solYear" INTEGER NOT NULL,
-    "solMonth" INTEGER NOT NULL,
-    "source" TEXT NOT NULL DEFAULT 'data-go-kr',
-    "fetchedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`);
-  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "HolidayFetchLog_solYear_solMonth_source_key" ON "HolidayFetchLog"("solYear", "solMonth", "source")`);
-
-  schemaReady = true;
+    schemaReady = true;
+  }, {});
 }
 
 async function listEntryNotionCards(params: {
@@ -623,39 +625,44 @@ function normalizeHolidayItems(items: unknown): DataGoKrHolidayItem[] {
 }
 
 async function fetchRestDeInfo(params: { solMonth: number; solYear: number }): Promise<HolidayRecord[]> {
-  const serviceKey = await getDataGoKrServiceKey();
+  const log = createOperationLog("holiday", "api");
+  return log.run(async () => {
+    const serviceKey = await getDataGoKrServiceKey();
 
-  if (!serviceKey) {
-    return [];
-  }
-
-  const solMonth = String(params.solMonth).padStart(2, "0");
-  const url = `https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo?ServiceKey=${encodeServiceKey(serviceKey)}&solYear=${params.solYear}&solMonth=${solMonth}&numOfRows=100&_type=json`;
-  const response = await fetch(url, { cache: "no-store" });
-
-  if (!response.ok) {
-    throw new Error(`공휴일 정보를 불러오지 못했습니다. (${response.status})`);
-  }
-
-  const data = (await response.json()) as {
-    response?: {
-      body?: {
-        items?: { item?: unknown };
-      };
-    };
-  };
-  const items = normalizeHolidayItems(data.response?.body?.items?.item);
-
-  return items.flatMap((item) => {
-    if (item.isHoliday !== "Y") {
+    if (!serviceKey) {
+      createOperationLog("holiday", "month").write("info", "skipped", { reason: "missing_service_key" });
       return [];
     }
 
-    const dateKey = toDateKeyFromLocdate(item.locdate);
-    const name = item.dateName?.trim();
+    const solMonth = String(params.solMonth).padStart(2, "0");
+    const url = `https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo?ServiceKey=${encodeServiceKey(serviceKey)}&solYear=${params.solYear}&solMonth=${solMonth}&numOfRows=100&_type=json`;
+    const response = await fetch(url, { cache: "no-store" });
 
-    return dateKey && name ? [{ dateKey, name }] : [];
-  });
+    log.write(response.ok ? "info" : "error", "received", { status: response.status, year: params.solYear, month: params.solMonth });
+    if (!response.ok) {
+      throw new Error(`공휴일 정보를 불러오지 못했습니다. (${response.status})`);
+    }
+
+    const data = (await response.json()) as {
+      response?: {
+        body?: {
+          items?: { item?: unknown };
+        };
+      };
+    };
+    const items = normalizeHolidayItems(data.response?.body?.items?.item);
+
+    return items.flatMap((item) => {
+      if (item.isHoliday !== "Y") {
+        return [];
+      }
+
+      const dateKey = toDateKeyFromLocdate(item.locdate);
+      const name = item.dateName?.trim();
+
+      return dateKey && name ? [{ dateKey, name }] : [];
+    });
+  }, { year: params.solYear, month: params.solMonth }, (holidays) => ({ holidaysFetched: holidays.length }));
 }
 
 function getMonthKeysBetween(startDateKey: string, endDateKey: string) {
@@ -675,43 +682,47 @@ function getMonthKeysBetween(startDateKey: string, endDateKey: string) {
 }
 
 async function ensureHolidayMonthFetched(params: { solMonth: number; solYear: number }) {
-  const existing = await prisma.$queryRawUnsafe<HolidayFetchLogRow[]>(
-    `SELECT "fetchedAt" FROM "HolidayFetchLog" WHERE "solYear" = ? AND "solMonth" = ? AND "source" = 'data-go-kr' LIMIT 1`,
-    params.solYear,
-    params.solMonth
-  );
-
-  if (existing.length > 0) {
-    return;
-  }
-
-  const serviceKey = await getDataGoKrServiceKey();
-
-  if (!serviceKey) {
-    return;
-  }
-
-  const holidays = await fetchRestDeInfo(params);
-
-  for (const holiday of holidays) {
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO "Holiday" ("id", "dateKey", "name", "source", "createdAt", "updatedAt")
-       VALUES (?, ?, ?, 'data-go-kr', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-       ON CONFLICT("dateKey") DO UPDATE SET "name" = excluded."name", "source" = 'data-go-kr', "updatedAt" = CURRENT_TIMESTAMP`,
-      randomUUID(),
-      holiday.dateKey,
-      holiday.name
+  return createOperationLog("holiday", "month").run(async () => {
+    const existing = await prisma.$queryRawUnsafe<HolidayFetchLogRow[]>(
+      `SELECT "fetchedAt" FROM "HolidayFetchLog" WHERE "solYear" = ? AND "solMonth" = ? AND "source" = 'data-go-kr' LIMIT 1`,
+      params.solYear,
+      params.solMonth
     );
-  }
 
-  await prisma.$executeRawUnsafe(
-    `INSERT INTO "HolidayFetchLog" ("id", "solYear", "solMonth", "source", "fetchedAt")
-     VALUES (?, ?, ?, 'data-go-kr', CURRENT_TIMESTAMP)
-     ON CONFLICT("solYear", "solMonth", "source") DO UPDATE SET "fetchedAt" = CURRENT_TIMESTAMP`,
-    randomUUID(),
-    params.solYear,
-    params.solMonth
-  );
+    if (existing.length > 0) {
+      createOperationLog("holiday", "month").write("debug", "cache_hit", { year: params.solYear, month: params.solMonth });
+      return;
+    }
+
+    const serviceKey = await getDataGoKrServiceKey();
+
+    if (!serviceKey) {
+      createOperationLog("holiday", "month").write("info", "skipped", { reason: "missing_service_key" });
+      return;
+    }
+
+    const holidays = await fetchRestDeInfo(params);
+
+    for (const holiday of holidays) {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "Holiday" ("id", "dateKey", "name", "source", "createdAt", "updatedAt")
+         VALUES (?, ?, ?, 'data-go-kr', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+         ON CONFLICT("dateKey") DO UPDATE SET "name" = excluded."name", "source" = 'data-go-kr', "updatedAt" = CURRENT_TIMESTAMP`,
+        randomUUID(),
+        holiday.dateKey,
+        holiday.name
+      );
+    }
+
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "HolidayFetchLog" ("id", "solYear", "solMonth", "source", "fetchedAt")
+       VALUES (?, ?, ?, 'data-go-kr', CURRENT_TIMESTAMP)
+       ON CONFLICT("solYear", "solMonth", "source") DO UPDATE SET "fetchedAt" = CURRENT_TIMESTAMP`,
+      randomUUID(),
+      params.solYear,
+      params.solMonth
+    );
+  }, { year: params.solYear, month: params.solMonth });
 }
 
 export async function resetHolidayCache(params?: { solMonth?: number; solYear?: number }) {
@@ -736,17 +747,19 @@ export async function resetHolidayCache(params?: { solMonth?: number; solYear?: 
 }
 
 export async function listHolidays(params: { endDateKey: string; startDateKey: string }) {
-  await ensureTimesheetSchema();
+  return createOperationLog("holiday", "list").run(async () => {
+    await ensureTimesheetSchema();
 
-  for (const month of getMonthKeysBetween(params.startDateKey, params.endDateKey)) {
-    await ensureHolidayMonthFetched(month);
-  }
+    for (const month of getMonthKeysBetween(params.startDateKey, params.endDateKey)) {
+      await ensureHolidayMonthFetched(month);
+    }
 
-  return prisma.$queryRawUnsafe<HolidayRow[]>(
-    `SELECT "dateKey", "name" FROM "Holiday" WHERE "dateKey" BETWEEN ? AND ? ORDER BY "dateKey" ASC`,
-    params.startDateKey,
-    params.endDateKey
-  );
+    return prisma.$queryRawUnsafe<HolidayRow[]>(
+      `SELECT "dateKey", "name" FROM "Holiday" WHERE "dateKey" BETWEEN ? AND ? ORDER BY "dateKey" ASC`,
+      params.startDateKey,
+      params.endDateKey
+    );
+  }, { startDateKey: params.startDateKey, endDateKey: params.endDateKey }, (holidays) => ({ holidaysReturned: holidays.length }));
 }
 
 export async function listVacations(params: { endDateKey: string; startDateKey: string; userId: string }) {
@@ -871,29 +884,33 @@ export async function upsertVacationAllowance(params: { days: number; userId: st
 }
 
 export async function saveTimesheetDay(params: { day: StoredTimesheetDay; userId: string }) {
-  await ensureTimesheetSchema();
+  return createOperationLog("timesheet", "save", { userId: params.userId, dateKey: params.day.dateKey }).run(async () => {
+    await ensureTimesheetSchema();
 
-  const day = normalizeDay(params.day);
+    const day = normalizeDay(params.day);
 
-  await prisma.$transaction(async (transaction) => {
-    await saveTimesheetDayInTransaction({ day, transaction, userId: params.userId });
-  });
+    await prisma.$transaction(async (transaction) => {
+      await saveTimesheetDayInTransaction({ day, transaction, userId: params.userId });
+    });
 
-  return day;
+    return day;
+  }, { entriesRequested: params.day.entries.length });
 }
 
 export async function saveTimesheetDays(params: { days: StoredTimesheetDay[]; userId: string }) {
-  await ensureTimesheetSchema();
+  return createOperationLog("timesheet", "save_many", { userId: params.userId }).run(async () => {
+    await ensureTimesheetSchema();
 
-  const days = params.days.map(normalizeDay);
+    const days = params.days.map(normalizeDay);
 
-  await prisma.$transaction(async (transaction) => {
-    for (const day of days) {
-      await saveTimesheetDayInTransaction({ day, transaction, userId: params.userId });
-    }
-  });
+    await prisma.$transaction(async (transaction) => {
+      for (const day of days) {
+        await saveTimesheetDayInTransaction({ day, transaction, userId: params.userId });
+      }
+    });
 
-  return days;
+    return days;
+  }, { daysRequested: params.days.length, entriesRequested: params.days.reduce((sum, day) => sum + day.entries.length, 0) });
 }
 
 export async function applyTimesheetAiSummaryPatches(params: {
@@ -902,66 +919,68 @@ export async function applyTimesheetAiSummaryPatches(params: {
   patches: TimesheetAiSummaryPatch[];
   userId: string;
 }): Promise<void> {
-  await ensureTimesheetSchema();
+  return createOperationLog("timesheet", "apply_summary_patches", { userId: params.userId }).run(async () => {
+    await ensureTimesheetSchema();
 
-  if (params.patches.length === 0) {
-    return;
-  }
-
-  const requestedDaysByDate = new Map(params.days.map((day) => [day.dateKey, day]));
-  const baselineDaysByDate = new Map(params.baseline.days.map((day) => [day.dateKey, day]));
-  const patchDateKeys = [...new Set(params.patches.map((patch) => patch.dateKey))];
-
-  await prisma.$transaction(async (transaction) => {
-    const currentDays = await listTimesheetDaysInTransaction({
-      dateKeys: patchDateKeys,
-      transaction,
-      userId: params.userId
-    });
-    const currentDaysByDate = new Map(currentDays.map((day) => [day.dateKey, day]));
-
-    for (const patch of params.patches) {
-      const requestedDay = requestedDaysByDate.get(patch.dateKey);
-      const baselineDay = baselineDaysByDate.get(patch.dateKey);
-      const currentDay = currentDaysByDate.get(patch.dateKey);
-
-      if (!requestedDay || !baselineDay || !currentDay) {
-        throw new Error(`${patch.dateKey} 기록을 찾을 수 없습니다.`);
-      }
-
-      const shortVersionChanged = patch.shortVersion !== baselineDay.shortVersion;
-
-      if (shortVersionChanged && currentDay.shortVersion !== baselineDay.shortVersion) {
-        throw new Error(`${patch.dateKey} shortVersion has changed since this JSON was exported. Reload the month and reapply the import.`);
-      }
-
-      for (const patchedEntry of patch.entries) {
-        const baselineEntry = baselineDay.entries.find((entry) => getAiSummaryEntryId(entry) === patchedEntry.id);
-        const currentEntry = currentDay.entries.find((entry) => entry.kind === "WORK" && getAiSummaryEntryId(entry) === patchedEntry.id);
-
-        if (!baselineEntry || baselineEntry.kind !== "WORK" || !currentEntry) {
-          throw new Error(`${patch.dateKey} entry ${patchedEntry.id} 기록을 찾을 수 없습니다.`);
-        }
-
-        if (currentEntry.aiTranslation !== baselineEntry.aiTranslation) {
-          throw new Error(`${patch.dateKey} entry ${patchedEntry.id} aiTranslation has changed since this JSON was exported. Reload the month and reapply the import.`);
-        }
-      }
-
-      const patchedEntriesById = new Map(patch.entries.map((entry) => [entry.id, entry]));
-      const nextDay: StoredTimesheetDay = normalizeDay({
-        ...currentDay,
-        shortVersion: shortVersionChanged ? patch.shortVersion : currentDay.shortVersion,
-        entries: currentDay.entries.map((entry) => {
-          const patchedEntry = entry.kind === "WORK" ? patchedEntriesById.get(getAiSummaryEntryId(entry)) : undefined;
-
-          return patchedEntry ? { ...entry, aiTranslation: patchedEntry.aiTranslation } : entry;
-        })
-      });
-
-      await saveTimesheetDayInTransaction({ day: nextDay, transaction, userId: params.userId });
+    if (params.patches.length === 0) {
+      return;
     }
-  });
+
+    const requestedDaysByDate = new Map(params.days.map((day) => [day.dateKey, day]));
+    const baselineDaysByDate = new Map(params.baseline.days.map((day) => [day.dateKey, day]));
+    const patchDateKeys = [...new Set(params.patches.map((patch) => patch.dateKey))];
+
+    await prisma.$transaction(async (transaction) => {
+      const currentDays = await listTimesheetDaysInTransaction({
+        dateKeys: patchDateKeys,
+        transaction,
+        userId: params.userId
+      });
+      const currentDaysByDate = new Map(currentDays.map((day) => [day.dateKey, day]));
+
+      for (const patch of params.patches) {
+        const requestedDay = requestedDaysByDate.get(patch.dateKey);
+        const baselineDay = baselineDaysByDate.get(patch.dateKey);
+        const currentDay = currentDaysByDate.get(patch.dateKey);
+
+        if (!requestedDay || !baselineDay || !currentDay) {
+          throw new Error(`${patch.dateKey} 기록을 찾을 수 없습니다.`);
+        }
+
+        const shortVersionChanged = patch.shortVersion !== baselineDay.shortVersion;
+
+        if (shortVersionChanged && currentDay.shortVersion !== baselineDay.shortVersion) {
+          throw new Error(`${patch.dateKey} shortVersion has changed since this JSON was exported. Reload the month and reapply the import.`);
+        }
+
+        for (const patchedEntry of patch.entries) {
+          const baselineEntry = baselineDay.entries.find((entry) => getAiSummaryEntryId(entry) === patchedEntry.id);
+          const currentEntry = currentDay.entries.find((entry) => entry.kind === "WORK" && getAiSummaryEntryId(entry) === patchedEntry.id);
+
+          if (!baselineEntry || baselineEntry.kind !== "WORK" || !currentEntry) {
+            throw new Error(`${patch.dateKey} entry ${patchedEntry.id} 기록을 찾을 수 없습니다.`);
+          }
+
+          if (currentEntry.aiTranslation !== baselineEntry.aiTranslation) {
+            throw new Error(`${patch.dateKey} entry ${patchedEntry.id} aiTranslation has changed since this JSON was exported. Reload the month and reapply the import.`);
+          }
+        }
+
+        const patchedEntriesById = new Map(patch.entries.map((entry) => [entry.id, entry]));
+        const nextDay: StoredTimesheetDay = normalizeDay({
+          ...currentDay,
+          shortVersion: shortVersionChanged ? patch.shortVersion : currentDay.shortVersion,
+          entries: currentDay.entries.map((entry) => {
+            const patchedEntry = entry.kind === "WORK" ? patchedEntriesById.get(getAiSummaryEntryId(entry)) : undefined;
+
+            return patchedEntry ? { ...entry, aiTranslation: patchedEntry.aiTranslation } : entry;
+          })
+        });
+
+        await saveTimesheetDayInTransaction({ day: nextDay, transaction, userId: params.userId });
+      }
+    });
+  }, { daysRequested: params.patches.length });
 }
 
 async function listTimesheetDaysInTransaction(params: {
@@ -1136,12 +1155,14 @@ async function saveTimesheetDayInTransaction(params: {
 }
 
 export async function deleteTimesheetEntry(params: { dateKey: string; userId: string }) {
-  await ensureTimesheetSchema();
+  return createOperationLog("timesheet", "delete", { userId: params.userId, dateKey: params.dateKey }).run(async () => {
+    await ensureTimesheetSchema();
 
-  await prisma.$executeRawUnsafe(`DELETE FROM "WorkEntryNotionCard" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);
-  await prisma.$executeRawUnsafe(`DELETE FROM "TimesheetEntry" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);
-  await prisma.$executeRawUnsafe(`DELETE FROM "TimesheetDay" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);
-  await prisma.$executeRawUnsafe(`DELETE FROM "Vacation" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);
+    await prisma.$executeRawUnsafe(`DELETE FROM "WorkEntryNotionCard" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);
+    await prisma.$executeRawUnsafe(`DELETE FROM "TimesheetEntry" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);
+    await prisma.$executeRawUnsafe(`DELETE FROM "TimesheetDay" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);
+    await prisma.$executeRawUnsafe(`DELETE FROM "Vacation" WHERE "userId" = ? AND "dateKey" = ?`, params.userId, params.dateKey);
+  }, {});
 }
 
 export const upsertTimesheetEntry = saveTimesheetDay;

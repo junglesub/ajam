@@ -1,3 +1,4 @@
+import { createOperationLog, safeErrorFields } from "@timesheet/db/logging";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 import { getAppSetting, setAppSetting } from "@timesheet/db";
@@ -39,7 +40,12 @@ function base64Url(value: string): string {
 }
 
 async function sign(payload: string): Promise<string> {
-  return createHmac("sha256", await getSessionSecret()).update(payload).digest("base64url");
+  try {
+    return createHmac("sha256", await getSessionSecret()).update(payload).digest("base64url");
+  } catch (error) {
+    createOperationLog("auth", "session_secret").write("error", "failed", safeErrorFields(error));
+    throw error;
+  }
 }
 
 function safeEqual(left: string, right: string): boolean {
@@ -61,13 +67,16 @@ async function createToken(payload: SessionPayload): Promise<string> {
 }
 
 async function readToken(token: string | undefined): Promise<SessionPayload | null> {
+  const log = createOperationLog("auth", "session");
   if (!token) {
+    log.write("debug", "rejected", { reason: "missing_cookie" });
     return null;
   }
 
   const [encodedPayload, signature] = token.split(".");
 
   if (!encodedPayload || !signature || !safeEqual(signature, await sign(encodedPayload))) {
+    log.write("warn", "rejected", { reason: "invalid_signature_or_format" });
     return null;
   }
 
@@ -75,11 +84,13 @@ async function readToken(token: string | undefined): Promise<SessionPayload | nu
     const payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as SessionPayload;
 
     if (payload.expiresAt < Date.now()) {
+      log.write("debug", "rejected", { reason: "expired" });
       return null;
     }
 
     return payload;
-  } catch {
+  } catch (error) {
+    log.write("warn", "rejected", { reason: "invalid_payload", ...safeErrorFields(error) });
     return null;
   }
 }
@@ -101,12 +112,14 @@ export async function createSession(params: { remember?: boolean; role: "ADMIN" 
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production"
   });
+  createOperationLog("auth", "session", { userId: params.userId }).write("info", "created", { remembered: Boolean(params.remember) });
 }
 
 export async function destroySession() {
   const cookieStore = await cookies();
 
   cookieStore.delete(sessionCookieName);
+  createOperationLog("auth", "session").write("info", "destroyed");
 }
 
 export async function getSession() {

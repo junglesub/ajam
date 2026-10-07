@@ -1,5 +1,7 @@
 "use server";
 
+import { createOperationLog, logHolidayFallback } from "@timesheet/db/logging";
+
 import {
   createNotionLog,
   notionErrorMessage,
@@ -238,48 +240,52 @@ function normalizeHolidayItems(items: unknown): Array<{ dateName?: string; isHol
 }
 
 async function fetchRestDeInfoWithKey(params: { serviceKey: string; solMonth: number; solYear: number }) {
-  const serviceKey = params.serviceKey.trim();
+  const log = createOperationLog("holiday", "test_api");
+  return log.run(async () => {
+    const serviceKey = params.serviceKey.trim();
 
-  if (!serviceKey) {
-    throw new Error("API 키를 입력해 주세요.");
-  }
-
-  const solMonth = String(params.solMonth).padStart(2, "0");
-  const url = `https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo?ServiceKey=${encodeServiceKey(serviceKey)}&solYear=${params.solYear}&solMonth=${solMonth}&numOfRows=100&_type=json`;
-  const response = await fetch(url, { cache: "no-store" });
-
-  if (!response.ok) {
-    throw new Error(`공휴일 정보를 불러오지 못했습니다. (${response.status})`);
-  }
-
-  const data = (await response.json()) as {
-    response?: {
-      body?: {
-        items?: { item?: unknown };
-      };
-      header?: {
-        resultCode?: string;
-        resultMsg?: string;
-      };
-    };
-  };
-
-  if (data.response?.header?.resultCode && data.response.header.resultCode !== "00") {
-    throw new Error(data.response.header.resultMsg || "API 키를 확인해 주세요.");
-  }
-
-  const items = normalizeHolidayItems(data.response?.body?.items?.item);
-
-  return items.flatMap((item) => {
-    if (item.isHoliday !== "Y") {
-      return [];
+    if (!serviceKey) {
+      throw new Error("API 키를 입력해 주세요.");
     }
 
-    const dateKey = toDateKeyFromLocdate(item.locdate);
-    const name = item.dateName?.trim();
+    const solMonth = String(params.solMonth).padStart(2, "0");
+    const url = `https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo?ServiceKey=${encodeServiceKey(serviceKey)}&solYear=${params.solYear}&solMonth=${solMonth}&numOfRows=100&_type=json`;
+    const response = await fetch(url, { cache: "no-store" });
 
-    return dateKey && name ? [{ dateKey, name }] : [];
-  });
+    log.write(response.ok ? "info" : "error", "received", { status: response.status });
+    if (!response.ok) {
+      throw new Error(`공휴일 정보를 불러오지 못했습니다. (${response.status})`);
+    }
+
+    const data = (await response.json()) as {
+      response?: {
+        body?: {
+          items?: { item?: unknown };
+        };
+        header?: {
+          resultCode?: string;
+          resultMsg?: string;
+        };
+      };
+    };
+
+    if (data.response?.header?.resultCode && data.response.header.resultCode !== "00") {
+      throw new Error(data.response.header.resultMsg || "API 키를 확인해 주세요.");
+    }
+
+    const items = normalizeHolidayItems(data.response?.body?.items?.item);
+
+    return items.flatMap((item) => {
+      if (item.isHoliday !== "Y") {
+        return [];
+      }
+
+      const dateKey = toDateKeyFromLocdate(item.locdate);
+      const name = item.dateName?.trim();
+
+      return dateKey && name ? [{ dateKey, name }] : [];
+    });
+  }, { year: params.solYear, month: params.solMonth });
 }
 
 export async function loadTimesheetMonthAction(year: number, monthIndex: number): Promise<TimesheetMonthData> {
@@ -289,10 +295,10 @@ export async function loadTimesheetMonthAction(year: number, monthIndex: number)
     listTimesheetEntries({ ...range, userId: user.id }),
     listHolidays(range)
       .then((holidays) => ({ holidayWarning: undefined, holidays }))
-      .catch((error) => ({
-        holidayWarning: error instanceof Error ? error.message : "공휴일 정보를 불러오지 못했습니다.",
-        holidays: []
-      })),
+      .catch((error) => {
+        logHolidayFallback(error);
+        return { holidayWarning: error instanceof Error ? error.message : "공휴일 정보를 불러오지 못했습니다.", holidays: [] };
+      }),
     listProjects({ userId: user.id }),
     loadVacationYearColorData(user.id, year)
   ]);
@@ -315,38 +321,40 @@ export async function loadTimesheetVacationColorsAction(year: number): Promise<R
 
 export async function saveTimesheetEntryAction(day: TimesheetDayDraft): Promise<TimesheetSaveResult> {
   const user = await requireSession();
+  return createOperationLog("timesheet", "save_action", { userId: user.id, dateKey: day.dateKey, source: "timesheet_save" }).run(async () => {
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day.dateKey)) {
-    throw new Error("날짜 형식이 올바르지 않습니다.");
-  }
-
-  for (const entry of day.entries) {
-    if (!["WORK", "VACATION", "HOLIDAY"].includes(entry.kind)) {
-    throw new Error("업무 유형이 올바르지 않습니다.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day.dateKey)) {
+      throw new Error("날짜 형식이 올바르지 않습니다.");
     }
-  }
 
-  const normalizedDay: StoredTimesheetDraft = {
-    ...day,
-    aiRewriteRequested: Boolean(day.aiRewriteRequested)
-  };
-  const previousDay = await listTimesheetEntries({ endDateKey: normalizedDay.dateKey, startDateKey: normalizedDay.dateKey, userId: user.id });
-  const affectedNotionPageIds = collectChangedNotionPageIdsForTimesheetSave({
-    afterDay: normalizedDay,
-    beforeDays: previousDay
-  });
-  const savedDay = await saveTimesheetDay({ day: normalizedDay, userId: user.id });
+    for (const entry of day.entries) {
+      if (!["WORK", "VACATION", "HOLIDAY"].includes(entry.kind)) {
+      throw new Error("업무 유형이 올바르지 않습니다.");
+      }
+    }
 
-  const notionSyncError = await syncNotionWorkHoursAfterTimesheetSave({ notionPageIds: affectedNotionPageIds, userId: user.id });
-  const [freshSavedDay] = await listTimesheetEntries({ endDateKey: normalizedDay.dateKey, startDateKey: normalizedDay.dateKey, userId: user.id });
+    const normalizedDay: StoredTimesheetDraft = {
+      ...day,
+      aiRewriteRequested: Boolean(day.aiRewriteRequested)
+    };
+    const previousDay = await listTimesheetEntries({ endDateKey: normalizedDay.dateKey, startDateKey: normalizedDay.dateKey, userId: user.id });
+    const affectedNotionPageIds = collectChangedNotionPageIdsForTimesheetSave({
+      afterDay: normalizedDay,
+      beforeDays: previousDay
+    });
+    const savedDay = await saveTimesheetDay({ day: normalizedDay, userId: user.id });
 
-  revalidatePath("/notion-cards");
-  revalidatePath("/timesheet");
+    const notionSyncError = await syncNotionWorkHoursAfterTimesheetSave({ notionPageIds: affectedNotionPageIds, userId: user.id });
+    const [freshSavedDay] = await listTimesheetEntries({ endDateKey: normalizedDay.dateKey, startDateKey: normalizedDay.dateKey, userId: user.id });
 
-  return {
-    day: freshSavedDay ?? savedDay,
-    notionSyncError
-  };
+    revalidatePath("/notion-cards");
+    revalidatePath("/timesheet");
+
+    return {
+      day: freshSavedDay ?? savedDay,
+      notionSyncError
+    };
+  }, { entriesRequested: day.entries.length }, (result) => ({ notionFailed: Boolean(result.notionSyncError) }));
 }
 
 export async function runTimesheetAiCleanupAction(dateKey: string, options: AiCleanupOptions = {}): Promise<TimesheetAiCleanupResult> {
@@ -367,23 +375,25 @@ export async function listTimesheetAiRewriteRequestsAction(): Promise<TimesheetA
 
 export async function deleteTimesheetEntryAction(dateKey: string): Promise<TimesheetDeleteResult> {
   const user = await requireSession();
+  return createOperationLog("timesheet", "delete_action", { userId: user.id, dateKey, source: "timesheet_delete" }).run(async () => {
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
-    throw new Error("날짜 형식이 올바르지 않습니다.");
-  }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+      throw new Error("날짜 형식이 올바르지 않습니다.");
+    }
 
-  const previousDay = await listTimesheetEntries({ endDateKey: dateKey, startDateKey: dateKey, userId: user.id });
-  const affectedNotionPageIds = collectNotionPageIds(previousDay);
+    const previousDay = await listTimesheetEntries({ endDateKey: dateKey, startDateKey: dateKey, userId: user.id });
+    const affectedNotionPageIds = collectNotionPageIds(previousDay);
 
-  await deleteTimesheetEntry({ dateKey, userId: user.id });
-  const notionSyncError = await syncNotionWorkHoursAfterTimesheetSave({ notionPageIds: affectedNotionPageIds, userId: user.id });
+    await deleteTimesheetEntry({ dateKey, userId: user.id });
+    const notionSyncError = await syncNotionWorkHoursAfterTimesheetSave({ notionPageIds: affectedNotionPageIds, userId: user.id });
 
-  revalidatePath("/notion-cards");
-  revalidatePath("/timesheet");
+    revalidatePath("/notion-cards");
+    revalidatePath("/timesheet");
 
-  return {
-    notionSyncError
-  };
+    return {
+      notionSyncError
+    };
+  }, {}, (result) => ({ notionFailed: Boolean(result.notionSyncError) }));
 }
 
 function collectNotionPageIds(days: StoredTimesheetDraft[]): string[] {
@@ -664,7 +674,7 @@ async function buildNotionCardCandidateMetrics(params: {
     sumLinkedNotionHoursByPage({ notionPageIds, userId: params.userId }),
     countLinkedNotionWorkDaysByPage({ notionPageIds, userId: params.userId }),
     getLatestLinkedNotionWorkDateByPage({ notionPageIds, userId: params.userId }),
-    availabilityRange ? listHolidays(availabilityRange).catch(() => []) : Promise.resolve([]),
+    availabilityRange ? listHolidays(availabilityRange).catch(logHolidayFallback) : Promise.resolve([]),
     availabilityRange ? listVacations({ ...availabilityRange, userId: params.userId }) : Promise.resolve([])
   ]);
   const holidayDateKeys = availabilityHolidays.map((holiday) => holiday.dateKey);

@@ -1,3 +1,4 @@
+import { withRequestLog, createOperationLog } from "@timesheet/db/logging";
 import { runNotionDailyMaintenance } from "@timesheet/db";
 import { NextResponse } from "next/server";
 
@@ -36,21 +37,31 @@ function verifyToken(request: Request): boolean {
   const expectedToken = process.env.AJAM_INTERNAL_API_TOKEN?.trim();
 
   if (!expectedToken) {
+    createOperationLog("auth", "internal_api").write("warn", "rejected", { reason: "token_not_configured" });
     return false;
   }
 
-  return getBearerToken(request) === expectedToken;
+  const valid = getBearerToken(request) === expectedToken;
+  if (!valid) createOperationLog("auth", "internal_api").write("warn", "rejected", { reason: "missing_or_invalid_token" });
+  return valid;
 }
 
 async function parseBody(request: Request): Promise<DailyMaintenanceRequestBody> {
   try {
-    return (await request.json()) as DailyMaintenanceRequestBody;
+    const body = await request.json() as DailyMaintenanceRequestBody;
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      createOperationLog("http", "internal_body").write("warn", "invalid_shape");
+    } else if (body.dateKey !== undefined && typeof body.dateKey !== "string") {
+      createOperationLog("http", "internal_body").write("warn", "invalid_date_type");
+    }
+    return body;
   } catch {
+    createOperationLog("http", "internal_body").write("warn", "defaulted", { reason: "invalid_json" });
     return {};
   }
 }
 
-export async function POST(request: Request) {
+export const POST = withRequestLog("/api/internal/notion/daily-maintenance", async (request: Request) => {
   if (!verifyToken(request)) {
     return unauthorized();
   }
@@ -59,6 +70,7 @@ export async function POST(request: Request) {
   const dateKey = body.dateKey?.trim() || getSeoulDateKey();
 
   if (!isValidDateKey(dateKey)) {
+    createOperationLog("http", "internal_input").write("warn", "rejected", { reason: "invalid_date" });
     return NextResponse.json({ error: "Invalid dateKey" }, { status: 400 });
   }
 
@@ -71,4 +83,4 @@ export async function POST(request: Request) {
     ...result,
     ok: result.errors.length === 0
   });
-}
+});

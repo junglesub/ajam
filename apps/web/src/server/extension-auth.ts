@@ -1,3 +1,4 @@
+import { createOperationLog, safeErrorFields } from "@timesheet/db/logging";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 import { getAppSetting, getExtensionConnection, setAppSetting } from "@timesheet/db";
@@ -48,7 +49,12 @@ async function getExtensionAccessTokenSecret(): Promise<string> {
 }
 
 async function sign(value: string): Promise<string> {
-  return createHmac("sha256", await getExtensionAccessTokenSecret()).update(value).digest("base64url");
+  try {
+    return createHmac("sha256", await getExtensionAccessTokenSecret()).update(value).digest("base64url");
+  } catch (error) {
+    createOperationLog("auth", "extension_secret").write("error", "failed", safeErrorFields(error));
+    throw error;
+  }
 }
 
 function safeEqual(left: string, right: string): boolean {
@@ -130,16 +136,19 @@ export async function createExtensionAccessToken(params: {
 }
 
 export async function authenticateExtensionRequest(request: Request, requiredScope: string): Promise<AuthenticatedExtension | null> {
+  const log = createOperationLog("auth", "extension");
   const token = getBearerToken(request);
   const parts = token.split(".");
 
   if (parts.length !== 3) {
+    log.write(token ? "warn" : "debug", "rejected", { reason: token ? "invalid_format" : "missing_token" });
     return null;
   }
 
   const [header, payload, signature] = parts;
 
   if (!header || !payload || !signature || !safeEqual(signature, await sign(`${header}.${payload}`))) {
+    log.write("warn", "rejected", { reason: "invalid_signature_or_format" });
     return null;
   }
 
@@ -148,22 +157,27 @@ export async function authenticateExtensionRequest(request: Request, requiredSco
     const parsedPayload = decodeJsonPart(payload);
 
     if (!isHeader(parsedHeader) || !isPayload(parsedPayload)) {
+      log.write("warn", "rejected", { reason: "invalid_payload" });
       return null;
     }
 
     if (parsedPayload.exp <= Math.floor(Date.now() / 1000) || !parsedPayload.scopes.includes(requiredScope)) {
+      const expired = parsedPayload.exp <= Math.floor(Date.now() / 1000);
+      log.write(expired ? "debug" : "warn", "rejected", { reason: expired ? "expired" : "missing_scope" });
       return null;
     }
 
     const connection = await getExtensionConnection(parsedPayload.connectionId);
 
     if (!connection || connection.revokedAt || connection.userId !== parsedPayload.sub) {
+      log.write("warn", "rejected", { reason: !connection ? "missing_connection" : connection.revokedAt ? "revoked" : "user_mismatch" });
       return null;
     }
 
     const connectionScopes = parseScopeList(connection.scopes);
 
     if (!connectionScopes.includes(requiredScope)) {
+      log.write("warn", "rejected", { reason: "connection_missing_scope" });
       return null;
     }
 
@@ -172,7 +186,8 @@ export async function authenticateExtensionRequest(request: Request, requiredSco
       scopes: connectionScopes,
       userId: parsedPayload.sub
     };
-  } catch {
+  } catch (error) {
+    log.write(error instanceof SyntaxError ? "warn" : "error", "failed", safeErrorFields(error));
     return null;
   }
 }

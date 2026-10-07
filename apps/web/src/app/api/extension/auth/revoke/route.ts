@@ -1,9 +1,10 @@
+import { withRequestLog } from "@timesheet/db/logging";
 import { revokeExtensionConnection } from "@timesheet/db";
 import { NextResponse } from "next/server";
 
 import { authenticateExtensionRequest } from "@/server/extension-auth";
 
-export async function POST(request: Request) {
+export const POST = withRequestLog("/api/extension/auth/revoke", async (request: Request) => {
   const auth = await authenticateExtensionRequest(request, "monthly_time_macro:read");
 
   if (!auth) {
@@ -13,4 +14,4 @@ export async function POST(request: Request) {
   await revokeExtensionConnection(auth.connectionId, auth.userId);
 
   return NextResponse.json({ ok: true });
-}
+});

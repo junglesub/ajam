@@ -1,13 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createOperationLog, type LogContext } from "./operation-log";
 
-export type NotionLogContext = {
-  operationId?: string;
-  source?: string;
-  userId?: string;
-  dateKey?: string;
-};
-
-type LogValue = string | number | boolean | undefined;
+export type NotionLogContext = LogContext;
 
 export function notionErrorMessage(error: unknown): string {
   // JSON.parse/Response.json SyntaxErrors can embed a snippet of private data.
@@ -22,18 +15,5 @@ export function notionErrorMessage(error: unknown): string {
 
 /** Only explicitly selected metadata belongs here; never pass payloads or credentials. */
 export function createNotionLog(operation: string, context: NotionLogContext = {}) {
-  const startedAt = Date.now();
-  const operationId = context.operationId ?? randomUUID();
-  const safeContext = { operationId, source: context.source, userId: context.userId, dateKey: context.dateKey };
-  const contextFields = Object.fromEntries(Object.entries(safeContext).filter(([, value]) => value !== undefined));
-  return {
-    context: safeContext,
-    write(level: "info" | "warn" | "error", result: string, fields: Record<string, LogValue> = {}) {
-      const line = JSON.stringify({ ...fields, ...contextFields, timestamp: new Date().toISOString(), level,
-        component: "notion", operation, result, durationMs: Date.now() - startedAt });
-      if (level === "error") console.error(line);
-      else if (level === "warn") console.warn(line);
-      else console.info(line);
-    }
-  };
+  return createOperationLog("notion", operation, context);
 }

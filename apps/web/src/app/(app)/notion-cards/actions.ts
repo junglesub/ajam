@@ -1,5 +1,7 @@
 "use server";
 
+import { logHolidayFallback } from "@timesheet/db/logging";
+
 import {
   buildNotionCardAvailableHours,
   buildNotionCardEstimate,
@@ -335,7 +337,7 @@ export async function buildNotionMonthlyAnalysisAction(month: string): Promise<N
     getUserNotionConnection(user.id),
     listTimesheetEntries({ endDateKey, startDateKey, userId: user.id }),
     listCachedNotionCards({ endDateKey, startDateKey, userId: user.id }),
-    listHolidays({ endDateKey, startDateKey }).catch(() => []),
+    listHolidays({ endDateKey, startDateKey }).catch(logHolidayFallback),
     listVacations({ endDateKey, startDateKey, userId: user.id })
   ]);
   const savedWorkHoursByDate = new Map(
@@ -354,7 +356,7 @@ export async function buildNotionMonthlyAnalysisAction(month: string): Promise<N
   const availabilityRange = getAvailabilityRange(mappedCards, todayDateKey);
   const [availabilityHolidays, availabilityVacations] = availabilityRange
     ? await Promise.all([
-        listHolidays(availabilityRange).catch(() => []),
+        listHolidays(availabilityRange).catch(logHolidayFallback),
         listVacations({ ...availabilityRange, userId: user.id })
       ])
     : [[], []];

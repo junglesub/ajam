@@ -1,3 +1,4 @@
+import { logHolidayFallback } from "./operation-log";
 import { createNotionLog, notionErrorMessage, type NotionLogContext } from "./notion-log";
 
 import {
@@ -255,7 +256,7 @@ async function buildAvailableHoursByPage(params: {
     range.endDateKey > latest ? range.endDateKey : latest,
   dateRanges[0]!.endDateKey);
   const [holidays, vacations] = await Promise.all([
-    listHolidays({ endDateKey, startDateKey }).catch(() => []),
+    listHolidays({ endDateKey, startDateKey }).catch(logHolidayFallback),
     listVacations({ endDateKey, startDateKey, userId: params.userId })
   ]);
   const holidayDateKeys = holidays.map((holiday) => holiday.dateKey);
