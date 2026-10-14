@@ -14,6 +14,7 @@
 - 사용자 이메일 저장과 n8n 업무 기록 리마인더 연동
 - 공공데이터포털 서비스 키를 관리자 설정에서 저장/테스트
 - 사용자별 Notion 카드 후보 동기화, 업무 entry별 카드 연결, 완료 카드 투입시간 분석
+- 조회 기간·프로젝트·카테고리·빠른 필터로 저장된 업무와 연결 카드를 검토하고, 업무별 제외/재포함 후 Markdown 브리프·JSON 스냅샷·외부 LLM 인터뷰 프롬프트를 내보내는 연말 정리 화면
 
 ## 로컬 시작
 
@@ -130,4 +131,11 @@ n8n을 재시작한 뒤 `aJam API` credential을 만들고 `aJam` node를 workfl
 pnpm lint
 pnpm typecheck
 pnpm build
+```
+
+연말 정리 도메인/loader 회귀 검증은 build 없이 아래 명령으로 실행합니다.
+
+```bash
+pnpm --filter @timesheet/db exec tsx --test ../domain/src/year-end-review.test.ts
+pnpm --filter @timesheet/db test
 ```

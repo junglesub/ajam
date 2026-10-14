@@ -95,3 +95,45 @@ export type {
   VacationYearMetrics,
   VacationYearRecord
 } from "./vacation-year";
+export {
+  buildYearEndReviewArtifacts,
+  buildYearEndReviewData,
+  buildYearEndReviewDaySavePayload,
+  buildYearEndReviewExport,
+  buildYearEndReviewInterviewPrompt,
+  buildYearEndReviewSummary,
+  createEmptyYearEndReviewContext,
+  getYearEndReviewDefaultPeriod,
+  hasYearEndReviewContext,
+  resolveYearEndReviewWarnings,
+  selectYearEndReviewEntries,
+  validateYearEndReviewContext,
+  validateYearEndReviewPeriod,
+  yearEndReviewContextLimits,
+  yearEndReviewLabels,
+  yearEndReviewSchemaVersion
+} from "./year-end-review";
+export type {
+  YearEndReviewArtifacts,
+  YearEndReviewCard,
+  YearEndReviewCategoryFilter,
+  YearEndReviewContext,
+  YearEndReviewContextValidation,
+  YearEndReviewData,
+  YearEndReviewDay,
+  YearEndReviewDayEntryEdit,
+  YearEndReviewEntry,
+  YearEndReviewExport,
+  YearEndReviewGroup,
+  YearEndReviewLink,
+  YearEndReviewPeriod,
+  YearEndReviewQuickFilter,
+  YearEndReviewSelection,
+  YearEndReviewSelectionResult,
+  YearEndReviewSummary,
+  YearEndReviewValueFilter,
+  YearEndReviewResolvedWarning,
+  YearEndReviewWarning,
+  YearEndReviewWarningCode,
+  YearEndReviewWarningTarget
+} from "./year-end-review";

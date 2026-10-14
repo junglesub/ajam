@@ -13,7 +13,7 @@
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:dummy": "tsx prisma/seed-dummy.ts",
-    "test": "node --import tsx --test src/timesheet-store.test.ts src/vacation-color-store.test.ts src/vacation-name-store.test.ts src/dummy-prefill.test.ts src/notion-log.test.ts src/notion-webhook.test.ts src/notion-sync-logging.test.ts src/operation-log.test.ts src/operation-log-hmr.test.ts src/operational-logging.test.ts src/operation-log-store.test.ts src/log-persistence-queue.test.ts src/log-viewer-access.test.ts src/log-viewer-integration.test.ts src/log-bootstrap.test.ts",
+    "test": "node --import tsx --test src/timesheet-store.test.ts src/vacation-color-store.test.ts src/vacation-name-store.test.ts src/dummy-prefill.test.ts src/notion-log.test.ts src/notion-webhook.test.ts src/notion-sync-logging.test.ts src/operation-log.test.ts src/operation-log-hmr.test.ts src/operational-logging.test.ts src/operation-log-store.test.ts src/log-persistence-queue.test.ts src/log-viewer-access.test.ts src/log-viewer-integration.test.ts src/log-bootstrap.test.ts src/year-end-review.test.ts src/year-end-review-day-edit.test.ts",
     "typecheck": "tsc --noEmit",
     "db:deploy": "pnpm db:seed"
   },

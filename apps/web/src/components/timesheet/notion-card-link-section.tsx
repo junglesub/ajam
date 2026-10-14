@@ -20,6 +20,8 @@ type NotionCardLinkSectionProps = {
   onRemoveCard: (notionPageId: string) => void;
   onResetAutoAllocation: () => void;
   cardDateRanges?: Map<string, NotionCardWorkDateRange>;
+  /** Neutral label used instead of a raw page id when no title is available. */
+  missingTitleLabel?: string;
   selectedDateKey?: string;
 };
 
@@ -34,6 +36,7 @@ export function NotionCardLinkSection({
   onRemoveCard,
   onResetAutoAllocation,
   cardDateRanges,
+  missingTitleLabel,
   selectedDateKey
 }: NotionCardLinkSectionProps) {
   if (entry.kind !== "WORK") {
@@ -49,7 +52,7 @@ export function NotionCardLinkSection({
         <div className="space-y-2">
           {entry.notionCards.map((link) => {
             const card = candidates.find((candidate) => candidate.notionPageId === link.notionPageId);
-            const title = card?.title || link.title || link.notionPageId;
+            const title = card?.title || link.title || missingTitleLabel || link.notionPageId;
             const linkedHours = link.linkedHours ?? card?.linkedHours;
             const lastWorkedDate = link.lastWorkedDate ?? card?.lastWorkedDate;
             const hasMetrics = linkedHours !== undefined || Boolean(lastWorkedDate);

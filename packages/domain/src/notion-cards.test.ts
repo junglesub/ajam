@@ -256,6 +256,33 @@ describe("Notion work entry allocations", () => {
     ]);
   });
 
+  it("moves automatic allocations when the entry hours change", () => {
+    const links: WorkEntryNotionCardLink[] = [
+      {
+        allocatedHours: 1,
+        allocationMode: "manual",
+        notionPageId: "card-manual",
+        source: "manual"
+      },
+      {
+        allocatedHours: 5,
+        allocationMode: "auto",
+        notionPageId: "card-auto",
+        source: "previous_business_day_default"
+      }
+    ];
+    const reallocated = allocateNotionCardHours({ entryHours: 3, links });
+
+    assert.deepEqual(reallocated, [
+      { ...links[0], allocatedHours: 1 },
+      { ...links[1], allocatedHours: 2 }
+    ]);
+    // The manual value and the source/card metadata survive the recalculation.
+    assert.equal(reallocated[0]?.allocationMode, "manual");
+    assert.equal(reallocated[1]?.allocationMode, "auto");
+    assert.equal(reallocated[1]?.source, "previous_business_day_default");
+  });
+
   it("preserves manual overflow and sets auto allocations to zero", () => {
     const links: WorkEntryNotionCardLink[] = [
       {
