@@ -57,13 +57,20 @@ test("internal API, authentication, holiday fallback and scheduled AI logs omit 
     await store.deleteTimesheetEntry({ userId: "user-1", dateKey: "2026-10-07" });
     assert.ok(lines.some((line) => JSON.parse(line).operation === "delete" && JSON.parse(line).result === "completed"));
 
-    process.env.NEXT_RUNTIME = "nodejs";
     const instrumentation = await import("../../../apps/web/src/instrumentation");
+    process.env.NEXT_RUNTIME = "edge";
+    const edgeLogCount = lines.length;
+    await instrumentation.register();
+    await instrumentation.onRequestError(new Error("private edge response"), {
+      path: "/api/example", method: "GET", headers: {}
+    }, { routePath: "/api/example", routeType: "route", routerKind: "App Router", revalidateReason: undefined });
+    assert.equal(lines.length, edgeLogCount, "Edge hooks must not initialize Node logging or emit Node request errors");
+    process.env.NEXT_RUNTIME = "nodejs";
     await instrumentation.register();
     await instrumentation.onRequestError(new SyntaxError("private render response"), {
       path: "/api/example?key=private", method: "GET", headers: { Authorization: "private" }
     }, { routePath: "/api/example", routeType: "route", routerKind: "App Router", revalidateReason: undefined });
-    assert.ok(lines.some((line) => JSON.parse(line).operation === "startup"));
+    assert.ok(lines.some((line) => JSON.parse(line).operation === "startup" && JSON.parse(line).nodeVersion === process.version));
     assert.ok(lines.some((line) => JSON.parse(line).operation === "unhandled_error" && JSON.parse(line).reason === "invalid_json"));
     for (const secret of ["private-bearer", "private-holiday-key", "private-gemini-key", "private-work-content", "private provider response", "private-hash", "private-user"]) assert.ok(!lines.join("").includes(secret));
     for (const content of ["private concurrent summary", "private imported summary", "private render response", "key=private"]) assert.ok(!lines.join("").includes(content));

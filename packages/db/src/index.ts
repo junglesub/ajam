@@ -99,3 +99,25 @@ export type {
 export { prefillDummyTimesheetData } from "./dummy-prefill";
 export type { DummyPrefillOptions, DummyPrefillResult } from "./dummy-prefill";
 export { createNotionLog, notionErrorMessage } from "./notion-log";
+export {
+  appendOperationLogs,
+  ensureOperationLogSchema,
+  getUnreadLogSummary,
+  getVisibleOperationLogDetail,
+  listVisibleOperationLogs,
+  markAllOperationLogsRead,
+  markOperationLogRead,
+  projectOperationLog,
+  pruneOperationLogs
+} from "./operation-log-store";
+export type {
+  LogDetail,
+  LogPage,
+  LogQuery,
+  LogScope,
+  LogViewer,
+  PersistableOperationLog,
+  StoredLogLevel,
+  UnreadLogSummary,
+  VisibleOperationLog
+} from "./operation-log-store";

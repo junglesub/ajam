@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 
 import { AppNav } from "./app-nav";
 import { logoutAction } from "./timesheet/actions";
+import { useLogViewer } from "@/components/logs/log-viewer-provider";
 
 type MobileAppMenuProps = {
   settingsButton: ReactNode;
@@ -19,6 +20,10 @@ export function MobileAppMenu({ settingsButton, username }: MobileAppMenuProps) 
   const [open, setOpen] = useState(false);
   const drawerRef = useRef<HTMLElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const { modalOpen, summary } = useLogViewer();
+  const hasUnread = (summary?.total ?? 0) > 0;
+  const modalOpenRef = useRef(modalOpen);
+  modalOpenRef.current = modalOpen;
 
   useEffect(() => {
     if (!open) {
@@ -31,6 +36,12 @@ export function MobileAppMenu({ settingsButton, username }: MobileAppMenuProps) 
     document.body.style.overflow = "hidden";
 
     function handleKeyDown(event: KeyboardEvent) {
+      // While the log popup sits above the drawer, it alone owns Escape/Tab
+      // and the scroll lock. Closing the drawer here would unmount settings
+      // instead of returning to it.
+      if (modalOpenRef.current) {
+        return;
+      }
       if (event.key === "Escape") {
         event.preventDefault();
         setOpen(false);
@@ -74,13 +85,14 @@ export function MobileAppMenu({ settingsButton, username }: MobileAppMenuProps) 
     <>
       <button
         aria-expanded={open}
-        aria-label="메뉴 열기"
-        className="inline-flex size-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
+        aria-label={hasUnread && !open ? `메뉴 열기, 미읽음 ${summary?.total}건` : "메뉴 열기"}
+        className="relative inline-flex size-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
         onClick={() => setOpen(true)}
         ref={triggerRef}
         type="button"
       >
         <Menu aria-hidden="true" className="size-5" strokeWidth={2.4} />
+        {hasUnread && !open ? <span aria-hidden="true" className="absolute right-1.5 top-1.5 size-2 rounded-full bg-red-600" /> : null}
       </button>
 
       {open ? createPortal(

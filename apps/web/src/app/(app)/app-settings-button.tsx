@@ -3,11 +3,14 @@
 import type { AiCleanupMode, ManagedUser, TimesheetAiRewriteRequest, UserAiSetting, UserRole } from "@timesheet/db";
 import { formatKoreanDate } from "@timesheet/domain";
 import { Badge, Button, Input, cn } from "@timesheet/ui";
-import { Plus, RotateCcw, Settings, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { Plus, RotateCcw, Settings, Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { ThemeSetting } from "@/components/theme-setting";
+import { LogViewerModal } from "@/components/logs/log-viewer-modal";
+import { useLogViewer } from "@/components/logs/log-viewer-provider";
+import { formatUnreadBadge } from "@/lib/log-presentation";
 import { broadcastViewRefresh } from "@/lib/view-refresh";
 
 import {
@@ -64,6 +67,21 @@ export function AppSettingsButton({
   showLabel = false
 }: AppSettingsButtonProps) {
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<"logs" | "settings">("settings");
+  const { stale, status, summary } = useLogViewer();
+  const unreadTotal = summary?.total ?? 0;
+  const unreadBadge = summary === null ? null : formatUnreadBadge(unreadTotal);
+  const logStatusNote = status === "loading" ? "로그 확인 중" : summary === null ? "로그 연결을 확인해 주세요" : stale ? "로그 갱신 실패 · 마지막 확인 결과" : undefined;
+  const logButtonRef = useRef<HTMLButtonElement>(null);
+  const prevViewRef = useRef(view);
+  useEffect(() => {
+    // The log button unmounts while the popup is open, so restore focus to
+    // this real button instead of the detached element the modal saw.
+    if (prevViewRef.current === "logs" && view === "settings") {
+      logButtonRef.current?.focus();
+    }
+    prevViewRef.current = view;
+  }, [view]);
   const [profileUsername, setProfileUsername] = useState(currentUser.username);
   const [profileEmail, setProfileEmail] = useState(currentUser.email);
   const [profilePassword, setProfilePassword] = useState("");
@@ -102,6 +120,7 @@ export function AppSettingsButton({
   }
 
   function openSettings() {
+    setView("settings");
     setOpen(true);
     void refreshAiRewriteRequests();
   }
@@ -238,22 +257,56 @@ export function AppSettingsButton({
   return (
     <>
       <button
-        aria-label="설정 열기"
+        aria-label={unreadBadge ? `설정 열기, 미읽음 ${unreadTotal}건${stale ? ", 갱신 실패" : ""}` : "설정 열기"}
         className={showLabel
-          ? "inline-flex h-10 w-full items-center justify-start gap-3 rounded-md px-3 text-sm font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
-          : "inline-flex size-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"}
+          ? "relative inline-flex h-10 w-full items-center justify-start gap-3 rounded-md px-3 text-sm font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
+          : "relative inline-flex size-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"}
         onClick={openSettings}
         title="설정"
         type="button"
       >
         <Settings aria-hidden="true" className="size-5" strokeWidth={2.4} />
         {showLabel ? <span>설정</span> : null}
+        {unreadBadge ? (
+          <span aria-hidden="true" className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white">
+            {unreadBadge}
+          </span>
+        ) : null}
       </button>
 
-      {open ? createPortal(
+      {open && view === "logs" ? <LogViewerModal onClose={() => setView("settings")} /> : null}
+      {open && view === "settings" ? createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-6" onClick={() => setOpen(false)} role="presentation">
           <div aria-modal="true" className="w-full max-w-2xl rounded-lg border border-slate-200 bg-white p-5 shadow-2xl outline-none" onClick={(event) => event.stopPropagation()} role="dialog">
-            <h2 className="text-lg font-bold text-slate-950">설정</h2>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <h2 className="text-lg font-bold text-slate-950">설정</h2>
+                <button
+                  aria-label={unreadBadge ? `로그 열기, 미읽음 ${unreadTotal}건` : "로그 열기"}
+                  className="inline-flex h-8 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
+                  onClick={() => setView("logs")}
+                  ref={logButtonRef}
+                  type="button"
+                >
+                  로그
+                  {unreadBadge ? (
+                    <span aria-hidden="true" className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[11px] font-bold text-white">
+                      {unreadBadge}
+                    </span>
+                  ) : null}
+                </button>
+              </div>
+              <button
+                aria-label="설정 닫기"
+                className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
+                onClick={() => setOpen(false)}
+                title="닫기"
+                type="button"
+              >
+                <X aria-hidden="true" className="size-5" />
+              </button>
+            </div>
+            {logStatusNote ? <p className="mt-2 text-xs font-semibold text-slate-500" role="status">{logStatusNote}</p> : null}
             <div className="mt-4 max-h-[78vh] space-y-5 overflow-y-auto pr-1">
               <section className="rounded-md border border-slate-200 bg-slate-50 p-4">
                 <div className="flex items-start justify-between gap-3">

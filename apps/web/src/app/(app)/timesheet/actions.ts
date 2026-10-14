@@ -239,8 +239,8 @@ function normalizeHolidayItems(items: unknown): Array<{ dateName?: string; isHol
   return Array.isArray(items) ? items : [items as { dateName?: string; isHoliday?: string; locdate?: number | string }];
 }
 
-async function fetchRestDeInfoWithKey(params: { serviceKey: string; solMonth: number; solYear: number }) {
-  const log = createOperationLog("holiday", "test_api");
+async function fetchRestDeInfoWithKey(params: { serviceKey: string; solMonth: number; solYear: number; userId: string }) {
+  const log = createOperationLog("holiday", "test_api", { userId: params.userId });
   return log.run(async () => {
     const serviceKey = params.serviceKey.trim();
 
@@ -875,8 +875,8 @@ export async function testGeminiApiKeyAction(params: { apiKey?: string; model: s
 }
 
 export async function testHolidayApiKeyAction(serviceKey: string, year: number, monthIndex: number): Promise<HolidayApiKeyTestResult> {
-  await requireAdmin();
-  const holidays = await fetchRestDeInfoWithKey({ serviceKey, solMonth: monthIndex + 1, solYear: year });
+  const user = await requireAdmin();
+  const holidays = await fetchRestDeInfoWithKey({ serviceKey, solMonth: monthIndex + 1, solYear: year, userId: user.id });
 
   return {
     holidays,

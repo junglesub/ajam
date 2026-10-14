@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 
-import { createOperationLog, safeErrorFields, withRequestLog } from "./operation-log";
+import { createOperationLog, safeErrorFields, setOperationLogSink, withRequestLog, withoutOperationLogPersistence } from "./operation-log";
 import { createNotionLog } from "./notion-log";
 
 function capture(t: TestContext) {
@@ -75,4 +75,75 @@ test("invalid date input and non-scalar metadata cannot expose rejected private 
   createOperationLog("timesheet", "save", { dateKey: "2026-10-07" }).write("info", "completed", { year: 2026, month: 10 });
   assert.equal(JSON.parse(lines.at(-1)!).dateKey, "2026-10-07");
   assert.equal(JSON.parse(lines.at(-1)!).year, 2026);
+});
+
+test("sink receives info once when console threshold suppresses it, debug never sinks", (t) => {
+  const lines = capture(t);
+  process.env.AJAM_LOG_LEVEL = "error";
+  const received: string[] = [];
+  setOperationLogSink((event) => {
+    received.push(`${event.level}:${event.operation}:${event.eventId}`);
+  });
+  try {
+    createOperationLog("timesheet", "save", { userId: "u1" }).write("info", "completed", { status: 200 });
+    createOperationLog("timesheet", "save", { userId: "u1" }).write("debug", "expired");
+    assert.equal(lines.length, 0);
+    assert.equal(received.length, 1);
+    assert.ok(received[0]!.startsWith("info:save:"));
+  } finally {
+    setOperationLogSink(null);
+  }
+});
+
+test("sink throw preserves run result, exception identity and response reference", async (t) => {
+  capture(t);
+  setOperationLogSink(() => {
+    throw new Error("sink down");
+  });
+  try {
+    const originalResult = { ok: true };
+    assert.equal(await createOperationLog("ai", "batch").run(async () => originalResult), originalResult);
+    const originalError = new Error("original");
+    await assert.rejects(createOperationLog("ai", "batch").run(async () => {
+      throw originalError;
+    }), (error) => error === originalError);
+    const originalResponse = new Response("x");
+    assert.equal(await withRequestLog("/api/example", async () => originalResponse)(new Request("https://example.com")), originalResponse);
+  } finally {
+    setOperationLogSink(null);
+  }
+});
+
+test("suppression scope blocks sink but keeps other concurrent tasks collecting", async () => {
+  const received: string[] = [];
+  setOperationLogSink((event) => {
+    received.push(event.operationId);
+  });
+  try {
+    await withoutOperationLogPersistence(async () => {
+      createOperationLog("timesheet", "save", { userId: "u1" }).write("info", "suppressed");
+      await Promise.all([
+        (async () => {
+          createOperationLog("timesheet", "save", { userId: "u2" }).write("info", "still-suppressed");
+        })(),
+        createOperationLog("ai", "batch").run(async () => 1)
+      ]);
+      assert.equal(received.length, 0);
+    });
+    const after: string[] = [];
+    setOperationLogSink((event) => {
+      after.push(event.operationId);
+    });
+    await Promise.all([
+      withoutOperationLogPersistence(async () => {
+        createOperationLog("timesheet", "save").write("info", "a");
+      }),
+      (async () => {
+        createOperationLog("timesheet", "save").write("info", "b");
+      })()
+    ]);
+    assert.equal(after.length, 1);
+  } finally {
+    setOperationLogSink(null);
+  }
 });

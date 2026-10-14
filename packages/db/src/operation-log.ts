@@ -3,9 +3,47 @@ import { randomUUID } from "node:crypto";
 
 export type LogContext = { operationId?: string; source?: string; userId?: string; dateKey?: string };
 export type LogFields = Record<string, string | number | boolean | undefined>;
-type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogLevel = "debug" | "info" | "warn" | "error";
+export type OperationLogEvent = {
+  component: string;
+  dateKey?: string;
+  durationMs: number;
+  eventId: string;
+  fields: LogFields;
+  level: Exclude<LogLevel, "debug"> | "debug";
+  operation: string;
+  operationId: string;
+  result: string;
+  source?: string;
+  timestamp: string;
+  userId?: string;
+};
 const contextStorage = new AsyncLocalStorage<LogContext>();
+const suppressionStorage = new AsyncLocalStorage<boolean>();
 const levels = { debug: 0, info: 1, warn: 2, error: 3 };
+// The sink lives on globalThis so logger module re-evaluation (HMR) or a
+// duplicated module copy never resets collection to null: every copy reads
+// and writes the same shared registry, keeping a single writer.
+const sinkRegistry = globalThis as unknown as {
+  __ajamOperationLogSink?: ((event: OperationLogEvent) => void) | null;
+};
+
+export function setOperationLogSink(sink: ((event: OperationLogEvent) => void) | null): void {
+  sinkRegistry.__ajamOperationLogSink = sink;
+}
+
+function getOperationLogSink(): ((event: OperationLogEvent) => void) | null {
+  return sinkRegistry.__ajamOperationLogSink ?? null;
+}
+
+export function withoutOperationLogPersistence<T>(task: () => T): T {
+  if (suppressionStorage.getStore()) return task();
+  return suppressionStorage.run(true, task);
+}
+
+function isPersistenceSuppressed(): boolean {
+  return suppressionStorage.getStore() === true;
+}
 
 /** Error messages may contain SQL values, response excerpts, URLs or credentials. */
 export function safeErrorFields(error: unknown): LogFields {
@@ -35,16 +73,34 @@ export function createOperationLog(component: string, operation: string, context
   const log = {
     context: safeContext,
     write(level: LogLevel, result: string, fields: LogFields = {}) {
-      const configured = process.env.AJAM_LOG_LEVEL;
-      const threshold = configured && Object.hasOwn(levels, configured) ? levels[configured as LogLevel] : levels.info;
-      if (levels[level] < threshold) return;
       const scalarFields = Object.fromEntries(Object.entries(fields).filter(([key, value]) => {
         if (typeof value === "number") return Number.isFinite(value);
         if (key === "year" || key === "month") return false;
         return typeof value === "string" || typeof value === "boolean";
       }));
-      const line = JSON.stringify({ ...scalarFields, ...contextFields, timestamp: new Date().toISOString(), level,
-        component, operation, result, durationMs: Date.now() - startedAt });
+      const timestamp = new Date().toISOString();
+      const durationMs = Date.now() - startedAt;
+      const sink = getOperationLogSink();
+      if (level !== "debug" && sink && !isPersistenceSuppressed()) {
+        const event: OperationLogEvent = {
+          component, operation, result, operationId: safeContext.operationId ?? randomUUID(),
+          timestamp, level, durationMs, eventId: randomUUID(),
+          ...(safeContext.userId ? { userId: safeContext.userId } : {}),
+          ...(safeContext.source ? { source: safeContext.source } : {}),
+          ...(safeContext.dateKey ? { dateKey: safeContext.dateKey } : {}),
+          fields: scalarFields
+        };
+        try {
+          sink(event);
+        } catch {
+          // Persistence must never break the original work.
+        }
+      }
+      const configured = process.env.AJAM_LOG_LEVEL;
+      const threshold = configured && Object.hasOwn(levels, configured) ? levels[configured as LogLevel] : levels.info;
+      if (levels[level] < threshold) return;
+      const line = JSON.stringify({ ...scalarFields, ...contextFields, timestamp, level,
+        component, operation, result, durationMs });
       if (level === "error") console.error(line);
       else if (level === "warn") console.warn(line);
       else console.info(line);
