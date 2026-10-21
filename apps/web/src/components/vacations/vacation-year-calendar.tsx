@@ -74,8 +74,9 @@ export function VacationYearCalendar({
 
                       const dayVacations = vacationsByDate.get(cell.dateKey) ?? [];
                       const vacationHours = dayVacations.reduce((sum, vacation) => sum + vacation.hours, 0);
+                      const nonDeductingHours = dayVacations.filter((vacation) => vacation.deductsAllowance === false).reduce((sum, vacation) => sum + vacation.hours, 0);
                       const vacationName = normalizeVacationName(dayVacations[0]?.name ?? "");
-                      const vacationLabel = dayVacations.length > 0 ? dayVacations.map((vacation) => `${normalizeVacationName(vacation.name)} ${vacation.hours}시간`).join(", ") : "휴가 없음";
+                      const vacationLabel = dayVacations.length > 0 ? dayVacations.map((vacation) => `${vacation.status === "TEMPORARY" ? "임시 " : ""}${vacation.deductsAllowance === false ? "공가 · " : ""}${normalizeVacationName(vacation.name)} ${vacation.hours}시간`).join(", ") : "휴가 없음";
                       const hasWorkRecord = workDateKeySet.has(cell.dateKey);
                       const holidayName = holidayNameByDate.get(cell.dateKey) ?? "";
                       const connected = connectedDateKeys.has(cell.dateKey);
@@ -92,10 +93,12 @@ export function VacationYearCalendar({
                           hours={vacationHours}
                           key={cell.dateKey}
                           label={vacationLabel}
+                          nonDeductingHours={nonDeductingHours}
+                          nonDeductingTemporary={dayVacations.some((vacation) => vacation.deductsAllowance === false && vacation.status === "TEMPORARY")}
                           onClick={onDateClick}
                           onHover={onDateHover}
                           onLeave={onDateLeave}
-                          temporary={dayVacations.some((vacation) => vacation.status === "TEMPORARY")}
+                          temporary={dayVacations.some((vacation) => vacation.deductsAllowance !== false && vacation.status === "TEMPORARY")}
                           today={cell.dateKey === todayKey}
                           color={colorByName.get(vacationName) ?? "blue"}
                         />

@@ -252,6 +252,9 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - In the timesheet calendar daily editor (desktop sidebar and mobile modal), selected vacation entries expose the same `연차 총량에서 차감` checkbox (on by default, unchecked when explicitly excluded).
 - The vacation summary panel shows a concise notice `연차 차감 제외: N일` when non-deducting vacation days exist.
 - Clearing the checkbox keeps the vacation in the calendar and type summary but removes its hours from the used, remaining, and consumption metrics.
+- Calendar presentation calls only allowance-excluded records `공가` (`임시 공가` for temporary records). Ordinary deductible records remain `휴가`; stored kinds/names and allowance calculations are unchanged.
+- In the annual calendar, public leave uses a thick hollow colored ring; partial public leave uses a proportional ring arc. Full rings omit SVG dash patterns to avoid a seam at 12 o'clock. Temporary public leave applies diagonal stripes to the ring stroke, keeping its center clear. Mixed vacation/public-leave dates retain the deductible-hour fill and add the public-leave ring. Fully exempt type-color swatches use the same ring/striped-outline convention.
+- In the timesheet calendar, public-leave-only vacation colors use transparent fills and stronger cell borders. Public-leave tags use the same dot and filled background as vacation tags; only temporary vacation/public-leave tags have transparent backgrounds. Date numerals have no extra public-leave circle. Temporary public leave retains diagonal cell stripes. Mixed dates show separate vacation/public-leave badges and only deductible vacation hours contribute to the vacation-only fill.
 - With focus outside an editor or popup, `j` loads the previous year and `k` loads the next year.
 - `t` returns to the browser-local current year and selects today through the existing date action, opening the applicable vacation or work-record popup.
 - Hovering the previous year, next year, or current-year controls shows the connected `J`, `K`, or `T` shortcut in the native button tooltip.
@@ -299,6 +302,7 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 
 ## Verification
 
+- Browser E2E and visual acceptance are user-owned going forward. Do not launch browser UI automation or headless browser previews; use static review, type/lint checks, unit tests and non-browser rendering checks instead. Product builds still require an explicit user request.
 - Run `pnpm --filter @timesheet/web typecheck` after changes.
 - Check calendar, list, and editor behavior for missing dates, projectless saved work, multiple work entries, Notion card linking on work entries, mixed work and vacation days, future vacation/holiday drafts, vacation range saves with holidays and existing records, connected vacation saves and deletes across holidays, month navigation selecting an in-month business day, month navigation loading/error feedback, previous-project auto-fill across month boundaries, saved non-holiday days with totals below or above `8h`, and holiday API warning behavior.
 
@@ -454,3 +458,19 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 - Code review: no unresolved blocking findings in the reviewed changes. Ponytail review: the six identified duplicate helpers are removed; no further necessary simplification was identified in this scope.
 - **GO for commit/push from the code-review perspective.** Evidence remains the direct post-fix run of 102 domain tests, 21 web tests, targeted lint, all six workspace typechecks and frozen lockfile validation, plus the earlier recorded DB regressions/runtime checks and user's working-UI confirmation. Tests were not repeated because no implementation changed after that run.
 - Product build and full authenticated browser automation are not verified. No commit or push was performed by this review.
+
+### 2026-10-21 public-leave calendar styling
+
+- User explicitly requested direct implementation and confirmed that hollow-circle styling and the `공가` label apply only to allowance-excluded records. Updated annual date markers, fully exempt type-color swatches, and timesheet calendar date/badge/card styling. Confirmed public leave is hollow; temporary public leave is striped. Mixed deductible/excluded vacation hours remain distinguishable. No persistence/schema changes.
+- Passed targeted ESLint for the four changed TSX components, `pnpm --filter @timesheet/web typecheck`, web helper tests (21 passed), and `git diff --check`.
+- Additional isolated smoke verification rendered the actual annual date component and transpiled the actual timesheet display functions in memory: checked ordinary/public/temporary labels, 3px SVG ring, half-day ring and mixed 4h vacation + 4h public-leave fill. Generated local HTML/CSS previews from these renderers and the actual stylesheet and visually inspected light/dark headless Edge screenshots, including a custom purple color. Fixed the dark-theme badge color override found during inspection.
+- Preview verification covers these component/style states, not authenticated page interactions. No product build, commit, push, or user database changes were performed.
+- Light/dark preview PNGs are retained locally in `.my-orch/artifacts/public-leave-light.png` and `public-leave-dark.png`. Automatic command approval rejected cleanup of the agent-created OS-temporary `ajam-public-leave-preview-VeFp5N` directory with a generic policy-block reason, including the attempt to remove verified files and empty directories individually. No further deletion attempt was made; the temporary preview/browser-profile directory remains.
+
+### 2026-10-21 public-leave style corrections and QA ownership
+
+- User assigned all future browser E2E/visual acceptance to themselves. Persisted that policy in the current Verification section; this correction did not launch a browser or generate new browser screenshots. Earlier preview images show the previous iteration.
+- Timesheet calendar: confirmed public-leave tags now use exactly the ordinary vacation tag styling; temporary vacation/public-leave tags alone use transparent tag backgrounds. Removed the additional public-leave circle around date numerals and its unused CSS. Sparse public-leave cell backgrounds remain.
+- Vacation tab: full SVG rings no longer specify `strokeDasharray`, avoiding fractional dash-end seams at 12 o'clock. Partial rings retain proportional arcs. Temporary rings now reference a unique SVG stripe pattern on the stroke instead of hatching the interior. Temporary type-color swatches mask their stripe pseudo-element to the 3px outline, preserving the button's focus treatment and clear center.
+- Passed targeted component ESLint, web typecheck, existing web helper tests (21 passed), and diff check. A non-browser server-render smoke check compared real confirmed/temporary public-leave and vacation badge markup (identical except labels), checked the removed month date-ring class, verified undashed full rings and 50% partial arcs, and checked temporary pattern-stroke references with unique IDs across multiple rendered date cells.
+- No product build, browser E2E, commit, push, or persistence changes were performed. Visual acceptance remains with the user.

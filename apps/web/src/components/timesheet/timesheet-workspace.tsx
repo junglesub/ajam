@@ -331,6 +331,13 @@ function getCalendarCellStyle(row: TimesheetRow | undefined) {
     return undefined;
   }
 
+  const vacations = row.entries.filter((entry) => entry.kind === "VACATION");
+  if (vacations.length > 0 && vacations.every((entry) => entry.vacationDeductsAllowance === false)) {
+    return vacations.some((entry) => entry.vacationStatus === "TEMPORARY")
+      ? { backgroundImage: temporaryVacationHatchBackground }
+      : undefined;
+  }
+
   if (isPartialVacationOnlyCell(row)) {
     return undefined;
   }
@@ -342,38 +349,29 @@ function getCalendarCellStyle(row: TimesheetRow | undefined) {
   return undefined;
 }
 
-function getVacationOnlyEntry(row: TimesheetRow | undefined): TimesheetEntryDraft | undefined {
-  if (!row || row.entries.length !== 1) {
+function getVacationOnlyFillRatio(row: TimesheetRow | undefined): number | undefined {
+  if (!row?.entries.length || row.entries.some((entry) => entry.kind !== "VACATION")) {
     return undefined;
   }
 
-  const [entry] = row.entries;
-
-  return entry?.kind === "VACATION" ? entry : undefined;
+  return clampVacationFillRatio(row.entries.reduce((sum, entry) => sum + (entry.vacationDeductsAllowance === false ? 0 : entry.hours), 0));
 }
 
 function isPartialVacationOnlyCell(row: TimesheetRow | undefined): boolean {
-  const vacation = getVacationOnlyEntry(row);
-
-  return Boolean(vacation && clampVacationFillRatio(vacation.hours) < 1);
+  const fillRatio = getVacationOnlyFillRatio(row);
+  return fillRatio !== undefined && fillRatio < 1;
 }
 
 function getPartialVacationOnlyOverlayStyle(row: TimesheetRow | undefined) {
-  const vacation = getVacationOnlyEntry(row);
+  const fillRatio = getVacationOnlyFillRatio(row);
 
-  if (!vacation) {
-    return undefined;
-  }
-
-  const fillRatio = clampVacationFillRatio(vacation.hours);
-
-  if (fillRatio <= 0 || fillRatio >= 1) {
+  if (fillRatio === undefined || fillRatio <= 0 || fillRatio >= 1) {
     return undefined;
   }
 
   const fillStop = `${Math.round(fillRatio * 100)}%`;
   const fillMask = `linear-gradient(135deg, #000 0 ${fillStop}, transparent ${fillStop} 100%)`;
-  const isTemporaryVacation = vacation.vacationStatus === "TEMPORARY";
+  const isTemporaryVacation = row!.entries.some((entry) => entry.vacationDeductsAllowance !== false && entry.vacationStatus === "TEMPORARY");
 
   return {
     backgroundColor: vacationFillColor,
@@ -5053,7 +5051,10 @@ function Metric({
   );
 }
 
-function vacationBadgeLabel(status: TimesheetStatus, vacationStatus: VacationStatus) {
+function vacationBadgeLabel(status: TimesheetStatus, vacationStatus: VacationStatus, publicLeave = false) {
+  if (status === "VACATION" && publicLeave) {
+    return vacationStatus === "TEMPORARY" ? "임시 공가" : "공가";
+  }
   if (status === "VACATION" && vacationStatus === "TEMPORARY") {
     return "임시";
   }
@@ -5061,7 +5062,7 @@ function vacationBadgeLabel(status: TimesheetStatus, vacationStatus: VacationSta
   return statusLabel[status];
 }
 
-function StatusBadge({ status, vacationStatus = "CONFIRMED" }: { status: TimesheetStatus; vacationStatus?: VacationStatus }) {
+function StatusBadge({ status, vacationStatus = "CONFIRMED", publicLeave = false }: { status: TimesheetStatus; vacationStatus?: VacationStatus; publicLeave?: boolean }) {
   if (status === "FUTURE") {
     return null;
   }
@@ -5069,34 +5070,26 @@ function StatusBadge({ status, vacationStatus = "CONFIRMED" }: { status: Timeshe
   const usesOutlineDot = status === "VACATION" && vacationStatus === "TEMPORARY";
 
   return (
-    <Badge tone={badgeToneByStatus[status]}>
+    <Badge className={usesOutlineDot ? "vacation-temporary-badge" : undefined} tone={badgeToneByStatus[status]}>
       <span className={cn("mr-1 size-1.5 rounded-full", usesOutlineDot ? "border border-current bg-transparent" : "bg-current")} />
-      {vacationBadgeLabel(status, vacationStatus)}
-    </Badge>
-  );
-}
-
-function VacationDotBadge({ vacationStatus }: { vacationStatus: VacationStatus }) {
-  const usesOutlineDot = vacationStatus === "TEMPORARY";
-
-  return (
-    <Badge tone="blue">
-      <span className={cn("size-1.5 rounded-full", usesOutlineDot ? "border border-current bg-transparent" : "bg-current")} />
+      {vacationBadgeLabel(status, vacationStatus, publicLeave)}
     </Badge>
   );
 }
 
 function CalendarStatusBadges({ row }: { row: TimesheetRow }) {
-  const isVacationOnly = row.hasVacation && row.status === "VACATION";
-
-  if (isVacationOnly) {
-    return <StatusBadge status="VACATION" vacationStatus={row.vacationStatus} />;
-  }
+  const vacations = row.entries.filter((entry) => entry.kind === "VACATION");
+  const deducting = vacations.filter((entry) => entry.vacationDeductsAllowance !== false);
+  const nonDeducting = vacations.filter((entry) => entry.vacationDeductsAllowance === false);
 
   return (
-    <div className="flex items-center gap-1">
-      {row.hasVacation ? <VacationDotBadge vacationStatus={row.vacationStatus} /> : null}
-      <StatusBadge status={row.status} />
+    <div className="flex flex-wrap justify-end gap-1">
+      {deducting.length > 0 ? row.status === "VACATION"
+        ? <StatusBadge status="VACATION" vacationStatus={deducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "TEMPORARY" : "CONFIRMED"} />
+        : <Badge className={deducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "vacation-temporary-badge" : undefined} tone="blue"><span className={cn("size-1.5 rounded-full", deducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "border border-current bg-transparent" : "bg-current")} /></Badge>
+        : null}
+      {nonDeducting.length > 0 ? <StatusBadge publicLeave status="VACATION" vacationStatus={nonDeducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "TEMPORARY" : "CONFIRMED"} /> : null}
+      {row.status !== "VACATION" ? <StatusBadge status={row.status} /> : null}
     </div>
   );
 }
@@ -5235,6 +5228,15 @@ function CalendarView({
               }
 
               const row = rows[cell.dateKey];
+              const vacations = row?.entries.filter((entry) => entry.kind === "VACATION") ?? [];
+              const nonDeducting = vacations.filter((entry) => entry.vacationDeductsAllowance === false);
+              const deducting = vacations.filter((entry) => entry.vacationDeductsAllowance !== false);
+              const publicLeaveLabel = nonDeducting.length > 0
+                ? vacationBadgeLabel("VACATION", nonDeducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "TEMPORARY" : "CONFIRMED", true)
+                : "";
+              const primaryLabel = row && (row.status !== "VACATION" || deducting.length > 0)
+                ? vacationBadgeLabel(row.status, deducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "TEMPORARY" : "CONFIRMED")
+                : "";
               const vacationMixOverlayStyle = getVacationMixOverlayStyle(row);
               const partialVacationOnlyOverlayStyle = getPartialVacationOnlyOverlayStyle(row);
               const isPartialVacationOnly = isPartialVacationOnlyCell(row);
@@ -5250,6 +5252,7 @@ function CalendarView({
                   className={cn(
                     "relative flex min-h-16 flex-col justify-between overflow-hidden rounded-md border p-1.5 text-left transition sm:min-h-24 sm:p-2 lg:min-h-32 lg:p-3",
                     row?.hasVacation && "timesheet-vacation-theme",
+                    nonDeducting.length > 0 && deducting.length === 0 && "timesheet-public-leave",
                     row && (isPartialVacationOnly
                       ? cell.dateKey > todayKey
                         ? "timesheet-vacation-border bg-slate-100 text-slate-400"
@@ -5289,7 +5292,7 @@ function CalendarView({
                     {row ? <div className="hidden sm:block"><CalendarStatusBadges row={row} /></div> : null}
                   </div>
                   <p className="relative z-10 truncate text-center text-[10px] font-semibold text-slate-500 sm:hidden">
-                    {row ? vacationBadgeLabel(row.status, row.vacationStatus) : ""}
+                    {[primaryLabel, publicLeaveLabel].filter(Boolean).join(" · ")}
                   </p>
                   <div className="relative z-10 mt-2 hidden min-w-0 space-y-1 sm:block lg:mt-3">
                     {row?.kind === "WORK" && row.project ? (

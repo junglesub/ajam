@@ -396,6 +396,42 @@ body:has([data-footer-scope="auth"]) .site-footer {
   border-color: var(--timesheet-vacation-border);
 }
 
+/* Public leave keeps the vacation color, with outlines instead of solid fills. */
+:root .timesheet-vacation-theme.timesheet-public-leave {
+  --timesheet-vacation-surface: transparent;
+  --timesheet-vacation-fill: transparent;
+  --temporary-vacation-hatch-background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in oklab, var(--timesheet-vacation-color) 22%, transparent) 5px 7px, transparent 7px 12px);
+  background-color: transparent;
+  border-color: var(--timesheet-vacation-color);
+  border-width: 2px;
+}
+
+.vacation-public-leave-swatch {
+  position: relative;
+  border: 0;
+  background-color: transparent;
+}
+
+.vacation-public-leave-swatch::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 3px;
+  background-color: var(--timesheet-vacation-color);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+:root .timesheet-vacation-theme .vacation-temporary-badge {
+  background-color: transparent;
+}
+
+.vacation-public-leave-swatch-temporary::before {
+  background-color: transparent;
+  background-image: repeating-linear-gradient(135deg, transparent 0 2px, var(--timesheet-vacation-color) 2px 3px, transparent 3px 5px);
+}
+
 :root[data-theme="dark"] .vacation-today-date {
   box-shadow: 0 0 0 3px rgb(156 220 254 / 18%);
 }

@@ -191,6 +191,7 @@ export function VacationSummaryPanel({
             const presetColor = isCustom ? null : group.color as VacationColorPreset;
             const preferredColor = colorPreferences[group.name];
             const automaticColor = VACATION_COLOR_PRESETS[index % VACATION_COLOR_PRESETS.length]!;
+            const isPublicLeave = group.nonDeductingHours > 0 && group.nonDeductingHours === group.hours;
 
             return (
               <div className="py-3 text-sm" key={group.name}>
@@ -201,9 +202,11 @@ export function VacationSummaryPanel({
                       aria-label={`${group.name} 색상 변경`}
                       className={cn(
                         "size-5 shrink-0 rounded-full border-2 border-white outline outline-1 outline-slate-300 transition hover:scale-110 focus-visible:ring-2 focus-visible:ring-slate-950",
-                        isCustom ? "vacation-custom-color" : swatchClassByTone[presetColor!]
+                        isPublicLeave ? "timesheet-vacation-theme vacation-public-leave-swatch" : isCustom ? "vacation-custom-color" : swatchClassByTone[presetColor!],
+                        isPublicLeave && group.status === "TEMPORARY" && "vacation-public-leave-swatch-temporary"
                       )}
-                      data-vacation-tone={presetColor ?? undefined}
+                      data-vacation-tone={!isPublicLeave ? presetColor ?? undefined : undefined}
+                      data-timesheet-vacation-color={isPublicLeave ? presetColor ?? undefined : undefined}
                       onClick={() => {
                         setOpenName(openName === group.name ? "" : group.name);
                         setColorError("");
@@ -211,7 +214,10 @@ export function VacationSummaryPanel({
                           setCustomColor(group.color);
                         }
                       }}
-                      style={{ "--vacation-custom-color": isCustom ? group.color : undefined } as CSSProperties}
+                      style={{
+                        "--vacation-custom-color": isCustom ? group.color : undefined,
+                        "--timesheet-vacation-color": isCustom ? group.color : undefined
+                      } as CSSProperties}
                       type="button"
                     />
                     <button
