@@ -67,7 +67,7 @@ export type {
 } from "./monthly-time-macro";
 export { resolveStatus, statusLabel, statusTone } from "./status";
 export type { TimesheetStatus, VacationStatus, WorkRecordKind } from "./status";
-export { createEmptyDraft, createEmptyEntryDraft, getDisplayContent } from "./timesheet";
+export { createEmptyDraft, createEmptyEntryDraft, createVacationDay, getDisplayContent } from "./timesheet";
 export type {
   TimesheetDayDraft,
   TimesheetEntryDraft,
@@ -75,21 +75,29 @@ export type {
   TimesheetRow
 } from "./timesheet";
 export {
+  buildVacationBoundaries,
   buildVacationYearMetricSummary,
   buildVacationYearMetrics,
   clampVacationFillRatio,
+  createVacationEntry,
+  deleteVacationFromDay,
   findConnectedVacationDateKeys,
   findConnectedVacationDateKeysInDirection,
   groupVacationRecordsByName,
+  isMatchingVacationEntry,
   isTemporaryVacationStatus,
+  isVacationAllowanceDeducted,
   normalizeVacationColor,
   VACATION_COLOR_PRESETS,
-  normalizeVacationName
+  normalizeVacationName,
+  replaceVacationEntries
 } from "./vacation-year";
 export type {
   ConnectedVacationDatePredicateParams,
+  VacationBoundary,
   VacationColor,
   VacationColorPreset,
+  VacationDateInput,
   VacationYearGroup,
   VacationYearMetricSummary,
   VacationYearMetrics,

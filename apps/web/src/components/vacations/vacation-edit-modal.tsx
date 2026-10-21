@@ -7,7 +7,9 @@ import type { VacationStatus } from "@timesheet/domain";
 
 export type VacationEditDraft = {
   dateKey: string;
+  deductsAllowance: boolean;
   hours: number;
+  matchDeductsAllowance?: boolean;
   matchName?: string;
   matchStatus?: VacationStatus;
   name: string;
@@ -15,6 +17,7 @@ export type VacationEditDraft = {
 };
 
 export type VacationEditOption = {
+  deductsAllowance: boolean;
   hours: number;
   label: string;
   name: string;
@@ -135,16 +138,30 @@ export function VacationEditModal({
                   const option = vacationOptions[Number(event.target.value)];
 
                   if (option) {
-                    onDraftChange({ ...draft, hours: option.hours, matchName: option.name, matchStatus: option.status, name: option.name, status: option.status });
+                    onDraftChange({
+                      ...draft,
+                      deductsAllowance: option.deductsAllowance,
+                      hours: option.hours,
+                      matchDeductsAllowance: option.deductsAllowance,
+                      matchName: option.name,
+                      matchStatus: option.status,
+                      name: option.name,
+                      status: option.status
+                    });
                   }
                 }}
                 value={Math.max(
-                  vacationOptions.findIndex((option) => option.status === (draft.matchStatus ?? draft.status) && option.name === (draft.matchName ?? draft.name)),
+                  vacationOptions.findIndex(
+                    (option) =>
+                      option.status === (draft.matchStatus ?? draft.status) &&
+                      option.name === (draft.matchName ?? draft.name) &&
+                      (draft.matchDeductsAllowance === undefined || option.deductsAllowance === draft.matchDeductsAllowance)
+                  ),
                   0
                 )}
               >
                 {vacationOptions.map((option, index) => (
-                  <option key={`${option.status}-${option.name}-${option.hours}-${index}`} value={index}>
+                  <option key={`${option.status}-${option.name}-${option.hours}-${option.deductsAllowance}-${index}`} value={index}>
                     {option.label}
                   </option>
                 ))}
@@ -159,6 +176,21 @@ export function VacationEditModal({
               <Input disabled={saving} max={24} min={0} onChange={(event) => onDraftChange({ ...draft, hours: Number(event.target.value) })} step={0.5} type="number" value={draft.hours} />
             </Field>
           </div>
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <input
+              checked={draft.deductsAllowance}
+              className="mt-0.5 size-4 shrink-0 accent-slate-950"
+              disabled={saving}
+              onChange={(event) => onDraftChange({ ...draft, deductsAllowance: event.target.checked })}
+              type="checkbox"
+            />
+            <span className="space-y-0.5">
+              <span className="block text-sm font-bold text-slate-800">연차 총량에서 차감</span>
+              <span className="block text-xs font-medium leading-5 text-slate-500">
+                체크를 해제하면 휴가로 기록하되 사용 일수와 잔여 연차에서 제외합니다.
+              </span>
+            </span>
+          </label>
           {error ? <p className="text-sm font-semibold text-red-600">{error}</p> : null}
           <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <div>

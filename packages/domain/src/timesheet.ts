@@ -27,6 +27,7 @@ export type TimesheetEntryDraft = {
   notionCards: TimesheetEntryNotionCardDraft[];
   project: string;
   sortOrder: number;
+  vacationDeductsAllowance?: boolean;
   vacationName: string;
   vacationStatus: VacationStatus;
 };
@@ -52,6 +53,7 @@ export type TimesheetRow = TimesheetDayDraft & {
   project: string;
   projectCount: number;
   status: TimesheetStatus;
+  vacationDeductsAllowance?: boolean;
   vacationName: string;
   vacationStatus: VacationStatus;
 };
@@ -74,13 +76,35 @@ export function createEmptyEntryDraft(sortOrder = 0): TimesheetEntryDraft {
   };
 }
 
-export function createEmptyDraft(dateKey: string): TimesheetDayDraft {
+export function createEmptyDraft(dateKey: string): TimesheetDayDraft & { aiRewriteRequested: boolean } {
   return {
     aiRewriteRequested: false,
     dateKey,
     entries: [],
     holidayName: "",
     shortVersion: ""
+  };
+}
+
+export function createVacationDay(
+  dateKey: string,
+  vacationName: string,
+  hours: number,
+  vacationStatus: VacationStatus = "CONFIRMED",
+  vacationDeductsAllowance = true
+): TimesheetDayDraft & { aiRewriteRequested: boolean } {
+  return {
+    ...createEmptyDraft(dateKey),
+    entries: [
+      {
+        ...createEmptyEntryDraft(0),
+        hours,
+        kind: "VACATION",
+        vacationDeductsAllowance,
+        vacationName,
+        vacationStatus
+      }
+    ]
   };
 }
 

@@ -30,7 +30,7 @@ type ConnectedVacationPrompt =
   | { action: "save"; dateKeys: string[]; label: string; matchStatus: VacationStatus; status: VacationStatus };
 
 type VacationYearWorkspaceProps = {
-  deleteVacationDateAction: (dateKey: string, status: VacationStatus, name: string) => Promise<VacationYearData>;
+  deleteVacationDateAction: (dateKey: string, status: VacationStatus, name: string, deductsAllowance?: boolean) => Promise<VacationYearData>;
   deleteVacationWorkDateAction: (dateKey: string) => Promise<VacationYearData>;
   initialData: VacationYearData;
   initialTodayKey: string;
@@ -248,7 +248,16 @@ export function VacationYearWorkspace({
   const groups = useMemo(() => groupVacationRecordsByName(vacations, colorPreferences), [colorPreferences, vacations]);
   const metricSummary = useMemo(() => buildVacationYearMetricSummary({ allowanceDays, vacations }), [allowanceDays, vacations]);
   const savedHolidayDateKeySet = useMemo(() => new Set(savedHolidayDateKeys), [savedHolidayDateKeys]);
-  const vacationBoundaryByDate = useMemo(() => new Map(vacationBoundaries.map((boundary) => [`${boundary.dateKey}:${boundary.status}:${boundary.name.trim()}`, boundary])), [vacationBoundaries]);
+  const vacationBoundaryByDate = useMemo(
+    () =>
+      new Map(
+        vacationBoundaries.map((boundary) => [
+          `${boundary.dateKey}:${boundary.status}:${boundary.name.trim()}:${boundary.deductsAllowance !== false}`,
+          boundary
+        ])
+      ),
+    [vacationBoundaries]
+  );
   const vacationRecordsByDate = useMemo(() => {
     const recordsByDate = new Map<string, VacationYearRecord[]>();
 
@@ -267,17 +276,32 @@ export function VacationYearWorkspace({
     const hoveredVacation = vacationRecordsByDate.get(hoveredDateKey)?.[0];
     const hoveredVacationStatus = hoveredVacation?.status;
     const hoveredVacationName = hoveredVacation?.name ?? "";
+    const hoveredVacationDeducts = hoveredVacation?.deductsAllowance !== false;
 
     return new Set(
       findConnectedVacationDateKeysForTab({
         dateKey: hoveredDateKey,
-        getBoundary: (dateKey) => vacationBoundaryByDate.get(`${dateKey}:${hoveredVacationStatus}:${hoveredVacationName.trim()}`),
+        getBoundary: (dateKey) =>
+          vacationBoundaryByDate.get(
+            `${dateKey}:${hoveredVacationStatus}:${hoveredVacationName.trim()}:${hoveredVacationDeducts}`
+          ),
         getVacationStatus: (dateKey) =>
-          vacationRecordsByDate.get(dateKey)?.some((vacation) => vacation.status === hoveredVacationStatus && vacation.name.trim() === hoveredVacationName.trim())
+          vacationRecordsByDate.get(dateKey)?.some(
+            (vacation) =>
+              vacation.status === hoveredVacationStatus &&
+              vacation.name.trim() === hoveredVacationName.trim() &&
+              (vacation.deductsAllowance !== false) === hoveredVacationDeducts
+          )
             ? hoveredVacationStatus
             : undefined,
         isSavedHolidayDate: (dateKey) => savedHolidayDateKeySet.has(dateKey),
-        isVacationDate: (dateKey) => vacationDateKeySet.has(dateKey),
+        isVacationDate: (dateKey) =>
+          (vacationRecordsByDate.get(dateKey) ?? []).some(
+            (vacation) =>
+              vacation.status === hoveredVacationStatus &&
+              vacation.name.trim() === hoveredVacationName.trim() &&
+              (vacation.deductsAllowance !== false) === hoveredVacationDeducts
+          ),
         vacationStatus: hoveredVacationStatus
       })
     );
@@ -403,7 +427,9 @@ export function VacationYearWorkspace({
     setModalMode(vacation ? "edit" : "create");
     setModalDraft({
       dateKey,
+      deductsAllowance: vacation ? vacation.deductsAllowance !== false : true,
       hours: vacation?.hours ?? 8,
+      matchDeductsAllowance: vacation ? vacation.deductsAllowance !== false : undefined,
       matchName: vacation?.name,
       matchStatus: vacation?.status,
       name: vacation?.name ?? "",
@@ -419,30 +445,40 @@ export function VacationYearWorkspace({
     }
 
     const matchName = modalDraft.matchName ?? modalDraft.name;
+    const targetDeducts = modalDraft.matchDeductsAllowance !== undefined
+      ? modalDraft.matchDeductsAllowance
+      : modalDraft.deductsAllowance;
 
-    if (!vacationDateKeySet.has(modalDraft.dateKey)) {
+    const boundaryKey = (dateKey: string) => `${dateKey}:${status}:${matchName.trim()}:${targetDeducts}`;
+    const matchesTargetGroup = (vacation: VacationYearRecord) =>
+      vacation.status === status &&
+      vacation.name.trim() === matchName.trim() &&
+      (vacation.deductsAllowance !== false) === targetDeducts;
+
+    const isTargetVacationDate = (dateKey: string) =>
+      (vacationRecordsByDate.get(dateKey) ?? []).some(matchesTargetGroup);
+
+    if (!isTargetVacationDate(modalDraft.dateKey)) {
       if (savedHolidayDateKeySet.has(modalDraft.dateKey)) {
         return [modalDraft.dateKey];
       }
 
       return findConnectedVacationDateKeysForNewTab({
         dateKey: modalDraft.dateKey,
-        getBoundary: (dateKey) => vacationBoundaryByDate.get(`${dateKey}:${status}:${matchName.trim()}`),
-        getVacationStatus: (dateKey) =>
-          vacationRecordsByDate.get(dateKey)?.some((vacation) => vacation.status === status && vacation.name.trim() === matchName.trim()) ? status : undefined,
+        getBoundary: (dateKey) => vacationBoundaryByDate.get(boundaryKey(dateKey)),
+        getVacationStatus: (dateKey) => (isTargetVacationDate(dateKey) ? status : undefined),
         isSavedHolidayDate: (dateKey) => savedHolidayDateKeySet.has(dateKey),
-        isVacationDate: (dateKey) => vacationDateKeySet.has(dateKey),
+        isVacationDate: isTargetVacationDate,
         vacationStatus: status
       });
     }
 
     return findConnectedVacationDateKeysForTab({
       dateKey: modalDraft.dateKey,
-      getBoundary: (dateKey) => vacationBoundaryByDate.get(`${dateKey}:${status}:${matchName.trim()}`),
-      getVacationStatus: (dateKey) =>
-        vacationRecordsByDate.get(dateKey)?.some((vacation) => vacation.status === status && vacation.name.trim() === matchName.trim()) ? status : undefined,
+      getBoundary: (dateKey) => vacationBoundaryByDate.get(boundaryKey(dateKey)),
+      getVacationStatus: (dateKey) => (isTargetVacationDate(dateKey) ? status : undefined),
       isSavedHolidayDate: (dateKey) => savedHolidayDateKeySet.has(dateKey),
-      isVacationDate: (dateKey) => vacationDateKeySet.has(dateKey),
+      isVacationDate: isTargetVacationDate,
       vacationStatus: status
     });
   }
@@ -470,17 +506,29 @@ export function VacationYearWorkspace({
     try {
       let nextData: VacationYearData | null = null;
       const effectiveMatchName = modalDraft.matchName ?? modalDraft.name;
+      const targetDeducts = modalDraft.matchDeductsAllowance !== undefined
+        ? modalDraft.matchDeductsAllowance
+        : modalDraft.deductsAllowance;
+
       for (const dateKey of dateKeys) {
-        const existingVacation = vacationRecordsByDate
-          .get(dateKey)
-          ?.find((vacation) => vacation.status === matchStatus && vacation.name.trim() === effectiveMatchName.trim());
+        const isCurrentDate = dateKey === modalDraft.dateKey;
+        const dayVacations = vacationRecordsByDate.get(dateKey) ?? [];
+        const existingVacation = dayVacations.find(
+          (vacation) =>
+            vacation.status === matchStatus &&
+            vacation.name.trim() === effectiveMatchName.trim() &&
+            (vacation.deductsAllowance !== false) === targetDeducts
+        );
+
         nextData = await saveVacationDateAction({
           dateKey,
-          hours: dateKey === modalDraft.dateKey ? modalDraft.hours : existingVacation?.hours ?? modalDraft.hours,
+          deductsAllowance: modalDraft.deductsAllowance,
+          hours: isCurrentDate ? modalDraft.hours : existingVacation?.hours ?? modalDraft.hours,
+          matchDeductsAllowance: targetDeducts,
           matchName: vacationDateKeySet.has(dateKey) ? effectiveMatchName : undefined,
           matchStatus: vacationDateKeySet.has(dateKey) ? matchStatus : undefined,
           name: modalDraft.name,
-          preserveHours: dateKey !== modalDraft.dateKey,
+          preserveHours: !isCurrentDate,
           status
         });
       }
@@ -544,14 +592,26 @@ export function VacationYearWorkspace({
     void deleteModal([modalDraft.dateKey]);
   }
 
-  async function deleteModal(dateKeys: string[], status = modalDraft?.matchStatus ?? modalDraft?.status ?? "CONFIRMED", name = modalDraft?.matchName ?? modalDraft?.name ?? "") {
+  async function deleteModal(
+    dateKeys: string[],
+    status = modalDraft?.matchStatus ?? modalDraft?.status ?? "CONFIRMED",
+    name = modalDraft?.matchName ?? modalDraft?.name ?? "",
+    deductsAllowance = modalDraft?.matchDeductsAllowance !== undefined
+      ? modalDraft.matchDeductsAllowance
+      : modalDraft?.deductsAllowance
+  ) {
     setModalSaving(true);
     setModalError("");
 
     try {
       let nextData: VacationYearData | null = null;
       for (const dateKey of dateKeys) {
-        nextData = await deleteVacationDateAction(dateKey, status, name);
+        nextData = await deleteVacationDateAction(
+          dateKey,
+          status,
+          name,
+          deductsAllowance
+        );
       }
       if (nextData) {
         applyVacationYearData(nextData, { preserveAllowanceDraft: true });
@@ -582,7 +642,9 @@ export function VacationYearWorkspace({
       setModalMode("create");
       setModalDraft({
         dateKey,
+        deductsAllowance: true,
         hours: 8,
+        matchDeductsAllowance: undefined,
         matchName: undefined,
         matchStatus: undefined,
         name: "",
@@ -598,8 +660,11 @@ export function VacationYearWorkspace({
   const vacationEditOptions: VacationEditOption[] =
     modalDraft && modalMode === "edit"
       ? (vacationRecordsByDate.get(modalDraft.dateKey) ?? []).map((vacation) => ({
+          deductsAllowance: vacation.deductsAllowance ?? true,
           hours: vacation.hours,
-          label: `${vacation.status === "TEMPORARY" ? "임시" : "확정"} · ${normalizeVacationName(vacation.name)} · ${vacation.hours}시간`,
+          label: `${vacation.status === "TEMPORARY" ? "임시" : "확정"} · ${normalizeVacationName(vacation.name)} · ${vacation.hours}시간${
+            vacation.deductsAllowance === false ? " · 차감 안 함" : ""
+          }`,
           name: vacation.name,
           status: vacation.status
         }))
@@ -729,7 +794,14 @@ export function VacationYearWorkspace({
             setConnectedPrompt(null);
 
             if (prompt.action === "delete") {
-              void deleteModal(prompt.dateKeys, modalDraft.matchStatus ?? modalDraft.status, modalDraft.matchName ?? modalDraft.name);
+              void deleteModal(
+                prompt.dateKeys,
+                modalDraft.matchStatus ?? modalDraft.status,
+                modalDraft.matchName ?? modalDraft.name,
+                modalDraft.matchDeductsAllowance !== undefined
+                  ? modalDraft.matchDeductsAllowance
+                  : modalDraft.deductsAllowance
+              );
             } else {
               void saveModal(prompt.dateKeys, prompt.status, prompt.matchStatus);
             }
@@ -739,7 +811,14 @@ export function VacationYearWorkspace({
             setConnectedPrompt(null);
 
             if (prompt.action === "delete") {
-              void deleteModal([modalDraft.dateKey], modalDraft.matchStatus ?? modalDraft.status, modalDraft.matchName ?? modalDraft.name);
+              void deleteModal(
+                [modalDraft.dateKey],
+                modalDraft.matchStatus ?? modalDraft.status,
+                modalDraft.matchName ?? modalDraft.name,
+                modalDraft.matchDeductsAllowance !== undefined
+                  ? modalDraft.matchDeductsAllowance
+                  : modalDraft.deductsAllowance
+              );
             } else {
               void saveModal([modalDraft.dateKey], prompt.status, prompt.matchStatus);
             }

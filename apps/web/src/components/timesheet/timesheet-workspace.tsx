@@ -25,6 +25,7 @@ import {
   clampVacationFillRatio,
   createEmptyDraft,
   createEmptyEntryDraft,
+  createVacationDay,
   formatKoreanDate,
   getBusinessCalendarWeeks,
   getBusinessDateKeysUntil,
@@ -79,6 +80,12 @@ import { WeekendRelaxView } from "./weekend-relax-view";
 import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidate, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
 import { ThemeSetting } from "@/components/theme-setting";
 import { adjacentListTarget, shouldIgnoreCalendarShortcut } from "@/lib/calendar-shortcuts";
+import {
+  createClientId,
+  createFutureDraftForDate,
+  extractVacationRangeInitialState,
+  withClientIds
+} from "@/lib/timesheet-drafts";
 import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
 
 type ViewMode = "calendar" | "list";
@@ -414,10 +421,6 @@ function truncateContent(value: string): string {
   return `${trimmed.slice(0, 42)}...`;
 }
 
-function createClientId(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `entry-${Date.now()}-${Math.random()}`;
-}
-
 function addDays(dateKey: string, days: number): string {
   const date = parseDateKey(dateKey);
   date.setDate(date.getDate() + days);
@@ -484,36 +487,6 @@ function getDefaultSelectedDateForMonth(year: number, monthIndex: number): strin
   }
 
   return toBrowserDateKey(new Date(year, monthIndex, 1));
-}
-
-function createVacationDay(dateKey: string, vacationName: string, hours: number, vacationStatus: VacationStatus = "CONFIRMED"): TimesheetDayDraft {
-  return {
-    ...createEmptyDraft(dateKey),
-    entries: [
-      {
-        ...createEmptyEntryDraft(0),
-        clientId: createClientId(),
-        hours,
-        kind: "VACATION",
-        vacationName,
-        vacationStatus
-      }
-    ]
-  };
-}
-
-function withClientIds(day: TimesheetDayDraft): TimesheetDayDraft {
-  return {
-    ...day,
-    entries: day.entries
-      .map((entry, index) => ({
-        ...entry,
-        clientId: entry.clientId || entry.id || createClientId(),
-        hoursTouched: entry.hoursTouched ?? (entry.kind === "WORK" && day.entries.length === 1 && entry.hours !== 8),
-        sortOrder: index
-      }))
-      .sort((left, right) => left.sortOrder - right.sortOrder)
-  };
 }
 
 function buildDraftsFromMonthData(monthData: TimesheetMonthData): Record<string, TimesheetDayDraft> {
@@ -804,10 +777,6 @@ function createDraftForDate(dateKey: string, records: Record<string, TimesheetDa
     ...createEmptyDraft(dateKey),
     entries: [entry]
   };
-}
-
-function createFutureDraftForDate(dateKey: string): TimesheetDayDraft {
-  return createVacationDay(dateKey, "휴가", 8);
 }
 
 function firstWorkEntry(day: TimesheetDayDraft): TimesheetEntryDraft | undefined {
@@ -1216,6 +1185,7 @@ export function TimesheetWorkspace({
   const [vacationRangeName, setVacationRangeName] = useState("");
   const [vacationRangeHours, setVacationRangeHours] = useState(8);
   const [vacationRangeStatus, setVacationRangeStatus] = useState<VacationStatus>("CONFIRMED");
+  const [vacationRangeDeductsAllowance, setVacationRangeDeductsAllowance] = useState(true);
   const [canEditVacationRangeStart, setCanEditVacationRangeStart] = useState(false);
   const [vacationRangeState, setVacationRangeState] = useState<VacationRangeSaveState>("idle");
   const [vacationRangeError, setVacationRangeError] = useState("");
@@ -1238,6 +1208,7 @@ export function TimesheetWorkspace({
   const [projectRecommendationLoadingKeys, setProjectRecommendationLoadingKeys] = useState<Set<string>>(() => new Set());
   const [notionRecommendationLoadingKeys, setNotionRecommendationLoadingKeys] = useState<Set<string>>(() => new Set());
   const previousNotionCardRecommendationKeys = useRef(new Set<string>());
+  const previousProjectRecommendationKeys = useRef(new Set<string>());
   const isDailyEditorModalActive = isCompactViewport && isDailyEditorRequested;
 
   useEffect(() => {
@@ -1700,6 +1671,10 @@ export function TimesheetWorkspace({
   }, [isDirty]);
 
   useEffect(() => {
+    recommendPreviousProjectForDraft(selectedDateKey, records[selectedDateKey]);
+  }, [records, savedEntryDateKeys, selectedDateKey]);
+
+  useEffect(() => {
     recommendPreviousNotionCardsForDraft(selectedDateKey, records[selectedDateKey]);
   }, [records, savedEntryDateKeys, selectedDateKey]);
 
@@ -1849,6 +1824,13 @@ export function TimesheetWorkspace({
     const entry = day?.entries[0];
 
     if (entry?.kind === "WORK" && !entry.project.trim()) {
+      const recommendationKey = `${dateKey}:${entry.clientId}`;
+
+      if (previousProjectRecommendationKeys.current.has(recommendationKey)) {
+        return;
+      }
+
+      previousProjectRecommendationKeys.current.add(recommendationKey);
       void fillPreviousProjectFromDatabase(dateKey, entry.clientId);
     }
   }
@@ -1956,21 +1938,18 @@ export function TimesheetWorkspace({
       const currentDay = current[dateKey];
 
       if (currentDay?.entries.length) {
-        recommendPreviousProjectForDraft(dateKey, currentDay);
-        recommendPreviousNotionCardsForDraft(dateKey, currentDay);
         return current;
       }
-
-      setSelectedEntryIdByDate((selected) => ({
-        ...selected,
-        [dateKey]: draft.entries[0]?.clientId ?? ""
-      }));
 
       return {
         ...current,
         [dateKey]: draft
       };
     });
+    setSelectedEntryIdByDate((selected) => ({
+      ...selected,
+      [dateKey]: draft.entries[0]?.clientId ?? ""
+    }));
 
     recommendPreviousProjectForDraft(dateKey, draft);
     recommendPreviousNotionCardsForDraft(dateKey, draft);
@@ -2309,13 +2288,22 @@ export function TimesheetWorkspace({
     return Boolean(savedEntryDateKeys.has(dateKey) || draft?.entries.length || draft?.shortVersion.trim());
   }
 
-  async function saveVacationDays(dateKeys: string[], vacationName: string, hours: number, vacationStatus: VacationStatus = "CONFIRMED", onProgress?: (completed: number, total: number) => void): Promise<TimesheetDayDraft[]> {
+  async function saveVacationDays(
+    dateKeys: string[],
+    vacationName: string,
+    hours: number,
+    vacationStatus: VacationStatus = "CONFIRMED",
+    vacationDeductsAllowance = true,
+    onProgress?: (completed: number, total: number) => void
+  ): Promise<TimesheetDayDraft[]> {
     const savedDays: TimesheetDayDraft[] = [];
     const total = dateKeys.length;
 
     try {
       for (const dateKey of dateKeys) {
-        const saveResult = await saveEntryAction(sanitizeDayForSave(createVacationDay(dateKey, vacationName, hours, vacationStatus)));
+        const saveResult = await saveEntryAction(
+          sanitizeDayForSave(createVacationDay(dateKey, vacationName, hours, vacationStatus, vacationDeductsAllowance))
+        );
         const savedDay = withClientIds(saveResult.day);
 
         showNotionSyncError(saveResult.notionSyncError);
@@ -2400,18 +2388,14 @@ export function TimesheetWorkspace({
     return savedDays;
   }
 
+  // Kept pure: callers run this inside state updaters, i.e. during render,
+  // where kicking off an action would update the Router mid-render.
   function createDraftForSelectedDate(current: Record<string, TimesheetDayDraft>): TimesheetDayDraft {
     if (selectedDateKey > todayKey) {
       return createFutureDraftForDate(selectedDateKey);
     }
 
-    const draft = createDraftForDate(selectedDateKey, current);
-
-    if (draft.entries[0]?.kind === "WORK" && !draft.entries[0].project.trim()) {
-      void fillPreviousProjectFromDatabase(selectedDateKey, draft.entries[0].clientId);
-    }
-
-    return draft;
+    return createDraftForDate(selectedDateKey, current);
   }
 
   function getSelectedEntryIdForDay(dateKey: string, day: TimesheetDayDraft): string {
@@ -2686,9 +2670,11 @@ export function TimesheetWorkspace({
 
     setVacationRangeStart(selectedDateKey);
     setVacationRangeEnd(selectedDateKey);
-    setVacationRangeName(selectedEntry?.kind === "VACATION" ? selectedEntry.vacationName : "");
-    setVacationRangeHours(selectedEntry?.kind === "VACATION" ? selectedEntry.hours || 8 : 8);
-    setVacationRangeStatus(selectedEntry?.kind === "VACATION" ? selectedEntry.vacationStatus : "CONFIRMED");
+    const initialRange = extractVacationRangeInitialState(selectedEntry);
+    setVacationRangeName(initialRange.vacationName);
+    setVacationRangeHours(initialRange.hours);
+    setVacationRangeStatus(initialRange.vacationStatus);
+    setVacationRangeDeductsAllowance(initialRange.vacationDeductsAllowance);
     setCanEditVacationRangeStart(false);
     setVacationRangeState("idle");
     setVacationRangeError("");
@@ -2783,9 +2769,16 @@ export function TimesheetWorkspace({
       }
 
       setVacationRangeProgress({ completed: 0, total: targetDateKeys.length });
-      const savedDays = await saveVacationDays(targetDateKeys, vacationRangeName, vacationRangeHours, vacationStatus, (completed, total) => {
-        setVacationRangeProgress({ completed, total });
-      });
+      const savedDays = await saveVacationDays(
+        targetDateKeys,
+        vacationRangeName,
+        vacationRangeHours,
+        vacationStatus,
+        vacationRangeDeductsAllowance,
+        (completed, total) => {
+          setVacationRangeProgress({ completed, total });
+        }
+      );
       const selectedSavedDay = savedDays.find((day) => day.dateKey === selectedDateKey);
 
       if (selectedSavedDay) {
@@ -4254,6 +4247,16 @@ export function TimesheetWorkspace({
                   <Field label="휴가 시간">
                     <Input disabled={isFutureWork} max={24} min={0} onChange={(event) => updateSelectedEntry({ hours: Number(event.target.value) })} step={0.5} type="number" value={selectedEntry.hours} />
                   </Field>
+                  <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+                    <input
+                      checked={selectedEntry.vacationDeductsAllowance !== false}
+                      className="mt-0.5 size-4 shrink-0 accent-slate-950"
+                      disabled={isFutureWork || saveState === "saving"}
+                      onChange={(event) => updateSelectedEntry({ vacationDeductsAllowance: event.target.checked })}
+                      type="checkbox"
+                    />
+                    <span className="block text-sm font-bold text-slate-800">연차 총량에서 차감</span>
+                  </label>
                 </>
               ) : null
             ) : null}

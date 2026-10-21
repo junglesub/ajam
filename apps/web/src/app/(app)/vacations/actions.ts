@@ -13,14 +13,25 @@ import {
   setVacationTypeColorPreference,
   upsertVacationAllowance,
   type StoredTimesheetDraft,
-  type StoredTimesheetEntry,
   type VacationRecord
 } from "@timesheet/db";
-import { createEmptyDraft, createEmptyEntryDraft, getYearRange, isWeekendDateKey, normalizeVacationColor, normalizeVacationName, parseDateKey, toBrowserDateKey, type VacationStatus } from "@timesheet/domain";
+import {
+  buildVacationBoundaries,
+  createEmptyDraft,
+  deleteVacationFromDay,
+  getYearRange,
+  isWeekendDateKey,
+  normalizeVacationColor,
+  normalizeVacationName,
+  parseDateKey,
+  replaceVacationEntries,
+  toBrowserDateKey,
+  type VacationStatus
+} from "@timesheet/domain";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import type { VacationBoundary, VacationDateInput, VacationWorkDay, VacationYearData } from "@/components/vacations/types";
+import type { VacationDateInput, VacationWorkDay, VacationYearData } from "@/components/vacations/types";
 import { destroySession, getSession } from "@/server/session";
 
 const FULL_DAY_HOURS = 8;
@@ -58,72 +69,7 @@ function assertValidDateKey(dateKey: string) {
   }
 }
 
-function createVacationEntry(input: VacationDateInput, sortOrder: number): StoredTimesheetEntry {
-  const entry = createEmptyEntryDraft(sortOrder);
 
-  return {
-    ...entry,
-    hours: input.hours,
-    kind: "VACATION",
-    vacationName: input.name.trim(),
-    vacationStatus: input.status
-  };
-}
-
-function replaceVacationEntries(existingDay: StoredTimesheetDraft, input: VacationDateInput): StoredTimesheetEntry[] {
-  const existingVacationEntries = existingDay.entries.filter((entry) => entry.kind === "VACATION");
-  const matchesInputStatus = (entry: StoredTimesheetEntry) =>
-    entry.kind === "VACATION" &&
-    (!input.matchStatus || entry.vacationStatus === input.matchStatus) &&
-    (input.matchName === undefined || entry.vacationName.trim() === input.matchName.trim());
-  const targetVacationEntries = existingVacationEntries.filter(matchesInputStatus);
-
-  if (existingVacationEntries.length === 0) {
-    return [...existingDay.entries, createVacationEntry(input, existingDay.entries.length)];
-  }
-
-  if (input.matchStatus && targetVacationEntries.length === 0) {
-    return existingDay.entries;
-  }
-
-  if (targetVacationEntries.length === 1) {
-    return existingDay.entries.map((entry) =>
-      matchesInputStatus(entry)
-        ? {
-            ...entry,
-            hours: input.preserveHours ? entry.hours : input.hours,
-            vacationName: input.name.trim(),
-            vacationStatus: input.status
-          }
-        : entry
-    );
-  }
-
-  const existingTotalHours = targetVacationEntries.reduce((sum, entry) => sum + entry.hours, 0);
-  let vacationIndex = 0;
-  let allocatedHours = 0;
-
-  return existingDay.entries.map((entry) => {
-    if (!matchesInputStatus(entry)) {
-      return entry;
-    }
-
-    const isLastVacationEntry = vacationIndex === targetVacationEntries.length - 1;
-    const nextHours = isLastVacationEntry
-      ? Number((input.hours - allocatedHours).toFixed(2))
-      : Number((existingTotalHours > 0 ? input.hours * (entry.hours / existingTotalHours) : input.hours / targetVacationEntries.length).toFixed(2));
-
-    vacationIndex += 1;
-    allocatedHours += nextHours;
-
-    return {
-      ...entry,
-      hours: input.preserveHours ? entry.hours : nextHours,
-      vacationName: input.name.trim(),
-      vacationStatus: input.status
-    };
-  });
-}
 
 async function getExistingDay(params: { dateKey: string; userId: string }): Promise<StoredTimesheetDraft> {
   const [existingDay] = await listTimesheetEntries({
@@ -157,8 +103,15 @@ async function getLegacyVacationRecord(params: { dateKey: string; existingDay: S
   return vacations.find((vacation) => vacation.dateKey === params.dateKey);
 }
 
-function matchesVacationTarget(vacation: VacationRecord, params: { name?: string; status?: VacationStatus }): boolean {
-  return (!params.status || vacation.status === params.status) && (params.name === undefined || vacation.name.trim() === params.name.trim());
+function matchesVacationTarget(
+  vacation: VacationRecord,
+  params: { deductsAllowance?: boolean; name?: string; status?: VacationStatus }
+): boolean {
+  return (
+    (!params.status || vacation.status === params.status) &&
+    (params.name === undefined || vacation.name.trim() === params.name.trim()) &&
+    (params.deductsAllowance === undefined || vacation.deductsAllowance === params.deductsAllowance)
+  );
 }
 
 async function loadVacationHolidays(range: { endDateKey: string; startDateKey: string }) {
@@ -238,47 +191,6 @@ function buildVacationOnlyDateKeys(timesheetEntries: StoredTimesheetDraft[], vac
   }
 
   return Array.from(dateKeys).sort();
-}
-
-function buildVacationBoundaries(timesheetEntries: StoredTimesheetDraft[], vacations: VacationRecord[]): VacationBoundary[] {
-  const boundariesByDate = new Map<string, VacationBoundary>();
-
-  for (const day of timesheetEntries) {
-    for (const [index, entry] of day.entries.entries()) {
-      if (entry.kind !== "VACATION") {
-        continue;
-      }
-
-      const name = entry.vacationName.trim();
-      const status = entry.vacationStatus;
-
-      if (!boundariesByDate.has(`${day.dateKey}:${status}:${name}`)) {
-        boundariesByDate.set(`${day.dateKey}:${status}:${name}`, {
-          dateKey: day.dateKey,
-          endsDay: index === day.entries.length - 1,
-          name,
-          startsDay: index === 0,
-          status
-        });
-      }
-    }
-  }
-
-  for (const vacation of vacations) {
-    const name = vacation.name.trim();
-
-    if (!boundariesByDate.has(`${vacation.dateKey}:${vacation.status}:${name}`)) {
-      boundariesByDate.set(`${vacation.dateKey}:${vacation.status}:${name}`, {
-        dateKey: vacation.dateKey,
-        endsDay: true,
-        name,
-        startsDay: true,
-        status: vacation.status
-      });
-    }
-  }
-
-  return Array.from(boundariesByDate.values()).sort((left, right) => left.dateKey.localeCompare(right.dateKey));
 }
 
 export async function loadVacationYearAction(year: number): Promise<VacationYearData> {
@@ -399,7 +311,7 @@ export async function saveVacationDateAction(input: VacationDateInput): Promise<
     throw new Error("업무 기록이 있는 날짜에는 먼저 업무 기록을 삭제해야 휴가를 추가할 수 있습니다.");
   }
 
-  if (legacyVacation && !matchesVacationTarget(legacyVacation, { name: input.matchName, status: input.matchStatus })) {
+  if (legacyVacation && !matchesVacationTarget(legacyVacation, { deductsAllowance: input.matchDeductsAllowance, name: input.matchName, status: input.matchStatus })) {
     return loadVacationYearAction(Number(input.dateKey.slice(0, 4)));
   }
 
@@ -451,7 +363,12 @@ export async function deleteVacationWorkDateAction(dateKey: string): Promise<Vac
   return loadVacationYearAction(Number(dateKey.slice(0, 4)));
 }
 
-export async function deleteVacationDateAction(dateKey: string, status: VacationStatus, name: string): Promise<VacationYearData> {
+export async function deleteVacationDateAction(
+  dateKey: string,
+  status: VacationStatus,
+  name: string,
+  deductsAllowance?: boolean
+): Promise<VacationYearData> {
   const user = await requireSessionUser();
   assertValidDateKey(dateKey);
 
@@ -459,14 +376,11 @@ export async function deleteVacationDateAction(dateKey: string, status: Vacation
   const hasExistingVacation = existingDay.entries.some((entry) => entry.kind === "VACATION");
   const legacyVacation = hasExistingVacation ? undefined : await getLegacyVacationRecord({ dateKey, existingDay, userId: user.id });
 
-  if (legacyVacation && !matchesVacationTarget(legacyVacation, { name, status })) {
+  if (legacyVacation && !matchesVacationTarget(legacyVacation, { deductsAllowance, name, status })) {
     return loadVacationYearAction(Number(dateKey.slice(0, 4)));
   }
 
-  const day: StoredTimesheetDraft = {
-    ...existingDay,
-    entries: existingDay.entries.filter((entry) => entry.kind !== "VACATION" || entry.vacationStatus !== status || entry.vacationName.trim() !== name.trim())
-  };
+  const day: StoredTimesheetDraft = deleteVacationFromDay(existingDay, { deductsAllowance, name, status });
 
   if (isEffectivelyEmptyDay(day)) {
     await deleteTimesheetEntry({ dateKey, userId: user.id });

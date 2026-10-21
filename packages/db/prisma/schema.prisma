@@ -65,6 +65,7 @@ model TimesheetEntry {
   shortVersion  String   @default("")
   vacationName  String   @default("")
   vacationStatus String   @default("CONFIRMED")
+  vacationDeductsAllowance Boolean @default(true)
   holidayName   String   @default("")
   sortOrder     Int      @default(0)
   createdAt     DateTime @default(now())

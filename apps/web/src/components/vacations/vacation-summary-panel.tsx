@@ -88,6 +88,7 @@ export function VacationSummaryPanel({
   saveState
 }: VacationSummaryPanelProps) {
   const { confirmed, withTemporary } = metricSummary;
+  const nonDeductingDays = groups.reduce((sum, group) => sum + group.nonDeductingDays, 0);
   const [openName, setOpenName] = useState("");
   const [customColor, setCustomColor] = useState("#3b82f6");
   const [savingName, setSavingName] = useState("");
@@ -175,6 +176,11 @@ export function VacationSummaryPanel({
           <MetricCard inclusiveValue={formatHours(withTemporary.usedHours)} label="시간" value={formatHours(confirmed.usedHours)} />
           <MetricCard inclusiveValue={formatPercent(withTemporary.consumptionRatio)} label="소진률" value={formatPercent(confirmed.consumptionRatio)} />
         </div>
+        {nonDeductingDays > 0 ? (
+          <p className="mt-2 text-xs font-semibold text-slate-500">
+            연차 차감 제외: {formatDays(nonDeductingDays)}
+          </p>
+        ) : null}
       </section>
       <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="text-sm font-bold text-slate-950">휴가 유형</h2>
@@ -234,6 +240,11 @@ export function VacationSummaryPanel({
                         )}
                       >
                         임시 포함 {formatDays(group.withTemporaryDays)}
+                      </span>
+                    ) : null}
+                    {group.nonDeductingDays > 0 ? (
+                      <span className="block text-[10px] font-bold leading-tight text-slate-500">
+                        차감 안 함 {formatDays(group.nonDeductingDays)}
                       </span>
                     ) : null}
                   </span>

@@ -37,7 +37,7 @@
 - `Holiday`: 공휴일 날짜와 이름을 저장한다.
 - `HolidayFetchLog`: `getRestDeInfo` 월별 조회 여부를 저장해 같은 월을 반복 fetch하지 않게 한다.
 - `Vacation`: 사용자별 휴가 날짜, 이름, 시간을 저장한다. 업무 기록을 휴가로 저장하면 같은 날짜의 휴가 레코드가 동기화된다.
-- `VacationAllowance`: 사용자별 연도별 연차 총량을 저장한다. 휴가 사용량은 기존 `Vacation` 기록의 시간을 8시간 기준 일수로 환산한다.
+- `VacationAllowance`: 사용자별 연도별 연차 총량을 저장한다. 휴가 사용량은 `TimesheetEntry`의 `vacationDeductsAllowance`가 켜진 휴가 시간을 8시간 기준 일수로 환산한다. 차감 제외 휴가는 캘린더와 유형 요약에는 남지만 사용·잔여·소진률에서는 빠진다.
 - `VacationTypeColorPreference`: 사용자와 정규화된 휴가 유형 이름별 색상 하나를 저장한다. 프리셋 ID 또는 6자리 hex 원본만 저장하며 연도에는 종속되지 않는다.
 - `AppSetting`: 공공데이터포털 서비스 키 같은 앱 설정값을 저장한다.
 - `UserAiSetting`: 사용자별 Gemini API key, 모델, 자동 정리 여부, 실행 방식, 참고할 이전 저장 WORK 날짜 수, 과거 미작성 AI 필드 보정 설정을 저장한다. API key는 앱 secret으로 암호화해 저장한다.
@@ -115,7 +115,7 @@
 
 - `/timesheet` 서버 컴포넌트가 서버 기준 현재 월의 기록, 공휴일, 프로젝트, 휴가, 사용자/설정 데이터를 조회해 클라이언트 작업 공간에 전달하고, 클라이언트는 브라우저 기준 현재 월과 다르면 해당 월을 추가 조회한다.
 - `/timesheet` 월 데이터는 해당 연도의 휴가 기록과 `VacationTypeColorPreference`로 계산한 최종 유형별 색상도 포함한다. 클라이언트는 이를 연도별로 캐시하고 전체 휴가 셀, 부분 휴가, 업무 혼합 overlay, 휴가 badge에 같은 CSS 색상 토큰을 적용한다.
-- `/vacations`는 선택 연도의 `VacationAllowance`, `Vacation`, `Holiday` 데이터를 조회해 연간 휴가 캘린더와 유형별 요약을 표시한다. 휴가 입력/수정/삭제는 기존 timesheet 저장 경로를 사용하되 같은 날짜의 업무/공휴일 기록은 보존한다.
+- `/vacations`는 선택 연도의 `VacationAllowance`, `Vacation`, `Holiday` 데이터를 조회해 연간 휴가 캘린더와 유형별 요약을 표시한다. 휴가 입력/수정/삭제는 기존 timesheet 저장 경로를 사용하되 같은 날짜의 업무/공휴일 기록은 보존한다. 휴가 입력/수정 팝업의 `연차 총량에서 차감` 체크를 해제하면 `vacationDeductsAllowance`가 꺼진 entry로 저장되어 연차 사용 일수에서 제외된다.
 - `/vacations`의 유형 이름 변경은 현재 사용자와 선택 연도 범위에서 화면과 같은 정규화 이름을 가진 `TimesheetEntry`와 레거시 `Vacation` 행을 한 트랜잭션으로 갱신한다. 새 이름이 기존 유형과 같으면 집계 결과에서 합쳐지며 시간, 상태, 날짜와 색상 설정은 변경하지 않는다.
 - `/vacations`는 사용자의 전체 `VacationTypeColorPreference`도 함께 읽는다. 저장된 유형 색상이 있으면 자동 순위 색상보다 우선하고, 없으면 기존 여섯 색상 순환을 유지한다. 사용자 지정 hex는 CSS `color-mix(in oklab, ...)`가 현재 테마에 맞는 tint로 렌더링한다.
 - 월 이동 시 클라이언트가 server action으로 해당 월 데이터를 추가 조회한다.
@@ -148,7 +148,7 @@
 - `apps/web/src/components/year-end-review/year-end-review-workspace.tsx`가 기간 선택, 보기/필터, 업무별 제외 상태, Clipboard/Blob 내보내기와 날짜 편집 진입을 담당한다. 맥락 입력은 없애고 `createEmptyYearEndReviewContext()` 기본값을 그대로 쓰며, 원본 자료, 편집 기간, 최신 요청 번호, 보기, 세 필터, 제외 집합을 각각 관리한다. 늦게 도착한 응답은 최신 상태를 덜지 않으며 실패 시 기존 선택을 유지한 채 export를 비활성화한다. Clipboard는 `navigator.clipboard.writeText` 존재를 먼저 확인하고 동기 예외와 거부된 promise를 모두 같은 실패 경로로 보내 선택 가능한 textarea 대체를 띄운다. 날짜 일부 생략 안내는 `partial_day_summary_omitted` 경고 수를 센다. 업무 행·카드 칩·경고 날짜 버튼은 해당 날짜 편집을 열고, 포함 체크박스는 선택만 바꾸며 카드의 별도 외부 링크로만 원본 Notion 페이지를 연다. 화면에는 업무/카드 UUID를 표시하지 않는다.
 - `apps/web/src/components/year-end-review/timesheet-day-edit-modal.tsx`가 날짜 고정 편집 팝업을 담당한다. 기존 month-load action으로 그 날짜 전체 기록을 다시 읽고, `buildYearEndReviewDaySavePayload`로 만든 payload를 기존 `saveTimesheetEntryAction`에 저장한다. 저장 성공 후 작업 공간이 같은 기간을 다시 조회하며 필터·제외를 유지하고, 저장 중에는 닫기·저장을 막고 미저장 변경이 있으면 닫기 전에 확인한다. 로딩/오류·다시 불러오기, focus trap·복귀, Escape composition 가드, 본문 스크롤 복원, 중첩 카드 선택기를 처리하고 저장 실패와 Notion 동기화 실패, 재조회 실패를 각각 구분해 표시한다. 재사용하는 `NotionCardLinkSection`에는 `missingTitleLabel`을 넘겨 캐시 제목이 없는 카드도 page id 대신 중립 라벨을 쓴다. 업무 시간을 바꾸면 `allocateNotionCardHours`를 즉시 다시 적용해 자동 배분 미리보기가 저장 결과와 어긋나지 않게 하고(수동 배분·source/카드 메타데이터 유지, 수동 초과는 그대로 둠), 중첩 카드 선택기는 자체 focus scope를 가진다(Tab은 활성 선택기 안에서만 순환, 열 때 focus 이동, 닫을 때 열었던 버튼으로 복귀, Escape로 선택기를 먼저 닫음).
 - 새 DB 테이블·컬럼·마이그레이션을 추가하지 않는다. 평가 의미 매핑, 점수 판단, 요약, 목표 추론, 모델 호출은 앱 범위 밖이며 프롬프트로 외부 LLM에 위임한다.
-- 검증은 build 없이 `pnpm --filter @timesheet/db exec tsx --test ../domain/src/year-end-review.test.ts`와 `pnpm --filter @timesheet/db test`, `pnpm --filter @timesheet/domain typecheck`, `pnpm --filter @timesheet/db typecheck`, `pnpm --filter @timesheet/web typecheck`로 한다. DB 테스트는 OS temp의 합성 SQLite만 사용하고 `finally`에서 disconnect 후 해당 디렉터리만 삭제한다. 실제 브라우저 편집 팝업 확인은 사용자 담당이며 에이전트는 브라우저 UI 자동화와 제품 build를 실행하지 않는다.
+- 검증은 build 없이 `pnpm --filter @timesheet/domain test`와 `pnpm --filter @timesheet/db test`, `pnpm --filter @timesheet/domain typecheck`, `pnpm --filter @timesheet/db typecheck`, `pnpm --filter @timesheet/web typecheck`로 한다. 도메인 테스트는 자체 devDependency인 `tsx`로 소스를 직접 실행하며 JS 출력물을 만들지 않는다. DB 테스트는 OS temp의 합성 SQLite만 사용하고 `finally`에서 disconnect 후 해당 디렉터리만 삭제한다. 실제 브라우저 편집 팝업 확인은 사용자 담당이며 에이전트는 브라우저 UI 자동화와 제품 build를 실행하지 않는다.
 
 ## Deployment
 

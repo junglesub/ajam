@@ -18,6 +18,7 @@ export type StoredTimesheetEntry = {
   notionCards: TimesheetEntryNotionCardDraft[];
   project: string;
   sortOrder: number;
+  vacationDeductsAllowance?: boolean;
   vacationName: string;
   vacationStatus: VacationStatus;
 };
@@ -39,6 +40,7 @@ export type HolidayRecord = {
 
 export type VacationRecord = {
   dateKey: string;
+  deductsAllowance: boolean;
   hours: number;
   name: string;
   status: VacationStatus;
@@ -71,6 +73,7 @@ type TimesheetEntryRow = {
   project: string;
   sortOrder: number;
   userId: string;
+  vacationDeductsAllowance: number;
   vacationName: string;
   vacationStatus: string;
 };
@@ -89,6 +92,7 @@ type HolidayRow = {
 
 type VacationRow = {
   dateKey: string;
+  deductsAllowance: number;
   hours: number;
   name: string;
   status: string;
@@ -156,6 +160,7 @@ type TimesheetAiSummaryPatch = {
 };
 
 let schemaReady = false;
+let schemaReadyPromise: Promise<void> | null = null;
 
 function normalizeEntry(entry: StoredTimesheetEntry, sortOrder: number): StoredTimesheetEntry {
   const kind = entry.kind;
@@ -181,6 +186,7 @@ function normalizeEntry(entry: StoredTimesheetEntry, sortOrder: number): StoredT
     notionCards,
     project: isWork ? entry.project.trim() : "",
     sortOrder,
+    vacationDeductsAllowance: isVacation ? entry.vacationDeductsAllowance !== false : true,
     vacationName: isVacation ? entry.vacationName.trim() : "",
     vacationStatus: isVacation ? normalizeVacationStatus(entry.vacationStatus) : "CONFIRMED"
   };
@@ -246,6 +252,21 @@ async function hasColumn(tableName: string, columnName: string): Promise<boolean
   return rows.some((row) => row.name === columnName);
 }
 
+// SQLite has no ADD COLUMN IF NOT EXISTS; concurrent callers (or another process
+// bootstrapping the same file) can add the column between our check and the ALTER.
+async function addColumnIfMissing(tableName: string, columnName: string, definition: string) {
+  if (await hasColumn(tableName, columnName)) {
+    return;
+  }
+  try {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "${tableName}" ADD COLUMN "${columnName}" ${definition}`);
+  } catch (error) {
+    if (!(await hasColumn(tableName, columnName))) {
+      throw error;
+    }
+  }
+}
+
 async function migrateTimesheetDaySummaries() {
   await prisma.$executeRawUnsafe(`
     INSERT INTO "TimesheetDay" ("id", "userId", "dateKey", "shortVersion", "createdAt", "updatedAt")
@@ -266,7 +287,7 @@ export async function ensureTimesheetSchema() {
   if (schemaReady) {
     return;
   }
-  return createOperationLog("db", "schema_timesheet").run(async () => {
+  schemaReadyPromise ??= createOperationLog("db", "schema_timesheet").run(async () => {
     await ensureApplicationSchema();
     await ensureNotionSchema();
 
@@ -282,18 +303,16 @@ export async function ensureTimesheetSchema() {
       "shortVersion" TEXT NOT NULL DEFAULT '',
       "vacationName" TEXT NOT NULL DEFAULT '',
       "vacationStatus" TEXT NOT NULL DEFAULT 'CONFIRMED',
+      "vacationDeductsAllowance" INTEGER NOT NULL DEFAULT 1,
       "holidayName" TEXT NOT NULL DEFAULT '',
       "sortOrder" INTEGER NOT NULL DEFAULT 0,
       "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "TimesheetEntry_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
     )`);
-    if (!(await hasColumn("TimesheetEntry", "sortOrder"))) {
-      await prisma.$executeRawUnsafe(`ALTER TABLE "TimesheetEntry" ADD COLUMN "sortOrder" INTEGER NOT NULL DEFAULT 0`);
-    }
-    if (!(await hasColumn("TimesheetEntry", "vacationStatus"))) {
-      await prisma.$executeRawUnsafe(`ALTER TABLE "TimesheetEntry" ADD COLUMN "vacationStatus" TEXT NOT NULL DEFAULT 'CONFIRMED'`);
-    }
+    await addColumnIfMissing("TimesheetEntry", "sortOrder", "INTEGER NOT NULL DEFAULT 0");
+    await addColumnIfMissing("TimesheetEntry", "vacationStatus", "TEXT NOT NULL DEFAULT 'CONFIRMED'");
+    await addColumnIfMissing("TimesheetEntry", "vacationDeductsAllowance", "INTEGER NOT NULL DEFAULT 1");
     await prisma.$executeRawUnsafe(`DROP INDEX IF EXISTS "TimesheetEntry_userId_dateKey_key"`);
     await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "TimesheetEntry_userId_dateKey_idx" ON "TimesheetEntry"("userId", "dateKey")`);
     await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "TimesheetEntry_dateKey_idx" ON "TimesheetEntry"("dateKey")`);
@@ -308,9 +327,7 @@ export async function ensureTimesheetSchema() {
       "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "TimesheetDay_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
     )`);
-    if (!(await hasColumn("TimesheetDay", "aiRewriteRequested"))) {
-      await prisma.$executeRawUnsafe(`ALTER TABLE "TimesheetDay" ADD COLUMN "aiRewriteRequested" INTEGER NOT NULL DEFAULT 0`);
-    }
+    await addColumnIfMissing("TimesheetDay", "aiRewriteRequested", "INTEGER NOT NULL DEFAULT 0");
     await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "TimesheetDay_userId_dateKey_key" ON "TimesheetDay"("userId", "dateKey")`);
     await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "TimesheetDay_dateKey_idx" ON "TimesheetDay"("dateKey")`);
     await migrateTimesheetDaySummaries();
@@ -336,9 +353,7 @@ export async function ensureTimesheetSchema() {
       "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "Vacation_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
     )`);
-    if (!(await hasColumn("Vacation", "status"))) {
-      await prisma.$executeRawUnsafe(`ALTER TABLE "Vacation" ADD COLUMN "status" TEXT NOT NULL DEFAULT 'CONFIRMED'`);
-    }
+    await addColumnIfMissing("Vacation", "status", "TEXT NOT NULL DEFAULT 'CONFIRMED'");
     await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "Vacation_userId_dateKey_key" ON "Vacation"("userId", "dateKey")`);
 
     await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "VacationAllowance" (
@@ -372,7 +387,11 @@ export async function ensureTimesheetSchema() {
     await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "HolidayFetchLog_solYear_solMonth_source_key" ON "HolidayFetchLog"("solYear", "solMonth", "source")`);
 
     schemaReady = true;
-  }, {});
+  }, {}).catch((error: unknown) => {
+    schemaReadyPromise = null;
+    throw error;
+  });
+  return schemaReadyPromise;
 }
 
 async function listEntryNotionCards(params: {
@@ -468,7 +487,7 @@ export async function listTimesheetEntries(params: { endDateKey: string; startDa
 
   const [entries, dayRows] = await Promise.all([
     prisma.$queryRawUnsafe<TimesheetEntryRow[]>(
-      `SELECT "id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "sortOrder", "vacationName", "vacationStatus", "holidayName"
+      `SELECT "id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "sortOrder", "vacationName", "vacationStatus", "vacationDeductsAllowance", "holidayName"
        FROM "TimesheetEntry"
        WHERE "userId" = ? AND "dateKey" BETWEEN ? AND ?
        ORDER BY "dateKey" ASC, "sortOrder" ASC, "createdAt" ASC`,
@@ -525,6 +544,7 @@ export async function listTimesheetEntries(params: { endDateKey: string; startDa
       notionCards: notionCardsByEntryId.get(entry.id) ?? [],
       project: entry.kind === "WORK" ? entry.project : "",
       sortOrder: entry.sortOrder,
+      vacationDeductsAllowance: entry.kind === "VACATION" ? entry.vacationDeductsAllowance !== 0 : true,
       vacationName: entry.kind === "VACATION" ? entry.vacationName : "",
       vacationStatus: entry.kind === "VACATION" ? normalizeVacationStatus(entry.vacationStatus) : "CONFIRMED"
     });
@@ -767,17 +787,17 @@ export async function listVacations(params: { endDateKey: string; startDateKey: 
 
   const [entryRows, legacyRows] = await Promise.all([
     prisma.$queryRawUnsafe<VacationRow[]>(
-      `SELECT "dateKey", "vacationName" AS "name", sum("hours") AS "hours", "vacationStatus" AS "status"
+      `SELECT "dateKey", "vacationName" AS "name", sum("hours") AS "hours", "vacationStatus" AS "status", "vacationDeductsAllowance" AS "deductsAllowance"
        FROM "TimesheetEntry"
        WHERE "userId" = ? AND "dateKey" BETWEEN ? AND ? AND "kind" = 'VACATION'
-       GROUP BY "dateKey", "vacationName", "vacationStatus"
+       GROUP BY "dateKey", "vacationName", "vacationStatus", "vacationDeductsAllowance"
        ORDER BY "dateKey" ASC, "vacationStatus" ASC, "vacationName" ASC`,
       params.userId,
       params.startDateKey,
       params.endDateKey
     ),
     prisma.$queryRawUnsafe<VacationRow[]>(
-      `SELECT "dateKey", "name", "hours", "status"
+      `SELECT "dateKey", "name", "hours", "status", 1 AS "deductsAllowance"
        FROM "Vacation"
        WHERE "userId" = ? AND "dateKey" BETWEEN ? AND ?
        ORDER BY "dateKey" ASC`,
@@ -789,7 +809,9 @@ export async function listVacations(params: { endDateKey: string; startDateKey: 
   const entryDateKeys = new Set(entryRows.map((row) => row.dateKey));
   const rows = [...entryRows, ...legacyRows.filter((row) => !entryDateKeys.has(row.dateKey))];
 
-  return rows.map((row) => ({ ...row, status: normalizeVacationStatus(row.status) })).sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+  return rows
+    .map((row) => ({ ...row, deductsAllowance: Boolean(row.deductsAllowance), status: normalizeVacationStatus(row.status) }))
+    .sort((left, right) => left.dateKey.localeCompare(right.dateKey));
 }
 
 export async function renameVacationTypeForYear(params: {
@@ -997,7 +1019,7 @@ async function listTimesheetDaysInTransaction(params: {
   const dateKeyPlaceholders = dateKeys.map(() => "?").join(", ");
   const [entries, dayRows] = await Promise.all([
     params.transaction.$queryRawUnsafe<TimesheetEntryRow[]>(
-      `SELECT "id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "sortOrder", "vacationName", "vacationStatus", "holidayName"
+      `SELECT "id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "sortOrder", "vacationName", "vacationStatus", "vacationDeductsAllowance", "holidayName"
        FROM "TimesheetEntry"
        WHERE "userId" = ? AND "dateKey" IN (${dateKeyPlaceholders})
        ORDER BY "dateKey" ASC, "sortOrder" ASC, "createdAt" ASC`,
@@ -1053,6 +1075,7 @@ async function listTimesheetDaysInTransaction(params: {
       notionCards: notionCardsByEntryId.get(entry.id) ?? [],
       project: entry.kind === "WORK" ? entry.project : "",
       sortOrder: entry.sortOrder,
+      vacationDeductsAllowance: entry.kind === "VACATION" ? entry.vacationDeductsAllowance !== 0 : true,
       vacationName: entry.kind === "VACATION" ? entry.vacationName : "",
       vacationStatus: entry.kind === "VACATION" ? normalizeVacationStatus(entry.vacationStatus) : "CONFIRMED"
     });
@@ -1098,8 +1121,8 @@ async function saveTimesheetDayInTransaction(params: {
     const entryId = entry.id || randomUUID();
 
     await params.transaction.$executeRawUnsafe(
-      `INSERT INTO "TimesheetEntry" ("id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "shortVersion", "sortOrder", "vacationName", "vacationStatus", "holidayName", "createdAt", "updatedAt")
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      `INSERT INTO "TimesheetEntry" ("id", "userId", "dateKey", "kind", "project", "hours", "content", "aiTranslation", "shortVersion", "sortOrder", "vacationName", "vacationStatus", "vacationDeductsAllowance", "holidayName", "createdAt", "updatedAt")
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       entryId,
       params.userId,
       params.day.dateKey,
@@ -1111,6 +1134,7 @@ async function saveTimesheetDayInTransaction(params: {
       entry.sortOrder,
       entry.vacationName,
       entry.vacationStatus,
+      entry.vacationDeductsAllowance === false ? 0 : 1,
       entry.holidayName
     );
 

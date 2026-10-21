@@ -133,9 +133,9 @@ pnpm typecheck
 pnpm build
 ```
 
-연말 정리 도메인/loader 회귀 검증은 build 없이 아래 명령으로 실행합니다.
+도메인 및 DB 회귀 검증은 build 없이 아래 명령으로 실행합니다. 도메인 테스트는 `tsx`로 TypeScript 소스를 직접 실행합니다.
 
 ```bash
-pnpm --filter @timesheet/db exec tsx --test ../domain/src/year-end-review.test.ts
+pnpm --filter @timesheet/domain test
 pnpm --filter @timesheet/db test
 ```
