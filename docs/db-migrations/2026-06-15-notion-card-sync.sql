@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS "UserNotionConnection" (
   "availableHoursPropertyJson" TEXT NOT NULL DEFAULT '',
   "lastWorkedDatePropertyJson" TEXT NOT NULL DEFAULT '',
   "ajamLastUpdatePropertyJson" TEXT NOT NULL DEFAULT '',
+  "statusIconMappingJson" TEXT NOT NULL DEFAULT '',
   "dateMappingMode" TEXT NOT NULL DEFAULT 'separate_properties',
   "doneStatusValuesJson" TEXT NOT NULL DEFAULT '[]',
   "tokenLastValidatedAt" DATETIME,
@@ -135,3 +136,27 @@ CREATE TABLE IF NOT EXISTS "NotionSyncRun" (
 
 CREATE INDEX IF NOT EXISTS "NotionSyncRun_scope_idx" ON "NotionSyncRun"("userId", "scopeType", "scopeStartDate", "scopeEndDate", "finishedAt");
 CREATE INDEX IF NOT EXISTS "NotionSyncRun_status_idx" ON "NotionSyncRun"("userId", "status", "finishedAt");
+
+CREATE TABLE IF NOT EXISTS "NotionIconBulkJob" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  "serverInstanceId" TEXT NOT NULL,
+  "status" TEXT NOT NULL,
+  "settingsFingerprint" TEXT NOT NULL,
+  "totalKnown" INTEGER NOT NULL DEFAULT 0,
+  "discoveredCount" INTEGER NOT NULL DEFAULT 0,
+  "processedCount" INTEGER NOT NULL DEFAULT 0,
+  "updatedCount" INTEGER NOT NULL DEFAULT 0,
+  "skippedCount" INTEGER NOT NULL DEFAULT 0,
+  "failedCount" INTEGER NOT NULL DEFAULT 0,
+  "requestCount" INTEGER NOT NULL DEFAULT 0,
+  "startedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "finishedAt" DATETIME,
+  "errorMessage" TEXT,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "NotionIconBulkJob_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS "NotionIconBulkJob_userId_idx" ON "NotionIconBulkJob"("userId", "createdAt" DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS "NotionIconBulkJob_active_user" ON "NotionIconBulkJob"("userId") WHERE "status" = 'running';

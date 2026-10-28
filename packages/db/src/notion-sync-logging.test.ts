@@ -73,6 +73,6 @@ test("Notion sync logs per-page failures, skip reasons and partial pagination wi
     assert.ok(!lines.join("").includes("verification-private"));
   } finally {
     await prisma.$disconnect();
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 }).catch(() => null);
   }
 });

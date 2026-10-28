@@ -4,7 +4,27 @@ export { hashPassword, verifyPassword } from "./password";
 export { ensureUserAiSettingSchema, getUserAiSetting, getUserGeminiApiKey, updateUserAiSetting } from "./ai-settings-store";
 export type { AiCleanupMode, AiProvider, UserAiSetting, UserAiSettingUpdate } from "./ai-settings-store";
 export { retrieveNotionDataSourceSchema, syncNotionCardsForDate, syncSingleNotionCard } from "./notion-sync";
-export type { NotionDataSourceSchema } from "./notion-sync";
+export type { NotionDataSourceProperty, NotionDataSourceSchema, NotionSelectOption } from "./notion-sync";
+export { updateNotionPageProperties } from "./notion-page-update";
+export type { NotionPageIconPatch, NotionPagePatchResult, NotionPagePropertyPatch } from "./notion-page-update";
+export {
+  assertMatchingScope,
+  determineTargetIcon,
+  getNotionStatusIconSettings,
+  isValidEmoji,
+  parseStatusIconSettings,
+  saveNotionStatusIconSettings,
+  validateStatusIconSettings,
+  withPageLock
+} from "./notion-status-icons";
+export type { NotionPageLike, NotionStatusIconSettings, NotionTargetIconDecision } from "./notion-status-icons";
+export {
+  ensureNotionIconBulkSchema,
+  getLatestNotionIconBulkJob,
+  runNotionIconBulkJob,
+  startNotionIconBulk
+} from "./notion-icon-bulk";
+export type { NotionIconBulkJobStatus, NotionIconBulkJobStatusType } from "./notion-icon-bulk";
 export { handleNotionWebhook, NotionWebhookError } from "./notion-webhook";
 export { runNotionDailyMaintenance } from "./notion-daily-maintenance";
 export type { NotionDailyMaintenanceResult, NotionDailyMaintenanceUserResult } from "./notion-daily-maintenance";

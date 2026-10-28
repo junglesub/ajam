@@ -12,6 +12,7 @@ import {
   getSavedNotionCardDateRanges,
   normalizeNotionDateToDateKey,
   shouldWarnAboutFallbackHours,
+  isValidEmoji,
   type NotionCardSnapshot,
   type WorkEntryNotionCardLink
 } from "./notion-cards.js";
@@ -535,5 +536,40 @@ describe("Saved Notion card date ranges (persisted state only)", () => {
     assert.equal(ranges.has("draft-only-card"), false);
     assert.deepEqual(ranges.get("card-a"), { firstDateKey: "2026-06-01", lastDateKey: "2026-06-01", totalDays: 1 });
     assert.equal(getNotionCardWorkDateRole("2026-06-01", "card-a", ranges), "single");
+  });
+});
+
+describe("isValidEmoji domain validator", () => {
+  it("accepts valid single Unicode emoji graphemes and sequences", () => {
+    assert.equal(isValidEmoji("✅"), true);
+    assert.equal(isValidEmoji("🚧"), true);
+    assert.equal(isValidEmoji("🚀"), true);
+    assert.equal(isValidEmoji("✨"), true);
+    assert.equal(isValidEmoji("⚠️"), true);
+    assert.equal(isValidEmoji("👍🏽"), true);
+    assert.equal(isValidEmoji("🇰🇷"), true);
+    assert.equal(isValidEmoji("👨‍👩‍👧‍👦"), true);
+    assert.equal(isValidEmoji("🧑‍💻"), true);
+    assert.equal(isValidEmoji("1️⃣"), true);
+    assert.equal(isValidEmoji("*️⃣"), true);
+    assert.equal(isValidEmoji("🏳️‍🌈"), true);
+  });
+
+  it("rejects invalid inputs, multi-emojis, controls, text, and secrets", () => {
+    assert.equal(isValidEmoji("🚀🚀"), false);
+    assert.equal(isValidEmoji("✅🚧"), false);
+    assert.equal(isValidEmoji("\u200D"), false);
+    assert.equal(isValidEmoji("\uFE0F"), false);
+    assert.equal(isValidEmoji(""), false);
+    assert.equal(isValidEmoji("   "), false);
+    assert.equal(isValidEmoji("status"), false);
+    assert.equal(isValidEmoji("123"), false);
+    assert.equal(isValidEmoji("secret_token_12345"), false);
+    assert.equal(isValidEmoji("https://api.notion.com"), false);
+    assert.equal(isValidEmoji("🚀abc"), false);
+    assert.equal(isValidEmoji("a🚀"), false);
+    assert.equal(isValidEmoji(null), false);
+    assert.equal(isValidEmoji(undefined), false);
+    assert.equal(isValidEmoji(123), false);
   });
 });

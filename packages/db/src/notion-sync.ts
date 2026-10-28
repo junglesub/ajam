@@ -1,5 +1,6 @@
 import { requestNotionApi } from "./notion-api";
 import { createNotionLog, notionErrorMessage, type NotionLogContext } from "./notion-log";
+import { determineTargetIcon, getNotionStatusIconSettings, withPageLock } from "./notion-status-icons";
 
 import { normalizeNotionDateToDateKey } from "@timesheet/domain";
 
@@ -16,14 +17,28 @@ import {
 import { getNotionPropertyKey, pickRawNotionProperty } from "./notion-property";
 import { syncNotionWorkHoursForPages } from "./notion-work-hours-sync";
 
+export type NotionSelectOption = {
+  color?: string;
+  id: string;
+  name: string;
+};
+
+export type NotionDataSourceProperty = {
+  id: string;
+  name?: string;
+  options?: NotionSelectOption[];
+  type: string;
+};
+
 export type NotionDataSourceSchema = {
   id: string;
   name?: string;
-  properties: Record<string, { id: string; name?: string; type: string }>;
+  properties: Record<string, NotionDataSourceProperty>;
 };
 
 type NotionPage = {
   archived?: boolean;
+  icon?: { emoji?: string; type: string } | null;
   id: string;
   last_edited_time?: string;
   parent?: { data_source_id?: string; id?: string; type?: string };
@@ -45,14 +60,55 @@ export async function retrieveNotionDataSourceSchema(params: {
   token: string;
   context?: NotionLogContext;
 }): Promise<NotionDataSourceSchema> {
-  const response = await notionFetch({
+  const response = (await notionFetch({
     context: params.context,
     method: "GET",
     path: `/v1/data_sources/${encodeURIComponent(params.dataSourceId)}`,
     token: params.token
-  });
+  })) as {
+    id: string;
+    name?: string;
+    properties?: Record<
+      string,
+      {
+        id: string;
+        name?: string;
+        options?: Array<{ color?: string; id?: string; name?: string }>;
+        select?: { options?: Array<{ color?: string; id?: string; name?: string }> };
+        status?: { options?: Array<{ color?: string; id?: string; name?: string }> };
+        type: string;
+      }
+    >;
+  };
 
-  return response as NotionDataSourceSchema;
+  const rawProperties = response.properties ?? {};
+  const properties: Record<string, NotionDataSourceProperty> = {};
+
+  for (const [key, prop] of Object.entries(rawProperties)) {
+    const rawOptions = prop.status?.options ?? prop.select?.options ?? prop.options;
+    const options: NotionSelectOption[] | undefined = Array.isArray(rawOptions)
+      ? rawOptions
+          .filter((opt) => typeof opt?.id === "string" && typeof opt?.name === "string")
+          .map((opt) => ({
+            color: opt.color,
+            id: opt.id as string,
+            name: opt.name as string
+          }))
+      : undefined;
+
+    properties[key] = {
+      id: prop.id,
+      name: prop.name,
+      type: prop.type,
+      ...(options !== undefined ? { options } : {})
+    };
+  }
+
+  return {
+    id: response.id,
+    name: response.name,
+    properties
+  };
 }
 
 export async function syncNotionCardsForDate(params: {
@@ -121,46 +177,81 @@ export async function syncNotionCardsForDate(params: {
   }
 }
 
-export async function syncSingleNotionCard(params: { pageId: string; userId: string; context?: NotionLogContext }): Promise<NotionCardCacheRecord> {
-  const log = createNotionLog("single_sync", { ...params.context, userId: params.userId });
-  log.write("info", "started", { pageId: params.pageId });
-  try {
-    const connection = await requireConnection(params.userId);
-    const token = await getUserNotionAccessToken(params.userId);
-    const page = await notionFetch({
-      method: "GET",
-      context: log.context,
-      path: `/v1/pages/${encodeURIComponent(params.pageId)}`,
-      token
-    }) as NotionPage;
-    const parentDataSourceId = page.parent?.data_source_id ?? (page.parent?.type === "data_source_id" ? page.parent.id : "");
+export async function syncSingleNotionCard(params: {
+  context?: NotionLogContext;
+  pageId: string;
+  userId: string;
+}): Promise<NotionCardCacheRecord> {
+  return withPageLock(params.pageId, async () => {
+    const log = createNotionLog("single_sync", { ...params.context, userId: params.userId });
+    log.write("info", "started", { pageId: params.pageId });
+    try {
+      const connection = await requireConnection(params.userId);
+      const token = await getUserNotionAccessToken(params.userId);
+      const page = (await notionFetch({
+        context: log.context,
+        method: "GET",
+        path: `/v1/pages/${encodeURIComponent(params.pageId)}`,
+        token
+      })) as NotionPage;
+      const parentDataSourceId = page.parent?.data_source_id ?? (page.parent?.type === "data_source_id" ? page.parent.id : "");
 
-    if (parentDataSourceId !== connection.dataSourceId) {
-      throw new Error("설정된 Notion 데이터 소스의 카드가 아닙니다.");
+      if (parentDataSourceId !== connection.dataSourceId) {
+        throw new Error("설정된 Notion 데이터 소스의 카드가 아닙니다.");
+      }
+
+      const card = normalizePage({ connection, page });
+      await upsertNotionCardCache({
+        analysisConfigVersion: connection.analysisConfigVersion,
+        cards: [card],
+        userId: params.userId
+      });
+
+      const iconSettings = connection.statusIconSettings ?? (await getNotionStatusIconSettings(params.userId));
+      const iconDecision = determineTargetIcon(page, connection, iconSettings);
+      const targetIcon = iconDecision.action === "update" && iconDecision.targetEmoji
+        ? { emoji: iconDecision.targetEmoji, type: "emoji" as const }
+        : undefined;
+
+      const hasAggregateProperties = Boolean(
+        getNotionPropertyKey(connection.workHoursProperty) ||
+        getNotionPropertyKey(connection.workDayCountProperty) ||
+        getNotionPropertyKey(connection.availableHoursProperty) ||
+        getNotionPropertyKey(connection.lastWorkedDateProperty)
+      );
+
+      let fieldResult: { errors: Array<{ message: string }>; failed: number; skippedReason?: string; updated: number } = {
+        errors: [],
+        failed: 0,
+        skippedReason: undefined,
+        updated: 0
+      };
+
+      if (targetIcon || hasAggregateProperties) {
+        fieldResult = await syncNotionWorkHoursForPages({
+          context: log.context,
+          icon: targetIcon,
+          notionPageIds: [params.pageId],
+          userId: params.userId
+        });
+
+        if (fieldResult.failed > 0 && !fieldResult.skippedReason) {
+          throw new Error(fieldResult.errors[0]?.message ?? "Notion 집계 필드 업데이트에 실패했습니다.");
+        }
+      }
+
+      log.write("info", "completed", {
+        fieldsUpdated: fieldResult.updated,
+        iconAction: iconDecision.action,
+        pageId: params.pageId,
+        skippedReason: fieldResult.skippedReason
+      });
+      return card;
+    } catch (error) {
+      log.write("error", "failed", { error: notionErrorMessage(error), pageId: params.pageId });
+      throw error;
     }
-
-    const card = normalizePage({ connection, page });
-    await upsertNotionCardCache({
-      analysisConfigVersion: connection.analysisConfigVersion,
-      cards: [card],
-      userId: params.userId
-    });
-    const fieldResult = await syncNotionWorkHoursForPages({
-      context: log.context,
-      notionPageIds: [params.pageId],
-      userId: params.userId
-    });
-
-    if (fieldResult.failed > 0 && !fieldResult.skippedReason) {
-      throw new Error(fieldResult.errors[0]?.message ?? "Notion 집계 필드 업데이트에 실패했습니다.");
-    }
-
-    log.write("info", "completed", { pageId: params.pageId, fieldsUpdated: fieldResult.updated, skippedReason: fieldResult.skippedReason });
-    return card;
-  } catch (error) {
-    log.write("error", "failed", { pageId: params.pageId, error: notionErrorMessage(error) });
-    throw error;
-  }
+  });
 }
 
 async function queryDataSourcePages(params: {

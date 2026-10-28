@@ -1,7 +1,10 @@
 import type {
   NotionCardCacheRecord,
   NotionDataSourceSchema,
+  NotionIconBulkJobStatus,
   NotionPropertyDescriptor,
+  NotionSelectOption,
+  NotionStatusIconSettings,
   NotionWebhookSettings,
   UserNotionWeeklyDefaultCard,
   UserNotionConnection
@@ -19,6 +22,18 @@ export type NotionCardWorkspaceProps = {
   resetWebhookSettingsAction: () => Promise<NotionWebhookSettings>;
   revealWebhookVerificationTokenAction: () => Promise<string>;
   saveWebhookVerificationTokenAction: (token: string) => Promise<NotionWebhookSettings>;
+  getStatusIconSettingsAction: () => Promise<{
+    connection: UserNotionConnection | null;
+    hasWebhook: boolean;
+    latestJob: NotionIconBulkJobStatus | null;
+    options: NotionSelectOption[];
+    schemaError?: string;
+    settings: NotionStatusIconSettings | null;
+    statusPropertyName: string;
+  }>;
+  saveStatusIconSettingsAction: (settings: NotionStatusIconSettings) => Promise<NotionStatusIconSettings>;
+  startIconBulkAction: () => Promise<NotionIconBulkJobStatus>;
+  getIconBulkStatusAction: () => Promise<NotionIconBulkJobStatus | null>;
   listCardsForMonthAction: (month: string) => Promise<NotionCardCacheRecord[]>;
   saveConnectionAction: (params: {
     accessToken?: string;
@@ -99,6 +114,17 @@ export type NotionConnectionModalProps = NotionConnectionPanelProps & {
   saveWebhookVerificationTokenAction: NotionCardWorkspaceProps["saveWebhookVerificationTokenAction"];
   onClose: () => void;
   open: boolean;
+};
+
+export type NotionStatusIconsModalProps = {
+  connection: UserNotionConnection | null;
+  getIconBulkStatusAction: NotionCardWorkspaceProps["getIconBulkStatusAction"];
+  getStatusIconSettingsAction: NotionCardWorkspaceProps["getStatusIconSettingsAction"];
+  onClose: () => void;
+  onMessage: (message: string) => void;
+  open: boolean;
+  saveStatusIconSettingsAction: NotionCardWorkspaceProps["saveStatusIconSettingsAction"];
+  startIconBulkAction: NotionCardWorkspaceProps["startIconBulkAction"];
 };
 
 export type NotionCardTableProps = {

@@ -444,3 +444,50 @@ function toHourCents(value: number): number {
 function toHoursFromCents(value: number): number {
   return value / 100;
 }
+
+/**
+ * Validates that the input represents exactly one single valid emoji grapheme.
+ * Supports standard emojis, skin tone modifiers, flags, keycap sequences, and ZWJ sequences.
+ * Rejects multiple emojis, ASCII text, controls, whitespace, and standalone modifiers.
+ */
+export function isValidEmoji(text: unknown): boolean {
+  if (typeof text !== "string") {
+    return false;
+  }
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
+    const segmenter = new Intl.Segmenter("en", { granularity: "grapheme" });
+    const segments = Array.from(segmenter.segment(trimmed));
+    if (segments.length !== 1) {
+      return false;
+    }
+    const g = segments[0]!.segment;
+    // 1) Regional indicator pair (country flags)
+    if (/^[\u{1F1E6}-\u{1F1FF}]{2}$/u.test(g)) {
+      return true;
+    }
+    // 2) Keycap sequence (digit/symbol + optional VS-16 + enclosing keycap)
+    if (/^[0-9#*]\uFE0F?\u20E3$/u.test(g)) {
+      return true;
+    }
+    // 3) Standard emoji with optional modifiers, ZWJ, variation selectors
+    if (/\p{Extended_Pictographic}/u.test(g)) {
+      const stripped = g
+        .replaceAll("\u200D", "")
+        .replaceAll("\uFE0E", "")
+        .replaceAll("\uFE0F", "")
+        .replace(/\uD83C[\uDFFB-\uDFFF]/g, "");
+      if (/[\p{L}\p{N}\p{Z}\p{C}]/u.test(stripped)) {
+        return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  return /^(\p{Extended_Pictographic}(?:\uFE0F|\uD83C[\uDFFB-\uDFFF])?(?:\u200d\p{Extended_Pictographic}(?:\uFE0F|\uD83C[\uDFFB-\uDFFF])?)*|[\u{1F1E6}-\u{1F1FF}]{2}|[0-9#*]\uFE0F?\u20E3)$/u.test(trimmed);
+}

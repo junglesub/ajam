@@ -22,7 +22,8 @@ export {
   getNotionCardWorkDateRole,
   getSavedNotionCardDateRanges,
   normalizeNotionDateToDateKey,
-  shouldWarnAboutFallbackHours
+  shouldWarnAboutFallbackHours,
+  isValidEmoji
 } from "./notion-cards";
 export type {
   NotionCardAvailableHours,

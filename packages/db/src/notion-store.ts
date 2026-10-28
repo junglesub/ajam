@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { TimesheetEntryNotionCardDraft } from "@timesheet/domain";
 
 import { prisma } from "./client";
+import { parseStatusIconSettings, type NotionStatusIconSettings } from "./notion-status-icons";
 import { decryptSecret, encryptSecret } from "./secret-store";
 import { ensureApplicationSchema } from "./settings-store";
 
@@ -35,6 +36,7 @@ export type UserNotionConnection = {
   notionApiVersion: string;
   sourceInput: string;
   startDateProperty: NotionPropertyDescriptor | null;
+  statusIconSettings?: NotionStatusIconSettings | null;
   statusProperty: NotionPropertyDescriptor | null;
   titleProperty: NotionPropertyDescriptor | null;
   workDayCountProperty: NotionPropertyDescriptor | null;
@@ -105,6 +107,7 @@ type ConnectionRow = {
   notionApiVersion: string;
   sourceInput: string;
   startDatePropertyJson: string;
+  statusIconMappingJson?: string;
   statusPropertyJson: string;
   titlePropertyJson: string;
   workDayCountPropertyJson: string;
@@ -188,6 +191,13 @@ export async function ensureNotionSchema() {
     }
     if (!(await hasColumn("UserNotionConnection", "ajamLastUpdatePropertyJson"))) {
       await prisma.$executeRawUnsafe(`ALTER TABLE "UserNotionConnection" ADD COLUMN "ajamLastUpdatePropertyJson" TEXT NOT NULL DEFAULT ''`);
+    }
+    if (!(await hasColumn("UserNotionConnection", "statusIconMappingJson"))) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "UserNotionConnection" ADD COLUMN "statusIconMappingJson" TEXT NOT NULL DEFAULT ''`).catch((error: unknown) => {
+        if (!String(error).includes("duplicate column")) {
+          throw error;
+        }
+      });
     }
 
     await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "NotionCardCache" (
@@ -299,7 +309,7 @@ export async function getUserNotionConnection(userId: string): Promise<UserNotio
   const rows = await prisma.$queryRawUnsafe<ConnectionRow[]>(
     `SELECT "authType", "notionApiVersion", "accessTokenEncrypted", "sourceInput", "databaseId", "dataSourceId", "dataSourceName",
             "titlePropertyJson", "statusPropertyJson", "categoryPropertyJson", "startDatePropertyJson", "endDatePropertyJson",
-            "workHoursPropertyJson", "workDayCountPropertyJson", "availableHoursPropertyJson", "lastWorkedDatePropertyJson", "ajamLastUpdatePropertyJson", "dateMappingMode", "doneStatusValuesJson", "analysisConfigVersion",
+            "workHoursPropertyJson", "workDayCountPropertyJson", "availableHoursPropertyJson", "lastWorkedDatePropertyJson", "ajamLastUpdatePropertyJson", "dateMappingMode", "doneStatusValuesJson", "statusIconMappingJson", "analysisConfigVersion",
             strftime('%Y-%m-%dT%H:%M:%fZ', "lastSyncedAt") AS "lastSyncedAt", "lastSyncError"
      FROM "UserNotionConnection"
      WHERE "userId" = ?
@@ -507,7 +517,12 @@ async function upsertNotionCardCacheRecord(params: {
        "lastSeenAt" = CURRENT_TIMESTAMP,
        "analysisConfigVersionUsed" = excluded."analysisConfigVersionUsed",
        "syncedAt" = CURRENT_TIMESTAMP,
-       "updatedAt" = CURRENT_TIMESTAMP`,
+       "updatedAt" = CURRENT_TIMESTAMP
+     WHERE (
+       excluded."lastEditedTime" IS NOT NULL
+       AND excluded."lastEditedTime" != ''
+       AND ("NotionCardCache"."lastEditedTime" IS NULL OR "NotionCardCache"."lastEditedTime" = '' OR excluded."lastEditedTime" >= "NotionCardCache"."lastEditedTime")
+     ) OR ("NotionCardCache"."lastEditedTime" IS NULL OR "NotionCardCache"."lastEditedTime" = '')`,
     randomUUID(),
     params.userId,
     params.card.notionPageId,
@@ -1049,6 +1064,7 @@ function mapConnection(row: ConnectionRow): UserNotionConnection {
     notionApiVersion: row.notionApiVersion || "2026-03-11",
     sourceInput: row.sourceInput,
     startDateProperty: parseJson<NotionPropertyDescriptor | null>(row.startDatePropertyJson, null),
+    statusIconSettings: parseStatusIconSettings(row.statusIconMappingJson),
     statusProperty: parseJson<NotionPropertyDescriptor | null>(row.statusPropertyJson, null),
     titleProperty: parseJson<NotionPropertyDescriptor | null>(row.titlePropertyJson, null),
     workDayCountProperty: parseJson<NotionPropertyDescriptor | null>(row.workDayCountPropertyJson, null),

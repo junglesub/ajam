@@ -11,17 +11,36 @@ export type NotionPagePropertyPatch =
       } | null;
     };
 
+export type NotionPageIconPatch = {
+  emoji: string;
+  type: "emoji";
+};
+
+export type NotionPagePatchResult = {
+  archived?: boolean;
+  icon?: { emoji?: string; type: string } | null;
+  id: string;
+  last_edited_time?: string;
+  parent?: { data_source_id?: string; id?: string; type?: string };
+  properties?: Record<string, unknown>;
+  url?: string;
+};
+
 export async function updateNotionPageProperties(params: {
   ajamLastUpdatePropertyKey?: string;
-  pageId: string;
-  properties: Record<string, NotionPagePropertyPatch>;
-  token: string;
   context?: NotionLogContext;
-}) {
+  icon?: NotionPageIconPatch | null;
+  logSeverity?: "error" | "warn" | "none";
+  onAttempt?: () => void;
+  pageId: string;
+  properties?: Record<string, NotionPagePropertyPatch>;
+  token: string;
+}): Promise<NotionPagePatchResult> {
   const requestedAt = new Date().toISOString();
+  const hasProperties = Boolean(params.properties && Object.keys(params.properties).length > 0);
   const properties = {
-    ...params.properties,
-    ...(params.ajamLastUpdatePropertyKey
+    ...(params.properties ?? {}),
+    ...(params.ajamLastUpdatePropertyKey && (hasProperties || params.icon)
       ? {
           [params.ajamLastUpdatePropertyKey]: {
             date: {
@@ -31,10 +50,27 @@ export async function updateNotionPageProperties(params: {
         }
       : {})
   };
-  await requestNotionApi({
-    method: "PATCH", path: `/v1/pages/${encodeURIComponent(params.pageId)}`,
-    body: { properties }, token: params.token, context: params.context, errorMessage: mapNotionStatus
+
+  const body: Record<string, unknown> = {};
+  if (Object.keys(properties).length > 0) {
+    body.properties = properties;
+  }
+  if (params.icon !== undefined) {
+    body.icon = params.icon;
+  }
+
+  const response = await requestNotionApi({
+    body,
+    context: params.context,
+    errorMessage: mapNotionStatus,
+    logSeverity: params.logSeverity,
+    method: "PATCH",
+    onAttempt: params.onAttempt,
+    path: `/v1/pages/${encodeURIComponent(params.pageId)}`,
+    token: params.token
   });
+
+  return (await response.json()) as NotionPagePatchResult;
 }
 
 function mapNotionStatus(status: number): string {

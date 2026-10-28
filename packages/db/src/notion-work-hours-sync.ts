@@ -6,7 +6,7 @@ import {
   toBrowserDateKey
 } from "@timesheet/domain";
 
-import { updateNotionPageProperties, type NotionPagePropertyPatch } from "./notion-page-update";
+import { updateNotionPageProperties, type NotionPageIconPatch, type NotionPagePropertyPatch } from "./notion-page-update";
 import { getNotionPropertyKey, isMappedNotionPropertyType } from "./notion-property";
 import {
   countLinkedNotionWorkDaysByPage,
@@ -36,6 +36,7 @@ type NotionWorkHoursSkipReason = NonNullable<NotionWorkHoursSyncResult["skippedR
 
 export async function syncNotionWorkHoursForPages(params: {
   context?: NotionLogContext;
+  icon?: NotionPageIconPatch | null;
   includeLastWorkedDate?: boolean;
   notionPageIds: string[];
   userId: string;
@@ -101,11 +102,11 @@ export async function syncNotionWorkHoursForPages(params: {
         : property.descriptor.type === "number";
     });
 
-    if (properties.length === 0) {
+    if (properties.length === 0 && !params.icon) {
       return skip("missing_number_properties");
     }
 
-    if (validProperties.length === 0) {
+    if (validProperties.length === 0 && !params.icon) {
       return skip("invalid_number_properties");
     }
 
@@ -170,8 +171,9 @@ export async function syncNotionWorkHoursForPages(params: {
 
       try {
         await updateNotionPageProperties({
+          ajamLastUpdatePropertyKey: validProperties.length > 0 ? ajamLastUpdatePropertyKey : undefined,
           context: log.context,
-          ajamLastUpdatePropertyKey,
+          icon: params.icon,
           pageId,
           properties: pageProperties,
           token

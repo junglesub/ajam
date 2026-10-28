@@ -1,5 +1,6 @@
 "use server";
 
+import { after } from "next/server";
 import { logHolidayFallback } from "@timesheet/db/logging";
 
 import {
@@ -13,6 +14,11 @@ import {
   createNotionLog,
   notionErrorMessage,
   getManagedUser,
+  getNotionStatusIconSettings,
+  saveNotionStatusIconSettings,
+  startNotionIconBulk,
+  getLatestNotionIconBulkJob,
+  runNotionIconBulkJob,
   getOrCreateNotionWebhookSettings,
   getLatestLinkedNotionWorkDateByPage,
   getUserNotionAccessToken,
@@ -31,6 +37,9 @@ import {
   syncNotionWorkHoursForPages,
   upsertUserNotionConnection,
   type NotionCardCacheRecord,
+  type NotionIconBulkJobStatus,
+  type NotionSelectOption,
+  type NotionStatusIconSettings,
   type UserNotionWeeklyDefaultCard,
   type UserNotionConnection
 } from "@timesheet/db";
@@ -416,4 +425,106 @@ export async function buildNotionMonthlyAnalysisAction(month: string): Promise<N
       }))
     })
   };
+}
+
+export async function getNotionStatusIconSettingsAction(): Promise<{
+  connection: UserNotionConnection | null;
+  hasWebhook: boolean;
+  latestJob: NotionIconBulkJobStatus | null;
+  options: NotionSelectOption[];
+  schemaError?: string;
+  settings: NotionStatusIconSettings | null;
+  statusPropertyName: string;
+}> {
+  const user = await requireSession();
+  const [connection, settings, latestJob, webhook] = await Promise.all([
+    getUserNotionConnection(user.id),
+    getNotionStatusIconSettings(user.id),
+    getLatestNotionIconBulkJob(user.id),
+    getOrCreateNotionWebhookSettings(user.id).catch(() => null)
+  ]);
+
+  let options: NotionSelectOption[] = [];
+  let statusPropertyName = "";
+  let schemaError: string | undefined;
+  const hasWebhook = Boolean(webhook && webhook.status === "active");
+
+  if (connection?.dataSourceId && connection?.statusProperty) {
+    statusPropertyName = connection.statusProperty.name || connection.statusProperty.id;
+    const token = await getUserNotionAccessToken(user.id);
+    if (token) {
+      try {
+        const schema = await retrieveNotionDataSourceSchema({
+          dataSourceId: connection.dataSourceId,
+          token
+        });
+        const statusProp = Object.values(schema.properties).find((p) => p.id === connection.statusProperty?.id);
+        if (statusProp && (statusProp.type === "status" || statusProp.type === "select") && statusProp.options) {
+          options = statusProp.options;
+          statusPropertyName = statusProp.name || connection.statusProperty.name || connection.statusProperty.id;
+        } else {
+          schemaError = "설정된 상태 속성을 Notion 데이터 소스에서 찾을 수 없거나 옵션이 없습니다.";
+        }
+      } catch {
+        schemaError = "Notion 스키마 정보를 불러오지 못했습니다. 연결 설정 또는 권한을 확인해 주세요.";
+      }
+    } else {
+      schemaError = "Notion API 토큰이 설정되어 있지 않습니다.";
+    }
+  }
+
+  return {
+    connection,
+    hasWebhook,
+    latestJob,
+    options,
+    schemaError,
+    settings,
+    statusPropertyName
+  };
+}
+
+export async function saveNotionStatusIconSettingsAction(
+  settings: NotionStatusIconSettings
+): Promise<NotionStatusIconSettings> {
+  const user = await requireSession();
+  return logNotionSettingAction("icon_settings_saved", user.id, async () => {
+    const connection = await getUserNotionConnection(user.id);
+    if (!connection || !connection.hasToken || !connection.dataSourceId || !connection.statusProperty?.id) {
+      throw new Error("Notion 연결 또는 상태 속성이 설정되어 있지 않습니다.");
+    }
+    const token = await getUserNotionAccessToken(user.id);
+    if (!token) {
+      throw new Error("Notion 액세스 토큰을 찾을 수 없습니다.");
+    }
+    const schema = await retrieveNotionDataSourceSchema({
+      dataSourceId: connection.dataSourceId,
+      token
+    });
+    const statusProp = Object.values(schema.properties).find((p) => p.id === connection.statusProperty?.id);
+    if (!statusProp || !statusProp.options) {
+      throw new Error("상태 속성 옵션을 찾을 수 없습니다.");
+    }
+    const allowedOptionIds = statusProp.options.map((o) => o.id);
+    return saveNotionStatusIconSettings({ allowedOptionIds, settings, userId: user.id });
+  });
+}
+
+export async function startNotionIconBulkAction(): Promise<NotionIconBulkJobStatus> {
+  const user = await requireSession();
+  const result = await startNotionIconBulk(user.id);
+  if (result.startedNew) {
+    after(async () => {
+      await runNotionIconBulkJob({
+        jobId: result.job.id,
+        userId: user.id
+      });
+    });
+  }
+  return result.job;
+}
+
+export async function getNotionIconBulkStatusAction(): Promise<NotionIconBulkJobStatus | null> {
+  const user = await requireSession();
+  return getLatestNotionIconBulkJob(user.id);
 }

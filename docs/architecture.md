@@ -55,11 +55,12 @@
 - `AppSetting`: 공공데이터포털 서비스 키 같은 앱 설정값을 저장한다.
 - `UserAiSetting`: 사용자별 Gemini API key, 모델, 자동 정리 여부, 실행 방식, 참고할 이전 저장 WORK 날짜 수, 과거 미작성 AI 필드 보정 설정을 저장한다. API key는 앱 secret으로 암호화해 저장한다.
 - `TimesheetDay.aiRewriteRequested`: n8n 예약 AI 정리가 해당 날짜의 기존 영문 번역본과 짧은 버전을 한 번 다시 작성해도 되는지 저장한다. 이 값은 전역 설정이 아니라 `AI도 업데이트`를 선택한 날짜에만 켜진다.
-- `UserNotionConnection`: 사용자별 Notion token, data source, 읽기/쓰기 필드 매핑, 완료 상태 값, 분석 설정 버전을 저장한다. 쓰기 필드에는 업무 기간 시간, 작업일수, 가용 시간, 마지막 작업일, aJam 업데이트 시간이 포함될 수 있다. token은 앱 secret으로 암호화한다.
+- `UserNotionConnection`: 사용자별 Notion token, data source, 읽기/쓰기 필드 매핑, 완료 상태 값, 분석 설정 버전을 저장한다. 쓰기 필드에는 업무 기간 시간, 작업일수, 가용 시간, 마지막 작업일, aJam 업데이트 시간이 포함될 수 있다. 상태/선택 속성별 이모지 매핑은 `statusIconMappingJson`에 저장한다. token은 앱 secret으로 암호화한다.
 - `UserNotionWeeklyDefaultCard`: 사용자별 요일 자동 Notion 카드 규칙을 저장한다. 새 업무 draft에서 요일 기본 카드가 먼저 고정 시간으로 들어가고, 이전 날짜 추천 카드는 남은 시간을 자동 배분받는다.
 - `NotionCardCache`: Notion 카드 snapshot을 저장한다. 전체 복제본이 아니라 후보 표시와 월별 분석에 필요한 cache이다.
 - `WorkEntryNotionCard`: 저장된 `WORK` entry와 Notion 카드의 매핑 및 배분 시간을 저장한다.
 - `NotionSyncRun`: 날짜/월/schema 같은 scope별 동기화 결과, 실패 메시지, partial 여부를 저장한다.
+- `NotionIconBulkJob`: 일괄 아이콘 동기화 작업 1회당 1행을 저장한다. `serverInstanceId`, 진행도, 발견/처리/갱신/실패/요청 수, `status`(`running`, `completed`, `partial`, `failed`, `interrupted`), 설정 fingerprint를 추적하며 단일 프로세스 `after()` 백그라운드로 실행된다.
 - `UserNotionWebhook`: 사용자별 Connection Webhook 공개 ID, 암호화된 verification token, 상태와 최근 오류를 저장한다. `NotionWebhookEvent`는 재전송 event ID를 중복 처리하지 않게 한다.
 - verification token은 일반 설정 조회에 포함하지 않고 존재 여부만 반환한다. 인증된 사용자가 `보기`를 요청할 때만 별도 action에서 복호화한다. Webhook event는 처리 전에 `processing`으로 원자적 claim하고 성공 시 `complete`, 실패 시 claim을 제거해 재시도를 허용한다.
 - `ReminderLog`: 사용자별 날짜와 리마인더 유형의 발송 기록을 저장해 n8n 재시도나 중복 실행 시 같은 리마인더가 반복 발송되지 않게 한다.
@@ -68,7 +69,7 @@
 
 - Notion 서버 로그는 콘솔에 JSON 한 줄로 출력한다. Docker에서는 `docker compose logs -f --tail=200 ajam` 또는 `docker logs -f --tail=200 ajam`으로 확인한다. 별도 환경변수 없이 성공/시작은 info, 생략/부분 동기화/요청 거절은 info 또는 warn, 실패는 error로 기록한다.
 - 공통 필드는 `timestamp`, `level`, `component: "notion"`, `operation`, `result`, `operationId`, `durationMs`이다. 가능한 경로에는 `source`, `userId`, `dateKey`, `pageId`, `connectionId`, `eventId`를 추가한다. 같은 작업의 API 호출과 하위 동기화는 `operationId`를 공유하며 각 operation의 소요 시간은 독립 측정한다.
-- `source`는 `card_picker`, `timesheet_save`, `webhook`, `maintenance`, `notion_cards`, `manual_field_update`, `connection_settings`로 호출 계기를 구분한다.
+- `source`는 `card_picker`, `timesheet_save`, `webhook`, `maintenance`, `notion_cards`, `notion_icon_bulk`, `manual_field_update`, `connection_settings`로 호출 계기를 구분한다.
 - 팝업 후보 조회는 캐시 사용, 동기화 시작/완료/실패, 실패 후 캐시 fallback과 카드 수/마지막 성공 시각을 기록한다. 저장 후 필드 업데이트는 페이지별 성공/실패, 필드 종류, 업데이트/실패 수, 연결·토큰·매핑 부족으로 생략한 이유를 기록한다.
 - 날짜별 동기화는 조회 카드 수, API 요청 횟수, data source와 부분 결과 여부를 기록한다. 최대 20회 조회 상한에 도달한 부분 동기화는 warn으로 남긴다. 단일 카드 동기화도 시작/완료/실패를 기록한다.
 - Webhook은 수신과 최종 HTTP 상태, verification 완료, 중복/처리 중 충돌, 카드 삭제 처리, 처리 실패를 기록한다. 무시 사유는 지원하지 않는 이벤트, 연결 없음, 다른 data source, 입력 필드 변경 없음으로 나눈다. 서명 검증 등 이벤트 처리 이전의 오류도 route에서 기록한다.

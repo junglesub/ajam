@@ -1,5 +1,13 @@
 # Decisions
 
+## 2026-10-28 — Notion 상태별 아이콘 설정 및 백그라운드 동기화
+
+- Notion 상태/선택 속성별 이모지 아이콘 매핑을 `UserNotionConnection.statusIconMappingJson`에 저장하고, Webhook 단일 페이지 처리 시 기존 GET 결과와 결합해 속성과 아이콘을 1회 PATCH로 갱신한다. 숫자 집계 매핑이 없어도 아이콘 전용 갱신을 허용한다.
+- 기존 페이지 일괄 아이콘 동기화는 Next.js `after()`를 통해 단일 Node 프로세스 백그라운드로 실행하며, 별도 큐 서비스나 per-page item 테이블 없이 `NotionIconBulkJob` 테이블의 단일 작업 행으로 상태(진행도, 카운트, fingerprint, serverInstanceId)를 관리한다.
+- 서버 재시작 시 이전 프로세스의 running 작업은 `serverInstanceId` 불일치로 감지되어 `interrupted`로 표시되며 팝업에서 수동 재실행할 수 있다.
+- 동시 Webhook 및 일괄 쓰기 간 경합은 메모리 내 동일 페이지 잠금(`withPageLock`)과 `NotionCardCache.lastEditedTime` 비교로 오래된 덮어쓰기를 방지하고, stale bulk 감지 시 exception GET으로 최신 상태를 확인한 뒤 보정한다.
+- 아이콘 동기화 로그는 `component: "notion"`, `operation: "icon_bulk_sync"`로 통합 관리하며, 정상 장기 실행 bulk는 info, 진행률은 최대 5초에 1회 throttle하여 기록한다.
+
 ## 2026-10-28 — 로컬 커밋 이력 정리
 
 - 원격 조회로 확인한 `origin/main` (`be48b6e`) 이후 로컬 main의 추가 커밋 20개를 작업별 2개로 묶는다. 원격에 이미 올라간 이력과 다른 브랜치는 재작성하지 않는다.

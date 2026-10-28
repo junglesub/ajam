@@ -5,14 +5,18 @@ import { NotionCardWorkspace } from "@/components/notion-cards/notion-card-works
 import {
   buildNotionMonthlyAnalysisAction,
   getNotionConnectionAction,
+  getNotionIconBulkStatusAction,
+  getNotionStatusIconSettingsAction,
   getNotionWebhookSettingsAction,
+  listNotionCardsForMonthAction,
   listNotionWeeklyDefaultsAction,
   resetNotionWebhookSettingsAction,
   revealNotionWebhookVerificationTokenAction,
-  saveNotionWebhookVerificationTokenAction,
-  listNotionCardsForMonthAction,
   saveNotionConnectionAction,
+  saveNotionStatusIconSettingsAction,
+  saveNotionWebhookVerificationTokenAction,
   saveNotionWeeklyDefaultsAction,
+  startNotionIconBulkAction,
   syncNotionCardFieldsAction,
   syncNotionDateCandidatesAction,
   testNotionDataSourceAction
@@ -32,17 +36,21 @@ export default async function NotionCardsPage() {
 
   return (
     <NotionCardWorkspace
+      buildMonthlyAnalysisAction={buildNotionMonthlyAnalysisAction}
+      getIconBulkStatusAction={getNotionIconBulkStatusAction}
+      getStatusIconSettingsAction={getNotionStatusIconSettingsAction}
       initialConnection={connection}
       initialMonth={month}
       initialWeeklyDefaults={weeklyDefaults}
-      buildMonthlyAnalysisAction={buildNotionMonthlyAnalysisAction}
       listCardsForMonthAction={listNotionCardsForMonthAction}
       loadWebhookSettingsAction={getNotionWebhookSettingsAction}
       resetWebhookSettingsAction={resetNotionWebhookSettingsAction}
       revealWebhookVerificationTokenAction={revealNotionWebhookVerificationTokenAction}
-      saveWebhookVerificationTokenAction={saveNotionWebhookVerificationTokenAction}
       saveConnectionAction={saveNotionConnectionAction}
+      saveStatusIconSettingsAction={saveNotionStatusIconSettingsAction}
+      saveWebhookVerificationTokenAction={saveNotionWebhookVerificationTokenAction}
       saveWeeklyDefaultsAction={saveNotionWeeklyDefaultsAction}
+      startIconBulkAction={startNotionIconBulkAction}
       syncCardFieldsAction={syncNotionCardFieldsAction}
       syncDateCandidatesAction={syncNotionDateCandidatesAction}
       testDataSourceAction={testNotionDataSourceAction}

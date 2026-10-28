@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { CalendarClock, CalendarDays, Database, RefreshCw, Rows3 } from "lucide-react";
+import { CalendarClock, CalendarDays, Database, RefreshCw, Rows3, Smile } from "lucide-react";
 
 import type { UserNotionConnection } from "@timesheet/db";
 import { Button, Input } from "@timesheet/ui";
@@ -13,6 +13,7 @@ import { NotionCategorySummary } from "./notion-category-summary";
 import { NotionConnectionModal } from "./notion-connection-modal";
 import { NotionDurationTotals } from "./notion-duration-totals";
 import { NotionFieldUpdateModal } from "./notion-field-update-modal";
+import { NotionStatusIconsModal } from "./notion-status-icons-modal";
 import { NotionWeeklyDefaultsModal } from "./notion-weekly-defaults-modal";
 import type { NotionCardWorkspaceProps, NotionFieldUpdatePrompt } from "./types";
 import { useNotionCardMonth } from "./use-notion-card-month";
@@ -25,6 +26,8 @@ function todayKey(): string {
 
 export function NotionCardWorkspace({
   buildMonthlyAnalysisAction,
+  getIconBulkStatusAction,
+  getStatusIconSettingsAction,
   initialConnection,
   initialMonth,
   initialWeeklyDefaults,
@@ -34,7 +37,9 @@ export function NotionCardWorkspace({
   revealWebhookVerificationTokenAction,
   saveWebhookVerificationTokenAction,
   saveConnectionAction,
+  saveStatusIconSettingsAction,
   saveWeeklyDefaultsAction,
+  startIconBulkAction,
   syncCardFieldsAction,
   syncDateCandidatesAction,
   testDataSourceAction
@@ -43,6 +48,7 @@ export function NotionCardWorkspace({
   const [weeklyDefaults, setWeeklyDefaults] = useState(initialWeeklyDefaults);
   const [isConnectionOpen, setIsConnectionOpen] = useState(false);
   const [isWeeklyDefaultsOpen, setIsWeeklyDefaultsOpen] = useState(false);
+  const [isStatusIconsOpen, setIsStatusIconsOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [syncDateKey, setSyncDateKey] = useState(todayKey());
   const [syncError, setSyncError] = useState("");
@@ -52,7 +58,7 @@ export function NotionCardWorkspace({
   const [isFieldUpdatePending, startFieldUpdateTransition] = useTransition();
   const monthState = useNotionCardMonth({ buildMonthlyAnalysisAction, initialMonth, listCardsForMonthAction });
   const isRefreshLoading = useViewRefreshLoading("notion-cards");
-  const shortcutModalOpen = Boolean(isConnectionOpen || isWeeklyDefaultsOpen || fieldUpdatePrompt);
+  const shortcutModalOpen = Boolean(isConnectionOpen || isWeeklyDefaultsOpen || fieldUpdatePrompt || isStatusIconsOpen);
 
   useEffect(() => {
     function handleCalendarShortcut(event: KeyboardEvent) {
@@ -158,6 +164,10 @@ export function NotionCardWorkspace({
               <CalendarClock aria-hidden="true" className="size-4" />
               요일별 자동 카드
             </Button>
+            <Button onClick={() => setIsStatusIconsOpen(true)} type="button" variant="secondary">
+              <Smile aria-hidden="true" className="size-4" />
+              상태별 아이콘
+            </Button>
             <label className="flex items-center gap-2 text-sm font-bold text-slate-600">
               <CalendarDays aria-hidden="true" className="size-4" />
               <Input className="h-9 w-[150px]" onChange={(event) => monthState.setMonth(event.target.value)} type="month" value={monthState.month} />
@@ -212,6 +222,16 @@ export function NotionCardWorkspace({
         onMessage={setMessage}
         open={isWeeklyDefaultsOpen}
         saveWeeklyDefaultsAction={saveWeeklyDefaultsAction}
+      />
+      <NotionStatusIconsModal
+        connection={connection}
+        getIconBulkStatusAction={getIconBulkStatusAction}
+        getStatusIconSettingsAction={getStatusIconSettingsAction}
+        onClose={() => setIsStatusIconsOpen(false)}
+        onMessage={setMessage}
+        open={isStatusIconsOpen}
+        saveStatusIconSettingsAction={saveStatusIconSettingsAction}
+        startIconBulkAction={startIconBulkAction}
       />
       <NotionFieldUpdateModal
         error={fieldUpdateError}
