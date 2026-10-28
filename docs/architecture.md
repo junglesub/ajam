@@ -18,6 +18,10 @@
 - `use-timesheet-settings.ts`, `use-timesheet-month-loader.ts`, `use-timesheet-recommendations.ts`는 각각 설정 폼과 저장, 월 로딩 상태, 프로젝트/Notion 추천 요청을 맡는다. 서버 action을 호출하는 추천은 effect 또는 명시적인 사용자 이벤트에서 시작하며 React state updater 안에서 시작하지 않는다.
 - `timesheet-date-utils.ts`, `timesheet-draft-utils.ts`, `timesheet-entry-display.ts`, `timesheet-row-display.tsx`, `timesheet-notion-recommendation.ts`는 날짜·draft 변환·표시·카드 추천 계산을 모은다. `timesheet-ui-primitives.tsx`는 이 화면 내에서 함께 쓰는 표시 요소와 modal shell을 제공한다.
 - `lib/timesheet-drafts.ts`는 업무 기록과 연말 정리 날짜 편집에서 재사용하는 client ID·미래 휴가 draft·기간 편집 초기값 helper의 공통 소유자다. 휴가 draft의 도메인 기본값은 `@timesheet/domain`의 `createVacationDay`를 사용한다. 화면별 파일에서 이전 helper를 복제하지 않는다.
+- `timesheet-vacation-utils.ts`는 휴가 entry의 시작/끝 경계, 양방향 연속 날짜 탐색과 연결 저장 entry 변환을 계산한다. domain `isMatchingVacationEntry`를 재사용하되 연간 휴가의 vacation-only 탐색과 업무 기록의 mixed-day 경계 의미는 구분한다. workspace는 저장본/추가 조회본 우선순위, 비동기 조회와 저장을 맡는다.
+- workspace의 `applySavedDays`는 정규화한 저장 결과를 draft·저장 snapshot·저장 날짜 집합에 공통 반영한다. 일반 저장의 이전 선택 위치, 범위 저장의 첫 entry, 연결 저장의 첫 휴가 entry 선택, AI 결과의 선택 유지와 각 호출자의 알림·AI 대기열·부분 저장 성공 처리는 호출자가 맡는다.
+- `lib/timesheet-notion-editing.ts`는 카드 추가/제거·수동 시간·자동 배분 초기화·배분 실패 fallback 변환을 공유한다. 업무 기록은 후보 metadata 보강과 엄격한 reset allocator 호출을 유지하고, 연말 정리 편집기는 자체 identity·중복 제거와 fallback을 유지한다.
+- `use-timesheet-ai.ts`는 AI 재정리 대기열과 확인 팝업, 실행 상태 및 open/close/resolve/cleanup 명령을 맡는다. 같은 모듈의 순수 조건/대기열/덮어쓰기 patch와 비동기 cleanup 함수는 직접 테스트한다. 설정 값을 복제하지 않고 명령 호출 시 현재 설정을 받으며, 선택된 draft 수정은 workspace의 domain command로 수행한다. 일반 저장·AI 예약 시점·날짜 이동은 workspace에 남긴다.
 - 분리 전후 저장 action·DB schema·라우트 계약은 유지한다. 차감 제외 휴가의 저장 flag와 공가 표시, 추천 중복 요청 방지 등 최신 동작은 분리된 UI와 hook에서도 보존한다.
 
 ## Authentication And Users

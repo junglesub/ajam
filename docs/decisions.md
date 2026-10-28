@@ -1,5 +1,13 @@
 # Decisions
 
+## 2026-10-28 — 로컬 커밋 이력 정리
+
+- 원격 조회로 확인한 `origin/main` (`be48b6e`) 이후 로컬 main의 추가 커밋 20개를 작업별 2개로 묶는다. 원격에 이미 올라간 이력과 다른 브랜치는 재작성하지 않는다.
+- 첫 묶음은 기존 refactor의 16개 추출 커밋과 main 호환성 통합·완료 문서를 합친다. 기존 `a4a0b36`의 전체 트리를 보존하며 커밋 제목은 `refactor(web): split timesheet workspace by responsibility`다.
+- 두 번째 묶음은 휴가 계산·저장 결과 반영·공통 Notion 편집·AI 흐름과 관련 테스트·문서다. 기존 `b43b54b`의 최종 제품 트리를 보존하며 제목은 `refactor(web): extract timesheet editing and AI workflows`다. 이 정리 기록도 두 번째 커밋에 포함한다.
+- 정리 전 main `b43b54b`와 전체 원래 이력은 로컬 `backup/main-before-history-cleanup-20261028` 브랜치에 보존한다. 아래 문서와 계획에 등장하는 `5af1216`, `a4a0b36`, `47b86a3`, `b43b54b`는 정리 전 실행 시점의 식별자이며 복구 브랜치에서 조회할 수 있다.
+- 제품 코드·테스트·설정은 바꾸지 않고 원래 트리와 비교해 동일성을 확인한다. 기존 179개 테스트와 정적 검사 결과는 해당 제품 트리에 대한 기록으로 유지하며 이력 정리만을 위해 재실행하지 않는다. 새 테스트·build·브라우저 자동화·원격 push는 수행하지 않는다.
+
 ## 2026-10-28 — refactor 브랜치 활용 검토와 통합
 
 - 비교 기준은 로컬 `main` (`be48b6e`)과 `refactor` (`b90b54a`)이며 공통 조상은 `dccd873`이다. 로컬의 `origin/main`, `origin/refactor`도 각각 같은 커밋을 가리킨다. 이번 검토에서 원격 fetch는 하지 않았다.
@@ -31,6 +39,27 @@
 - 제품 build·브라우저 자동화는 실행하지 않았다. 실제 화면과 비동기 추천·편집 상호작용의 최종 확인은 사용자 담당이며, 이번에는 코드 검토와 정적 검사 및 자동 회귀 테스트로 검증했다.
 - 원격 브랜치는 `git ls-remote`로 조회해 최초 비교와 같은 커밋임을 확인했다. 원격 push·브랜치 삭제는 수행하지 않으며 로컬 main 통합 및 로컬 refactor 정리만 수행한다. 기존 refactor 작업 폴더의 파일은 삭제하지 않는다.
 - 독립 검토는 spec compliance pass, code quality approve, severity finding 0건으로 완료했다. 검증한 트리와 동일한 병합 커밋 `5af1216`을 로컬 main에 fast-forward 반영했고 로컬 `refactor`와 임시 통합 브랜치를 삭제했다. 기존 `C:/Users/RyooJungsub/orca/workspaces/ajam/refactor` 폴더는 원래 커밋 `b90b54a`의 detached HEAD로 남겨 파일과 로컬 환경을 보존했다. 원격 main/refactor는 그대로다.
+
+### 추가 리팩터링 검토와 실행
+
+- 초기 통합은 UI와 일부 상태 책임 분리를 마친 단계였다. 당시 workspace 3,062줄을 임의의 길이로 더 줄이기보다 다음 순서로 계산과 중복을 정리하도록 제안했고, 이후 사용자가 AI 흐름까지 포함한 후보 전부의 구현을 승인했다. 후보 목록 자체는 결함 판정이 아니다.
+- 우선순위 1: 휴가 entry 매칭·날짜 경계·연속 날짜 탐색·저장할 entry 변환을 React state에서 독립된 순수 계산으로 분리한다. `packages/domain/src/vacation-year.ts`의 기존 매칭·경계·연결 helper와 겹치는 부분부터 재사용 가능성을 확인한다. 업무 기록과 연간 휴가 화면의 연결 기준, 선택 entry, 차감 구분에 차이가 있으므로 기존 동작을 테스트로 고정한 뒤 공통 부분만 옮긴다. 비동기 월 조회와 저장 orchestration은 별도 문제로 남긴다.
+- 우선순위 2: `saveVacationDays`, `saveConnectedVacationDaysPreservingHours`, `saveSelectedDraft`, `mergeSavedDays` 등에 반복된 records/savedRecords/savedEntryDateKeys 반영을 작은 공통 경로로 모은다. 각 호출자의 선택 entry 유지, 휴가 entry 우선 선택, 부분 저장 성공, AI 대기열 갱신은 서로 달라 명시적으로 보존해야 한다. 모든 저장을 옵션 많은 범용 엔진으로 합치지 않는다.
+- 우선순위 3: 업무 시간·카드 연결·수동 배분 변경 시 반복되는 Notion 배분 변환을 기존 `allocateNotionCardHours` 위의 작은 순수 helper로 정리한다. 연말 정리 `timesheet-day-edit-modal.tsx`에도 동일 allocator의 예외 fallback과 유사한 편집 코드가 있다. 각 화면의 카드 metadata·중복 제거·entry 식별 기준은 다르므로 UI 전체를 합치지 않고 실제 같은 변환만 공유한다.
+- AI 재정리 대기열·덮어쓰기 확인·실행 상태는 그다음 분리 후보지만 일반 저장과 결합되어 있어 현재 우선순위는 낮다. hook을 추가한다면 기존 검증의 공백인 지연 응답·사용자 수동 수정·빠른 월 이동·Strict Mode effect 재실행 동작부터 검증한다.
+- 캘린더·리스트·모달을 더 잘게 나누거나, 공통 context/store·범용 CRUD·setter를 다수 받는 대형 hook을 추가할 필요는 현재 확인하지 못했다. 이번 후속 검토는 소스와 기존 문서만 읽었으며 제품 코드·테스트·build는 변경/실행하지 않았다.
+
+### 추가 리팩터링 구현 결과
+
+- 휴가 계산은 `timesheet-vacation-utils.ts`로 분리하고 기존 domain matcher를 재사용했다. 연결된 휴가의 방향별 경계·조회본 우선순위·이름/상태 조건과 시간/차감 flag 보존은 그대로다.
+- workspace의 `applySavedDays`로 records/savedRecords/savedEntryDateKeys 반영을 모았다. 선택 entry 정책·후보/AI 대기열·알림은 호출자가 유지하며 날짜별 성공을 즉시 반영해 부분 실패 시 앞선 저장을 보존한다.
+- 두 편집기의 공통 Notion 변환을 `lib/timesheet-notion-editing.ts`로 모았다. 업무 기록의 후보 metadata 보강/엄격한 배분 reset과 연말 정리의 중복 제거/fallback은 각각 유지한다.
+- `use-timesheet-ai.ts`가 AI 대기열·팝업·덮어쓰기 결정·실행 상태/명령을 맡는다. 현재 설정은 명령 시 전달하며 선택된 draft 수정과 일반 저장은 workspace에 남겼다. 서버 응답과 저장 결과 적용, broadcast의 기존 예외 처리 범위를 유지했다.
+- workspace는 3,062줄에서 2,773줄로 줄었다. 전체 제품 변경은 8개 파일(테스트 포함)에 한정하고 DB schema·server action·dependency는 변경하지 않았다. Astra/my-orch 대신 Codex 구현 및 독립 검토 에이전트를 사용했다.
+- 집중 테스트 10개(기존 캘린더 2개와 신규 8개), 기존 웹 helper 21개, 도메인 102개, DB 46개, web/domain/DB 타입 검사와 변경 파일 ESLint가 통과했다. 휴가 양방향/공휴일 경계, Notion 배분/metadata/fallback, AI 대기열/조건/덮어쓰기/지연 응답/서버·결과 적용 실패를 검증했다.
+- 테스트는 추출과 함께 작성했으며 추출 전 동작 테스트의 실패를 확인했다고 주장하지 않는다. mounted React·Strict Mode·응답 대기 중 날짜 이동·선택/부분 저장 상호작용은 직접 실행하지 않았다. build·브라우저 자동화는 실행하지 않았고 실제 UI 확인은 사용자 담당이다. 정확한 실행 명령과 소유자 지도는 workflow/architecture 문서에 남겼다.
+- 독립 검토 결과는 spec PASS, quality APPROVE, severity finding 0건이다. 휴가·저장 결과 반영·Notion 편집·AI 흐름의 호출 경계와 기존 동작을 비교했고, 위 테스트 공백은 제한사항으로 명시했다. 기존 제품 의미나 동시성 정책은 이 리팩터링에서 재설계하지 않았다.
+- 검증된 커밋 `47b86a3`을 로컬 main에 fast-forward 반영하고 임시 `codex/timesheet-logic-refactor` 브랜치를 삭제했다. 반영한 제품 트리는 검증/검토한 트리와 동일하며 원격 push·브랜치 변경은 수행하지 않았다.
 
 ## 2026-08-07
 

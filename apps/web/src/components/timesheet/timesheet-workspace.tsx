@@ -42,8 +42,10 @@ import {
 import { AppLoadingOverlay, AppLoadingScreen } from "@/components/app-loading-screen";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
 import { addBusinessDays, addDays, getBusinessDateKeysInRange, getDateKeyMonthCursor, getDefaultSelectedDateForMonth, getInclusiveDateSpan } from "./timesheet-date-utils";
-import { buildDraftsFromMonthData, buildInitialDrafts, buildSelectedEntryIds, createDraftForDate, createEntryForDate, findPreviousProject, hasExistingAiFields, hasHolidayMarker, hasMissingAiFields, hasWorkContent, hasWorkContentChange, isAutoProjectOnlyDraft, isDefaultFutureVacationDraft, rebalanceDefaultWorkHours, rowFromDraft, sanitizeDayForSave, type TimesheetMonthData } from "./timesheet-draft-utils";
+import { buildDraftsFromMonthData, buildInitialDrafts, buildSelectedEntryIds, createDraftForDate, createEntryForDate, findPreviousProject, hasHolidayMarker, hasWorkContent, isAutoProjectOnlyDraft, isDefaultFutureVacationDraft, rebalanceDefaultWorkHours, rowFromDraft, sanitizeDayForSave, type TimesheetMonthData } from "./timesheet-draft-utils";
 import { allocateDefaultNotionCards, mergeNotionCardSnapshot, type NotionWeeklyDefaultCard } from "./timesheet-notion-recommendation";
+import { findConnectedVacationDates, updateVacationEntryForConnectedSave } from "./timesheet-vacation-utils";
+import { useTimesheetAi, shouldPromptForRewrite, isScheduledOverwrite, isScheduledCleanupPending, type TimesheetAiCleanupResult, type TimesheetAiRewriteRequest, type AiCleanupOptions } from "./use-timesheet-ai";
 import { CalendarView } from "./timesheet-calendar-view";
 import { getNotionAllocationError, listRowKey } from "./timesheet-entry-display";
 import { ListView } from "./timesheet-list-view";
@@ -58,28 +60,13 @@ import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type Notio
 import { useTimesheetSettings, type GeminiApiKeyTestResult, type HolidayApiKeyTestResult, type ManagedUser, type UserAiSetting, type UserAiSettingUpdate, type UserRole } from "./use-timesheet-settings";
 import { getMonthCacheKey, useTimesheetMonthLoader, type VisibleMonthLoadResult } from "./use-timesheet-month-loader";
 import { useTimesheetRecommendations, type DatabaseNotionRecommendationApplication, type LocalNotionRecommendationApplication, type ProjectRecommendationApplication } from "./use-timesheet-recommendations";
+import { allocateEditedCards, resetEditedCardHours, setEditedCardHours, toggleEditedCard } from "@/lib/timesheet-notion-editing";
 import { adjacentListTarget, shouldIgnoreCalendarShortcut } from "@/lib/calendar-shortcuts";
 import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
 
 type ViewMode = "calendar" | "list";
 
 const fullListContentStorageKey = "timesheet:list:show-full-content";
-
-type TimesheetAiCleanupResult = {
-  appliedDateKeys: string[];
-  days: TimesheetDayDraft[];
-  message: string;
-  skipped: boolean;
-};
-
-type TimesheetAiRewriteRequest = {
-  cleanupType: "fill_missing" | "rewrite";
-  dateKey: string;
-  entryCount: number;
-  previewContent: string;
-  rewriteRequested: boolean;
-  shortVersion: string;
-};
 
 type TimesheetDeleteResult = {
   notionSyncError: string;
@@ -90,12 +77,7 @@ type TimesheetSaveResult = {
   notionSyncError: string;
 };
 
-type AiCleanupOptions = {
-  overwriteCurrentDate?: boolean;
-};
-
 type SaveState = "idle" | "saving" | "saved" | "error";
-type AiCleanupState = "idle" | "running" | "done" | "skipped" | "error";
 type DeleteState = "idle" | "deleting" | "error";
 type ProjectAddState = "idle" | "saving" | "error";
 type VacationRangeSaveState = "idle" | "saving" | "error";
@@ -198,27 +180,6 @@ function mergeProjects(current: string[], projects: string[]): string[] {
   return Array.from(next).sort((left, right) => left.localeCompare(right, "ko-KR"));
 }
 
-function toAiRewriteRequest(day: TimesheetDayDraft): TimesheetAiRewriteRequest | null {
-  const rewriteRequested = Boolean(day.aiRewriteRequested);
-  const missingAiFields = hasMissingAiFields(day);
-
-  if ((!rewriteRequested && !missingAiFields) || !hasWorkContent(day)) {
-    return null;
-  }
-
-  const workEntries = day.entries.filter((entry) => entry.kind === "WORK");
-  const previewContent = workEntries.find((entry) => entry.content.trim())?.content.trim() ?? "";
-
-  return {
-    cleanupType: rewriteRequested ? "rewrite" : "fill_missing",
-    dateKey: day.dateKey,
-    entryCount: workEntries.length,
-    previewContent,
-    rewriteRequested,
-    shortVersion: day.shortVersion
-  };
-}
-
 export function TimesheetWorkspace({
   addProjectAction,
   createUserAction,
@@ -280,9 +241,6 @@ export function TimesheetWorkspace({
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState("");
   const [notionSyncError, setNotionSyncError] = useState("");
-  const [aiCleanupState, setAiCleanupState] = useState<AiCleanupState>("idle");
-  const [aiCleanupDateKey, setAiCleanupDateKey] = useState("");
-  const [aiCleanupMessage, setAiCleanupMessage] = useState("");
   const [deleteState, setDeleteState] = useState<DeleteState>("idle");
   const [deleteError, setDeleteError] = useState("");
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
@@ -291,8 +249,6 @@ export function TimesheetWorkspace({
   const [projectAddState, setProjectAddState] = useState<ProjectAddState>("idle");
   const [projectAddError, setProjectAddError] = useState("");
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
-  const [aiRewriteRequests, setAiRewriteRequests] = useState(initialAiRewriteRequests);
-  const [isAiRewriteQueueOpen, setIsAiRewriteQueueOpen] = useState(false);
   const [holidayWarning, setHolidayWarning] = useState(initialMonthData.holidayWarning ?? "");
   const [holidayWarningMonthKeys, setHolidayWarningMonthKeys] = useState(() => {
     const initialMonthKey = getMonthCacheKey(initialYear, initialMonthIndex);
@@ -317,12 +273,12 @@ export function TimesheetWorkspace({
   const [connectedVacationAction, setConnectedVacationAction] = useState<ConnectedVacationAction>("save");
   const [isConnectedVacationSaving, setIsConnectedVacationSaving] = useState(false);
   const [connectedVacationProgress, setConnectedVacationProgress] = useState({ completed: 0, total: 0 });
-  const [aiRewritePromptDateKey, setAiRewritePromptDateKey] = useState("");
-  const [aiOverwriteEditPrompt, setAiOverwriteEditPrompt] = useState<{
-    entryClientId?: string;
-    field: "summary" | "translation";
-    previousValue: string;
-  } | null>(null);
+  const {
+    aiCleanupState, aiCleanupDateKey, aiCleanupMessage, aiRewriteRequests, isAiRewriteQueueOpen,
+    openQueue, closeQueue, aiRewritePromptDateKey, openRewritePrompt, closeRewritePrompt,
+    aiOverwriteEditPrompt, requestOverwritePrompt, resolveOverwritePrompt, updateAiRewriteRequestsFromDays,
+    removeAiRewriteRequests, refreshAiRewriteRequests, runAiCleanup: executeAiCleanup
+  } = useTimesheetAi(initialAiRewriteRequests, listAiRewriteRequestsAction, runAiCleanupAction);
   const settings = useTimesheetSettings({
     createUserAction,
     currentUser,
@@ -331,7 +287,7 @@ export function TimesheetWorkspace({
     initialHolidayApiKey,
     initialManagedUsers,
     onHolidayCacheReset: applyHolidayCacheReset,
-    onOpenRewriteQueue: () => setIsAiRewriteQueueOpen(true),
+    onOpenRewriteQueue: () => openQueue(),
     onProfileUpdated: setCurrentUser,
     refreshRewriteQueue: refreshAiRewriteRequests,
     resetAllHolidayCacheAction,
@@ -1245,33 +1201,6 @@ export function TimesheetWorkspace({
     return Boolean(draft?.holidayName || draft?.entries.some((entry) => entry.kind === "HOLIDAY"));
   }
 
-  function getVacationEntryIndex(draft: TimesheetDayDraft | undefined, vacationStatus?: VacationStatus, vacationName?: string): number {
-    const hasVacationNameFilter = vacationName !== undefined;
-    const trimmedVacationName = vacationName?.trim() ?? "";
-
-    return (
-      draft?.entries.findIndex(
-        (entry) =>
-          entry.kind === "VACATION" &&
-          (!vacationStatus || entry.vacationStatus === vacationStatus) &&
-          (!hasVacationNameFilter || entry.vacationName.trim() === trimmedVacationName)
-      ) ?? -1
-    );
-  }
-
-  function getVacationBoundary(draft: TimesheetDayDraft | undefined, vacationStatus?: VacationStatus, vacationName?: string) {
-    const vacationIndex = getVacationEntryIndex(draft, vacationStatus, vacationName);
-
-    if (!draft || vacationIndex < 0) {
-      return null;
-    }
-
-    return {
-      endsDay: vacationIndex === draft.entries.length - 1,
-      startsDay: vacationIndex === 0
-    };
-  }
-
   function selectedVacationBoundary() {
     if (selectedEntry?.kind !== "VACATION") {
       return null;
@@ -1296,39 +1225,10 @@ export function TimesheetWorkspace({
     vacationStatus?: VacationStatus,
     vacationName?: string
   ): string[] {
-    const dateKeys: string[] = [];
-    let cursor = addBusinessDays(dateKey, direction);
-
-    while (true) {
-      if (isSavedHolidayDate(cursor, loadedDrafts)) {
-        cursor = addBusinessDays(cursor, direction);
-        continue;
-      }
-
-      const boundary = getVacationBoundary(getSavedDraftForVacationDate(cursor, loadedDrafts), vacationStatus, vacationName);
-
-      if (!boundary) {
-        break;
-      }
-
-      const connectsToCursor = direction === 1 ? boundary.startsDay : boundary.endsDay;
-
-      if (!connectsToCursor) {
-        break;
-      }
-
-      dateKeys.push(cursor);
-
-      const continuesPastCursor = direction === 1 ? boundary.endsDay : boundary.startsDay;
-
-      if (!continuesPastCursor) {
-        break;
-      }
-
-      cursor = addBusinessDays(cursor, direction);
-    }
-
-    return dateKeys;
+    return findConnectedVacationDates(
+      dateKey, direction, (key) => getSavedDraftForVacationDate(key, loadedDrafts),
+      (key) => isSavedHolidayDate(key, loadedDrafts), vacationStatus, vacationName
+    );
   }
 
   function hasReplaceableRecord(dateKey: string, loadedDrafts: Record<string, TimesheetDayDraft> = {}): boolean {
@@ -1350,15 +1250,7 @@ export function TimesheetWorkspace({
         savedDays.push(savedDay);
         onProgress?.(savedDays.length, total);
 
-        setRecords((current) => ({
-          ...current,
-          [savedDay.dateKey]: savedDay
-        }));
-        setSavedRecords((current) => ({
-          ...current,
-          [savedDay.dateKey]: savedDay
-        }));
-        setSavedEntryDateKeys((current) => new Set(current).add(savedDay.dateKey));
+        applySavedDays([savedDay]);
         setSelectedEntryIdByDate((current) => ({
           ...current,
           [savedDay.dateKey]: savedDay.entries[0]?.clientId ?? ""
@@ -1372,17 +1264,6 @@ export function TimesheetWorkspace({
     }
 
     return savedDays;
-  }
-
-  function updateVacationEntryForConnectedSave(day: TimesheetDayDraft, vacationName: string, matchVacationName: string, matchVacationStatus: VacationStatus, vacationStatus: VacationStatus): TimesheetDayDraft {
-    return {
-      ...day,
-      entries: day.entries.map((entry) =>
-        entry.kind === "VACATION" && entry.vacationStatus === matchVacationStatus && entry.vacationName.trim() === matchVacationName.trim()
-          ? { ...entry, vacationName, vacationStatus }
-          : entry
-      )
-    };
   }
 
   async function saveConnectedVacationDaysPreservingHours(dateKeys: string[], vacationName: string, matchVacationName: string, matchVacationStatus: VacationStatus, vacationStatus: VacationStatus, loadedDrafts: Record<string, TimesheetDayDraft>, onProgress?: (completed: number, total: number) => void): Promise<TimesheetDayDraft[]> {
@@ -1404,15 +1285,7 @@ export function TimesheetWorkspace({
         savedDays.push(savedDay);
         onProgress?.(savedDays.length, total);
 
-        setRecords((current) => ({
-          ...current,
-          [savedDay.dateKey]: savedDay
-        }));
-        setSavedRecords((current) => ({
-          ...current,
-          [savedDay.dateKey]: savedDay
-        }));
-        setSavedEntryDateKeys((current) => new Set(current).add(savedDay.dateKey));
+        applySavedDays([savedDay]);
         setSelectedEntryIdByDate((current) => ({
           ...current,
           [savedDay.dateKey]: savedDay.entries.find((entry) => entry.kind === "VACATION")?.clientId ?? savedDay.entries[0]?.clientId ?? ""
@@ -1502,17 +1375,7 @@ export function TimesheetWorkspace({
           return nextEntry;
         }
 
-        try {
-          return {
-            ...nextEntry,
-            notionCards: allocateNotionCardHours({
-              entryHours: hours,
-              links: entry.notionCards
-            })
-          };
-        } catch {
-          return nextEntry;
-        }
+        return { ...nextEntry, notionCards: allocateEditedCards(hours, entry.notionCards) };
       });
 
       return {
@@ -1537,42 +1400,15 @@ export function TimesheetWorkspace({
           return entry;
         }
 
-        const exists = entry.notionCards.some((link) => link.notionPageId === notionPageId);
         const candidate = selectedCandidates.find((card) => card.notionPageId === notionPageId);
-        const nextLinks = exists
-          ? entry.notionCards.filter((link) => link.notionPageId !== notionPageId)
-          : [
-              ...entry.notionCards,
-              {
-                allocatedHours: 0,
-                allocationMode: "auto" as const,
-                category: candidate?.category ?? "",
-                endDate: candidate?.endDate ?? "",
-                lastWorkedDate: candidate?.lastWorkedDate ?? "",
-                linkedHours: candidate?.linkedHours ?? 0,
-                notionPageId,
-                source: "manual" as const,
-                startDate: candidate?.startDate ?? "",
-                status: candidate?.status ?? "",
-                title: candidate?.title ?? "",
-                workDayCount: candidate?.workDayCount ?? 0
-              }
-            ];
-
-        try {
-          return {
-            ...entry,
-            notionCards: allocateNotionCardHours({
-              entryHours: entry.hours,
-              links: nextLinks
-            })
-          };
-        } catch {
-          return {
-            ...entry,
-            notionCards: nextLinks
-          };
-        }
+        const nextLinks = toggleEditedCard(entry.notionCards, {
+          allocatedHours: 0, allocationMode: "auto", notionPageId, source: "manual",
+          category: candidate?.category ?? "", endDate: candidate?.endDate ?? "",
+          lastWorkedDate: candidate?.lastWorkedDate ?? "", linkedHours: candidate?.linkedHours ?? 0,
+          startDate: candidate?.startDate ?? "", status: candidate?.status ?? "",
+          title: candidate?.title ?? "", workDayCount: candidate?.workDayCount ?? 0
+        });
+        return { ...entry, notionCards: allocateEditedCards(entry.hours, nextLinks) };
       });
 
       return {
@@ -1595,26 +1431,8 @@ export function TimesheetWorkspace({
           return entry;
         }
 
-        const nextLinks = entry.notionCards.map((link) => ({
-          ...link,
-          allocatedHours: link.notionPageId === notionPageId ? Math.max(allocatedHours, 0) : link.allocatedHours,
-          allocationMode: link.notionPageId === notionPageId ? "manual" as const : link.allocationMode
-        }));
-
-        try {
-          return {
-            ...entry,
-            notionCards: allocateNotionCardHours({
-              entryHours: entry.hours,
-              links: nextLinks
-            })
-          };
-        } catch {
-          return {
-            ...entry,
-            notionCards: nextLinks
-          };
-        }
+        const nextLinks = setEditedCardHours(entry.notionCards, notionPageId, allocatedHours);
+        return { ...entry, notionCards: allocateEditedCards(entry.hours, nextLinks) };
       });
 
       return {
@@ -1641,11 +1459,7 @@ export function TimesheetWorkspace({
           ...entry,
           notionCards: allocateNotionCardHours({
             entryHours: entry.hours,
-            links: entry.notionCards.map((link) => ({
-              ...link,
-              allocatedHours: 0,
-              allocationMode: "auto" as const
-            }))
+            links: resetEditedCardHours(entry.notionCards)
           })
         };
       });
@@ -1953,7 +1767,7 @@ export function TimesheetWorkspace({
 
       return next;
     });
-    setAiRewriteRequests((current) => current.filter((request) => !dateKeys.includes(request.dateKey)));
+    removeAiRewriteRequests(dateKeys);
   }
 
   async function deleteConnectedVacationPrompt() {
@@ -2236,6 +2050,16 @@ export function TimesheetWorkspace({
     }
   }
 
+  function applySavedDays(days: TimesheetDayDraft[]) {
+    if (!days.length) {
+      return;
+    }
+    const byDate = Object.fromEntries(days.map((day) => [day.dateKey, day]));
+    setRecords((current) => ({ ...current, ...byDate }));
+    setSavedRecords((current) => ({ ...current, ...byDate }));
+    setSavedEntryDateKeys((current) => new Set([...current, ...days.map((day) => day.dateKey)]));
+  }
+
   function mergeSavedDays(days: TimesheetDayDraft[]) {
     if (days.length === 0) {
       return;
@@ -2244,89 +2068,19 @@ export function TimesheetWorkspace({
     const nextDays = days.map(withClientIds);
     updateAiRewriteRequestsFromDays(nextDays);
 
-    setRecords((current) => ({
-      ...current,
-      ...Object.fromEntries(nextDays.map((day) => [day.dateKey, day]))
-    }));
-    setSavedRecords((current) => ({
-      ...current,
-      ...Object.fromEntries(nextDays.map((day) => [day.dateKey, day]))
-    }));
-    setSavedEntryDateKeys((current) => {
-      const next = new Set(current);
-
-      for (const day of nextDays) {
-        next.add(day.dateKey);
-      }
-
-      return next;
-    });
-  }
-
-  function updateAiRewriteRequestsFromDays(days: TimesheetDayDraft[]) {
-    setAiRewriteRequests((current) => {
-      const next = new Map(current.map((request) => [request.dateKey, request]));
-
-      for (const day of days) {
-        const request = toAiRewriteRequest(day);
-
-        if (request) {
-          next.set(day.dateKey, request);
-        } else {
-          next.delete(day.dateKey);
-        }
-      }
-
-      return Array.from(next.values()).sort((left, right) => right.dateKey.localeCompare(left.dateKey));
-    });
-  }
-
-  async function refreshAiRewriteRequests() {
-    try {
-      setAiRewriteRequests(await listAiRewriteRequestsAction());
-    } catch {
-      // The settings modal can still show the last known queue state.
-    }
+    applySavedDays(nextDays);
   }
 
   function shouldPromptForAiRewrite(day: TimesheetDayDraft): boolean {
-    const savedDay = savedRecords[day.dateKey];
-
-    if (!savedDay) {
-      return false;
-    }
-
-    return (
-      aiSetting.enabled &&
-      aiSetting.apiKeySaved &&
-      hasExistingAiFields(savedDay) &&
-      hasWorkContentChange(savedDay, day)
-    );
+    return shouldPromptForRewrite(aiSetting, savedRecords[day.dateKey], day);
   }
 
   function isScheduledOverwriteActive() {
-    const savedDay = savedRecords[selectedDateKey];
-
-    return (
-      aiSetting.enabled &&
-      aiSetting.apiKeySaved &&
-      aiSetting.cleanupMode === "scheduled" &&
-      Boolean(selectedDay.aiRewriteRequested || savedDay?.aiRewriteRequested)
-    );
+    return isScheduledOverwrite(aiSetting, savedRecords[selectedDateKey], selectedDay);
   }
 
   function isSelectedDayScheduledCleanupPending() {
-    if (!aiSetting.enabled || !aiSetting.apiKeySaved || aiSetting.cleanupMode !== "scheduled" || isFutureWork) {
-      return false;
-    }
-
-    const savedDay = savedRecords[selectedDateKey];
-
-    if (!savedDay || !savedEntryDateKeys.has(selectedDateKey)) {
-      return false;
-    }
-
-    return savedDay.aiRewriteRequested ? hasWorkContent(savedDay) : hasMissingAiFields(savedDay);
+    return isScheduledCleanupPending(aiSetting, savedRecords[selectedDateKey], savedEntryDateKeys.has(selectedDateKey), isFutureWork);
   }
 
   function shouldWarnScheduledOverwriteField() {
@@ -2334,11 +2088,7 @@ export function TimesheetWorkspace({
   }
 
   function promptForScheduledOverwriteEdit(prompt: NonNullable<typeof aiOverwriteEditPrompt>) {
-    if (!shouldWarnScheduledOverwriteField() || aiOverwriteEditPrompt) {
-      return;
-    }
-
-    setAiOverwriteEditPrompt(prompt);
+    requestOverwritePrompt(prompt, shouldWarnScheduledOverwriteField());
   }
 
   function updateSelectedShortVersion(value: string) {
@@ -2363,51 +2113,20 @@ export function TimesheetWorkspace({
   }
 
   function keepScheduledOverwriteAfterManualEdit() {
-    setAiOverwriteEditPrompt(null);
+    resolveOverwritePrompt("keep", updateSelectedDay, updateSelectedEntry);
   }
 
   function revertScheduledOverwriteManualEdit() {
-    if (!aiOverwriteEditPrompt) {
-      return;
-    }
-
-    if (aiOverwriteEditPrompt.field === "summary") {
-      updateSelectedDay({ shortVersion: aiOverwriteEditPrompt.previousValue });
-    } else {
-      updateSelectedEntry({ aiTranslation: aiOverwriteEditPrompt.previousValue });
-    }
-
-    setAiOverwriteEditPrompt(null);
+    if (!aiOverwriteEditPrompt) return;
+    resolveOverwritePrompt("revert", updateSelectedDay, updateSelectedEntry);
   }
 
   function disableScheduledOverwriteAfterManualEdit() {
-    updateSelectedDay({ aiRewriteRequested: false });
-    setAiOverwriteEditPrompt(null);
+    resolveOverwritePrompt("disable", updateSelectedDay, updateSelectedEntry);
   }
 
-  async function runAiCleanup(dateKey: string, options?: AiCleanupOptions) {
-    setAiCleanupDateKey(dateKey);
-
-    if (!aiSetting.enabled || !aiSetting.apiKeySaved) {
-      setAiCleanupState("skipped");
-      setAiCleanupMessage(!aiSetting.enabled ? "AI 자동 정리 꺼짐" : "Gemini API key 없음");
-      return;
-    }
-
-    setAiCleanupState("running");
-    setAiCleanupMessage("AI 정리 중");
-
-    try {
-      const result = await runAiCleanupAction(dateKey, options);
-
-      mergeSavedDays(result.days);
-      setAiCleanupState(result.skipped ? "skipped" : "done");
-      setAiCleanupMessage(result.message);
-      broadcastViewRefresh(["timesheet", "ai-summary"], "mutation");
-    } catch (error) {
-      setAiCleanupState("error");
-      setAiCleanupMessage(error instanceof Error ? error.message : "AI 정리에 실패했습니다.");
-    }
+  function runAiCleanup(dateKey: string, options?: AiCleanupOptions) {
+    return executeAiCleanup(dateKey, options, aiSetting, mergeSavedDays);
   }
 
   async function saveSelectedDraft(options: { forceImmediateAiAfterSave?: boolean; overwriteAiAfterSave?: boolean; skipAiRewritePrompt?: boolean; skipConnectedVacation?: boolean; vacationActionLabel?: string; vacationStatus?: VacationStatus } = {}) {
@@ -2446,7 +2165,7 @@ export function TimesheetWorkspace({
     };
 
     if (!options.forceImmediateAiAfterSave && !options.skipAiRewritePrompt && shouldPromptForAiRewrite(entry)) {
-      setAiRewritePromptDateKey(entry.dateKey);
+      openRewritePrompt(entry.dateKey);
       return;
     }
 
@@ -2465,15 +2184,7 @@ export function TimesheetWorkspace({
       updateAiRewriteRequestsFromDays([savedEntry]);
       notionCandidates.updateCandidatesFromDay(savedEntry);
       showNotionSyncError(saveResult.notionSyncError);
-      setRecords((current) => ({
-        ...current,
-        [savedEntry.dateKey]: savedEntry
-      }));
-      setSavedRecords((current) => ({
-        ...current,
-        [savedEntry.dateKey]: savedEntry
-      }));
-      setSavedEntryDateKeys((current) => new Set(current).add(savedEntry.dateKey));
+      applySavedDays([savedEntry]);
       setSelectedEntryIdByDate((current) => ({
         ...current,
         [savedEntry.dateKey]: savedEntry.entries[Math.max(selectedIndexBeforeSave, 0)]?.clientId ?? savedEntry.entries[0]?.clientId ?? ""
@@ -2903,7 +2614,7 @@ export function TimesheetWorkspace({
       {isAiRewriteQueueOpen ? (
         <AiRewriteQueueModal
           cleanupMode={rewriteQueueCleanupMode}
-          onClose={() => setIsAiRewriteQueueOpen(false)}
+          onClose={() => closeQueue()}
           requests={aiRewriteRequests}
         />
       ) : null}
@@ -2976,9 +2687,9 @@ export function TimesheetWorkspace({
       {aiRewritePromptDateKey ? (
         <AiRewritePromptModal
           dateKey={aiRewritePromptDateKey}
-          onCancel={() => setAiRewritePromptDateKey("")}
-          onSaveOnly={() => { setAiRewritePromptDateKey(""); void saveSelectedDraft({ skipAiRewritePrompt: true }); }}
-          onSaveWithAi={() => { setAiRewritePromptDateKey(""); void saveSelectedDraft({ overwriteAiAfterSave: true, skipAiRewritePrompt: true }); }}
+          onCancel={() => closeRewritePrompt()}
+          onSaveOnly={() => { closeRewritePrompt(); void saveSelectedDraft({ skipAiRewritePrompt: true }); }}
+          onSaveWithAi={() => { closeRewritePrompt(); void saveSelectedDraft({ overwriteAiAfterSave: true, skipAiRewritePrompt: true }); }}
           scheduled={aiSetting.cleanupMode === "scheduled"}
         />
       ) : null}

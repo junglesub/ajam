@@ -1,10 +1,11 @@
 "use client";
 
+import { allocateEditedCards, resetEditedCardHours, setEditedCardHours, toggleEditedCard } from "@/lib/timesheet-notion-editing";
+
 import { Check, LoaderCircle, RefreshCw, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import {
-  allocateNotionCardHours,
   buildYearEndReviewDaySavePayload,
   yearEndReviewLabels,
   type TimesheetDayDraft,
@@ -179,7 +180,7 @@ export function TimesheetDayEditModal({
         }
 
         // Reusing the save-path rule keeps the preview in sync with what the save action stores.
-        return { ...entry, hours, notionCards: applyAllocation(hours, entry.notionCards) };
+        return { ...entry, hours, notionCards: allocateEditedCards(hours, entry.notionCards) };
       })
     );
   }
@@ -191,7 +192,7 @@ export function TimesheetDayEditModal({
           return entry;
         }
 
-        return { ...entry, notionCards: applyAllocation(entry.hours, cards) };
+        return { ...entry, notionCards: allocateEditedCards(entry.hours, cards) };
       })
     );
   }
@@ -203,15 +204,9 @@ export function TimesheetDayEditModal({
           return entry;
         }
 
-        const exists = entry.notionCards.some((card) => card.notionPageId === notionPageId);
-        const nextCards = exists
-          ? entry.notionCards.filter((card) => card.notionPageId !== notionPageId)
-          : [
-              ...entry.notionCards,
-              { allocatedHours: 0, allocationMode: "auto" as const, notionPageId, source: "manual" as const }
-            ];
+        const nextCards = toggleEditedCard(entry.notionCards, { allocatedHours: 0, allocationMode: "auto", notionPageId, source: "manual" });
 
-        return { ...entry, notionCards: applyAllocation(entry.hours, dedupeNotionCards(nextCards)) };
+        return { ...entry, notionCards: allocateEditedCards(entry.hours, dedupeNotionCards(nextCards)) };
       })
     );
   }
@@ -505,11 +500,7 @@ export function TimesheetDayEditModal({
                         onAllocatedHoursChange={(notionPageId, allocatedHours) =>
                           updateNotionCards(
                             entryKey,
-                            entry.notionCards.map((card) =>
-                              card.notionPageId === notionPageId
-                                ? { ...card, allocatedHours: Math.max(allocatedHours, 0), allocationMode: "manual" }
-                                : card
-                            )
+                            setEditedCardHours(entry.notionCards, notionPageId, allocatedHours)
                           )
                         }
                         onOpenPicker={() => {
@@ -525,7 +516,7 @@ export function TimesheetDayEditModal({
                         onResetAutoAllocation={() =>
                           updateNotionCards(
                             entryKey,
-                            entry.notionCards.map((card) => ({ ...card, allocatedHours: 0, allocationMode: "auto" }))
+                            resetEditedCardHours(entry.notionCards)
                           )
                         }
                       />
@@ -652,14 +643,6 @@ function Field({ children, label }: { children: ReactNode; label: string }) {
 
 function entryKeyFor(entry: TimesheetEntryDraft): string {
   return entry.id || entry.clientId;
-}
-
-function applyAllocation(entryHours: number, cards: TimesheetEntryNotionCardDraft[]): TimesheetEntryNotionCardDraft[] {
-  try {
-    return allocateNotionCardHours({ entryHours, links: cards });
-  } catch {
-    return cards;
-  }
 }
 
 function dedupeNotionCards(cards: TimesheetEntryNotionCardDraft[]): TimesheetEntryNotionCardDraft[] {
