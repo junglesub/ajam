@@ -1,5 +1,19 @@
 # Timesheet Workflow
 
+## Implementation ownership (2026-10-28)
+
+- `timesheet-workspace.tsx` coordinates selected dates, drafts, save/delete and cross-view state. Calendar, list and daily editor rendering live in `timesheet-calendar-view.tsx`, `timesheet-list-view.tsx` and `timesheet-daily-editor.tsx`; modal UI is grouped by feature.
+- Settings forms, month loading and automatic recommendations live in their `use-timesheet-*` hooks. Pure date/draft/display/Notion calculations live beside the views. Shared client IDs, future vacation drafts and range initial state use `lib/timesheet-drafts.ts`, and vacation construction uses the domain helper.
+- The extraction preserves the current main allowance-exclusion flag through single-day editing and vacation range saves, public-leave calendar styling, and effect-based project recommendation with per-entry deduplication. Recommendation requests do not start from a records state updater.
+- Added actual component-render regressions for temporary public leave and mixed deductible/public leave. Run them with the existing workspace `tsx` runner and the automatic-JSX test configuration (no build or new dependency):
+
+```powershell
+pnpm --filter @timesheet/db exec tsx --tsconfig ../../apps/web/tsconfig.test.json --test ../../apps/web/src/components/timesheet/timesheet-calendar-view.test.ts
+```
+
+- Integration verification: domain tests 102/102, DB tests 46/46, existing web helper tests 21/21, calendar component regressions 2/2, web/domain/DB typechecks and changed-file ESLint passed. Both new regressions failed against the old refactor calendar and passed after migrating main behavior.
+- No product build, browser automation or authenticated interaction test was run. Browser/visual acceptance remains with the user; async recommendation/editor interactions are covered by code review rather than a new runtime integration suite.
+
 ## Overview
 
 The timesheet page supports multiple daily records. A day can contain work, vacation, and holiday entries, but saving is still performed at the day level. The responsive daily editor is the source of truth for the selected date: it stays in the right-side panel on desktop and opens as a bottom popup below `lg`. On desktop the calendar view keeps the right-side editor permanently visible in a two-column layout with no close button. In the list view the right-side editor shows a header `X` button; clicking it collapses the editor so the list uses the full width, and selecting any list row or focusing an editor control reopens it. The page scrolls naturally on desktop; only the right daily editor panel is sticky with its own internal scroll so it stays in view while scrolling through a long calendar or list. The calendar/list views show saved data plus safe draft previews.

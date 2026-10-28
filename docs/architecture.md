@@ -11,6 +11,15 @@
 - `packages/ui`: Tailwind 기반 공통 UI 컴포넌트
 - `docs`: 제품/구현 결정과 후속 작업 기록
 
+## Timesheet Client Structure
+
+- `components/timesheet/timesheet-workspace.tsx`는 선택 날짜·업무 draft·저장 상태와 화면 간 흐름을 조정한다. 파일 길이 자체보다 한 기능 수정 시 읽어야 하는 책임 범위를 줄이는 것을 분리 기준으로 삼는다.
+- `timesheet-calendar-view.tsx`, `timesheet-list-view.tsx`, `timesheet-daily-editor.tsx`는 각 보기와 일별 편집 UI를 맡는다. AI·휴가·설정·프로젝트·확인 팝업은 각 modal 파일에 둔다. 일별 편집기는 UI 입력/선택 이벤트를 workspace로 전달하며 별도 저장 모델을 만들지 않는다.
+- `use-timesheet-settings.ts`, `use-timesheet-month-loader.ts`, `use-timesheet-recommendations.ts`는 각각 설정 폼과 저장, 월 로딩 상태, 프로젝트/Notion 추천 요청을 맡는다. 서버 action을 호출하는 추천은 effect 또는 명시적인 사용자 이벤트에서 시작하며 React state updater 안에서 시작하지 않는다.
+- `timesheet-date-utils.ts`, `timesheet-draft-utils.ts`, `timesheet-entry-display.ts`, `timesheet-row-display.tsx`, `timesheet-notion-recommendation.ts`는 날짜·draft 변환·표시·카드 추천 계산을 모은다. `timesheet-ui-primitives.tsx`는 이 화면 내에서 함께 쓰는 표시 요소와 modal shell을 제공한다.
+- `lib/timesheet-drafts.ts`는 업무 기록과 연말 정리 날짜 편집에서 재사용하는 client ID·미래 휴가 draft·기간 편집 초기값 helper의 공통 소유자다. 휴가 draft의 도메인 기본값은 `@timesheet/domain`의 `createVacationDay`를 사용한다. 화면별 파일에서 이전 helper를 복제하지 않는다.
+- 분리 전후 저장 action·DB schema·라우트 계약은 유지한다. 차감 제외 휴가의 저장 flag와 공가 표시, 추천 중복 요청 방지 등 최신 동작은 분리된 UI와 hook에서도 보존한다.
+
 ## Authentication And Users
 
 - `User`는 SQLite에 저장한다.

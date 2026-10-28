@@ -1,5 +1,37 @@
 # Decisions
 
+## 2026-10-28 — refactor 브랜치 활용 검토와 통합
+
+- 비교 기준은 로컬 `main` (`be48b6e`)과 `refactor` (`b90b54a`)이며 공통 조상은 `dccd873`이다. 로컬의 `origin/main`, `origin/refactor`도 각각 같은 커밋을 가리킨다. 이번 검토에서 원격 fetch는 하지 않았다.
+- 공통 조상 이후 main 전용 커밋은 6개, refactor 전용 커밋은 16개다. main은 운영 로그, 로그 뷰어, 연말 정리, 연차 차감 제외 휴가와 표시 개선을 추가했다.
+- refactor는 업무 기록 UI의 컴포넌트·유틸·상태 hook 추출에 집중한다. 변경 파일은 18개(신규 17개와 기존 workspace)이며 DB·의존성·문서·테스트 변경은 없다. `timesheet-workspace.tsx`는 공통 조상의 5,687줄에서 3,066줄로 줄지만, 추출 파일을 합친 전체 코드는 1,027줄 증가한다. 따라서 가치의 기준은 전체 코드 감소보다 책임 분리와 수정 범위 축소다.
+- 양쪽에서 함께 변경한 경로는 `apps/web/src/components/timesheet/timesheet-workspace.tsx` 하나다. 해당 파일의 main 쪽 변경량은 106줄 추가·100줄 삭제다. `git merge-tree --write-tree --name-only main refactor` 가상 병합은 이 파일에만 충돌을 보고했고, 생성된 가상 결과에는 충돌 블록이 7개 있다. 실제 checkout·index·브랜치 병합은 수행하지 않았다.
+
+### 권고
+
+- 초기 검토에서는 기존 refactor를 보존하고 현재 main에서 별도 통합 브랜치를 만들어 refactor를 병합·보완한 뒤 main으로 반영하는 방식을 권고했다. 이후 사용자가 이 방향의 실행을 승인하고, 최종 목표를 깔끔한 코드의 main 반영과 refactor 브랜치 정리로 확정했다.
+- 충돌은 최신 main의 기능과 수정 의도를 기준으로 해결하고, 해당 동작을 refactor의 새 컴포넌트·hook으로 옮긴다. 한쪽 버전을 통째로 선택하면 새 기능 또는 구조 분리를 잃을 수 있다.
+- 특히 차감 제외 휴가의 생성·기간 저장·편집 체크박스·캘린더 채움/테두리/배지 표시를 분리된 draft 유틸, 일별 편집기, 캘린더와 UI primitive에 반영해야 한다.
+- main의 `@/lib/timesheet-drafts`와 도메인 `createVacationDay`를 재사용한다. refactor의 `timesheet-draft-utils.ts`에는 이전 버전의 같은 helper가 있어 두 구현을 병존시키지 않는다.
+- 프로젝트 추천은 main의 effect 실행·요청 중복 방지와 state updater 내부의 서버 호출 제거를 유지한다. refactor의 추천 hook과 `createDraftForSelectedDate`에는 이 수정이 반영되어 있지 않다.
+- 모든 추출을 무조건 유지할 필요는 없다. 통합 검토에서 전달용 props·타입만 늘리는 분리는 단순화하되, UI 분리와 기존의 유용한 helper는 재사용한다. 필요한 경우에만 일부 커밋/변경을 선택적으로 이식한다.
+
+### 통합 시 확인할 항목과 이번 검토 범위
+
+- 통합 후에는 build 없이 관련 lint·typecheck, 기존 domain/DB 및 draft 회귀 테스트를 실행하고, 차감 제외 휴가와 프로젝트 추천의 변경 경로를 검증해야 한다. 월 전환·저장·설정·Notion 추천·연말 정리 날짜 편집도 기존 동작이 유지되는지 확인 대상이다.
+- 초기 검토에서는 Git 이력·diff·관련 코드·문서와 가상 병합만 확인했고 코드 변경·실제 병합·브랜치 삭제·테스트·제품 build는 수행하지 않았다. 후속 구현 결과는 아래에 기록한다. 충돌 개수는 통합 후 동작 보존을 보장하지 않는다.
+
+### 후속 통합 결과
+
+- `codex/refactor-timesheet-integration`에서 refactor를 실제 병합하고 최신 main의 휴가 차감 제외·공가 표시·프로젝트 추천 수정을 새 컴포넌트와 hook으로 옮겼다. main의 다른 기능 파일과 DB·의존성·저장 action은 변경하지 않았다.
+- workspace는 5,693줄에서 3,062줄로 줄었다. 캘린더·리스트·일별 편집·기능별 팝업과 설정/로딩/추천 hook을 분리하고, refactor의 중복 draft helper는 제거해 기존 공통 helper를 사용한다. 추가 추상화나 임의의 파일 길이 목표는 두지 않았다.
+- Codex 하위 에이전트 `gpt-6.1-terra`가 제품 통합을 수행하고 별도 `gpt-6.1-sol`이 전체 변경을 독립 검토했다. 기존 이름 있는 함수 187개와 상태 초기값 95개, view/modal의 props·callback·effect 연결을 비교해 병합을 막는 결함이 없음을 확인했다. Astra와 my-orch는 사용하지 않았다.
+- 도메인 102개, DB 46개, 기존 웹 helper 21개, 신규 캘린더 렌더 회귀 2개가 통과했다. 신규 2개는 이전 refactor 캘린더에서 실패한 뒤 main 동작 이식 후 통과했다. web/domain/DB 타입 검사와 변경 파일 ESLint, diff 공백 검사도 통과했다.
+- 신규 렌더 테스트는 기존 workspace의 tsx와 `apps/web/tsconfig.test.json`을 사용한다. 테스트에서 React 전역 객체를 수정하거나 새 dependency를 추가하지 않는다. 실제 실행 명령과 UI 소유자 지도는 `docs/timesheet-workflow.md`와 `docs/architecture.md`에 기록했다.
+- 제품 build·브라우저 자동화는 실행하지 않았다. 실제 화면과 비동기 추천·편집 상호작용의 최종 확인은 사용자 담당이며, 이번에는 코드 검토와 정적 검사 및 자동 회귀 테스트로 검증했다.
+- 원격 브랜치는 `git ls-remote`로 조회해 최초 비교와 같은 커밋임을 확인했다. 원격 push·브랜치 삭제는 수행하지 않으며 로컬 main 통합 및 로컬 refactor 정리만 수행한다. 기존 refactor 작업 폴더의 파일은 삭제하지 않는다.
+- 독립 검토는 spec compliance pass, code quality approve, severity finding 0건으로 완료했다. 검증한 트리와 동일한 병합 커밋 `5af1216`을 로컬 main에 fast-forward 반영했고 로컬 `refactor`와 임시 통합 브랜치를 삭제했다. 기존 `C:/Users/RyooJungsub/orca/workspaces/ajam/refactor` 폴더는 원래 커밋 `b90b54a`의 detached HEAD로 남겨 파일과 로컬 환경을 보존했다. 원격 main/refactor는 그대로다.
+
 ## 2026-08-07
 
 - web 배포의 `publish-image`와 `request-dca-deploy`는 같은 `web-deploy-main` concurrency group을 사용한다. 새 web 배포가 준비되면 진행 중인 이전 web 배포를 취소한다.

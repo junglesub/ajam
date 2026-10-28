@@ -1,154 +1,69 @@
 "use client";
 
-import { CSS } from "@dnd-kit/utilities";
-import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent
-} from "@dnd-kit/core";
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy
-} from "@dnd-kit/sortable";
-import confetti from "canvas-confetti";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { createClientId, createFutureDraftForDate, extractVacationRangeInitialState, withClientIds } from "@/lib/timesheet-drafts";
+
+import type { DragEndEvent } from "@dnd-kit/core";
+import { arrayMove } from "@dnd-kit/sortable";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 
 import {
   allocateNotionCardHours,
-  clampVacationFillRatio,
   createEmptyDraft,
-  createEmptyEntryDraft,
   createVacationDay,
+  createEmptyEntryDraft,
   formatKoreanDate,
   getBusinessCalendarWeeks,
   getBusinessDateKeysUntil,
-  getDisplayContent,
   getMonthLabel,
-  getNotionCardWorkDateRole,
   getSavedNotionCardDateRanges,
   isWeekendDateKey,
-  normalizeVacationName,
-  parseDateKey,
-  resolveStatus,
-  statusLabel,
   toBrowserDateKey,
   type TimesheetRow,
-  type TimesheetStatus,
   type TimesheetDayDraft,
   type TimesheetEntryDraft,
   type TimesheetEntryNotionCardDraft,
   type VacationColor,
-  type VacationColorPreset,
   type VacationStatus,
   type WorkRecordKind
 } from "@timesheet/domain";
-import { Badge, Button, Input, Label, SegmentedControl, Textarea, cn } from "@timesheet/ui";
+import { Button, SegmentedControl, cn } from "@timesheet/ui";
 import {
-  AlertTriangle,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
   Clock3,
-  GripVertical,
   ListChecks,
-  LoaderCircle,
-  Plus,
-  Trash2,
-  ArrowDown,
-  ArrowUp,
-  RotateCcw,
   Search,
   Sparkles,
   TimerReset,
-  WrapText,
-  X,
-  type LucideIcon
+  WrapText
 } from "lucide-react";
 
-import { logoutAction } from "@/app/(app)/timesheet/actions";
 import { AppLoadingOverlay, AppLoadingScreen } from "@/components/app-loading-screen";
-import { NotionCardLinkSection } from "./notion-card-link-section";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
-import { WeekendRelaxView } from "./weekend-relax-view";
-import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidate, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
-import { ThemeSetting } from "@/components/theme-setting";
+import { addBusinessDays, addDays, getBusinessDateKeysInRange, getDateKeyMonthCursor, getDefaultSelectedDateForMonth, getInclusiveDateSpan } from "./timesheet-date-utils";
+import { buildDraftsFromMonthData, buildInitialDrafts, buildSelectedEntryIds, createDraftForDate, createEntryForDate, findPreviousProject, hasExistingAiFields, hasHolidayMarker, hasMissingAiFields, hasWorkContent, hasWorkContentChange, isAutoProjectOnlyDraft, isDefaultFutureVacationDraft, rebalanceDefaultWorkHours, rowFromDraft, sanitizeDayForSave, type TimesheetMonthData } from "./timesheet-draft-utils";
+import { allocateDefaultNotionCards, mergeNotionCardSnapshot, type NotionWeeklyDefaultCard } from "./timesheet-notion-recommendation";
+import { CalendarView } from "./timesheet-calendar-view";
+import { getNotionAllocationError, listRowKey } from "./timesheet-entry-display";
+import { ListView } from "./timesheet-list-view";
+import { DailyEditor } from "./timesheet-daily-editor";
+import { AiOverwritePromptModal, AiRewritePromptModal, AiRewriteQueueModal } from "./timesheet-ai-modals";
+import { ProjectCreateModal } from "./timesheet-project-modal";
+import { SettingsModal } from "./timesheet-settings-modal";
+import { ConnectedVacationDeleteModal, ConnectedVacationSaveModal, VacationRangeModal } from "./timesheet-vacation-modals";
+import { Metric } from "./timesheet-ui-primitives";
+import { DeleteConfirmModal, NotionSyncErrorModal, PendingNavigationConfirmModal } from "./timesheet-simple-modals";
+import { useNotionCardCandidates, type LoadNotionCardCandidatesInput, type NotionCardCandidatesResult } from "./use-notion-card-candidates";
+import { useTimesheetSettings, type GeminiApiKeyTestResult, type HolidayApiKeyTestResult, type ManagedUser, type UserAiSetting, type UserAiSettingUpdate, type UserRole } from "./use-timesheet-settings";
+import { getMonthCacheKey, useTimesheetMonthLoader, type VisibleMonthLoadResult } from "./use-timesheet-month-loader";
+import { useTimesheetRecommendations, type DatabaseNotionRecommendationApplication, type LocalNotionRecommendationApplication, type ProjectRecommendationApplication } from "./use-timesheet-recommendations";
 import { adjacentListTarget, shouldIgnoreCalendarShortcut } from "@/lib/calendar-shortcuts";
-import {
-  createClientId,
-  createFutureDraftForDate,
-  extractVacationRangeInitialState,
-  withClientIds
-} from "@/lib/timesheet-drafts";
 import { broadcastViewRefresh, useSharedViewRefresh } from "@/lib/view-refresh";
 
 type ViewMode = "calendar" | "list";
 
 const fullListContentStorageKey = "timesheet:list:show-full-content";
-
-type UserRole = "ADMIN" | "USER";
-type AiCleanupMode = "immediate" | "manual" | "scheduled";
-
-type ManagedUser = {
-  email: string;
-  id: string;
-  role: UserRole;
-  username: string;
-};
-
-type TimesheetMonthData = {
-  entries: TimesheetDayDraft[];
-  holidayWarning?: string;
-  holidays: Array<{ dateKey: string; name: string }>;
-  projects: string[];
-  vacationColors: Record<string, VacationColor>;
-  vacations: Array<{ dateKey: string; hours: number; name: string }>;
-};
-
-type HolidayApiKeyTestResult = {
-  holidays: Array<{ dateKey: string; name: string }>;
-  ok: boolean;
-};
-
-type UserAiSetting = {
-  apiKeySaved: boolean;
-  backfillLimit: number;
-  backfillMissing: boolean;
-  contextDays: number;
-  cleanupMode: AiCleanupMode;
-  enabled: boolean;
-  model: string;
-  provider: "GEMINI";
-};
-
-type UserAiSettingUpdate = {
-  apiKey?: string;
-  backfillLimit: number;
-  backfillMissing: boolean;
-  clearApiKey?: boolean;
-  contextDays: number;
-  cleanupMode: AiCleanupMode;
-  enabled: boolean;
-  model: string;
-};
-
-type NotionWeeklyDefaultCard = {
-  allocatedHours: number;
-  category: string;
-  enabled: boolean;
-  endDate: string;
-  notionPageId: string;
-  startDate: string;
-  status: string;
-  title: string;
-  weekday: number;
-};
 
 type TimesheetAiCleanupResult = {
   appliedDateKeys: string[];
@@ -179,18 +94,11 @@ type AiCleanupOptions = {
   overwriteCurrentDate?: boolean;
 };
 
-type GeminiApiKeyTestResult = {
-  ok: boolean;
-};
-
 type SaveState = "idle" | "saving" | "saved" | "error";
 type AiCleanupState = "idle" | "running" | "done" | "skipped" | "error";
 type DeleteState = "idle" | "deleting" | "error";
 type ProjectAddState = "idle" | "saving" | "error";
-type SettingsSaveState = "idle" | "saving" | "saved" | "error";
-type HolidayResetState = "idle" | "saving" | "saved" | "error";
 type VacationRangeSaveState = "idle" | "saving" | "error";
-type MonthLoadState = "idle" | "loading" | "error";
 type PendingNavigation =
   | { kind: "closeEditor" }
   | { kind: "date"; dateKey: string; entryClientId?: string }
@@ -245,28 +153,7 @@ type TimesheetWorkspaceProps = {
   updateProfileAction: (params: { email?: string; password?: string; username: string }) => Promise<ManagedUser>;
 };
 
-const weekdays = ["월", "화", "수", "목", "금"];
 const todayRefreshIntervalMs = 60_000;
-
-const badgeToneByStatus: Record<TimesheetStatus, "blue" | "gray" | "green" | "orange" | "white"> = {
-  COMPLETED: "green",
-  FUTURE: "gray",
-  HOLIDAY: "orange",
-  MISSING: "white",
-  VACATION: "blue"
-};
-
-const cellToneByStatus: Record<TimesheetStatus, string> = {
-  COMPLETED: "border-emerald-200 bg-white hover:border-emerald-300",
-  FUTURE: "border-slate-200 bg-slate-100 text-slate-400",
-  HOLIDAY: "border-orange-200 bg-orange-50/80 hover:border-orange-300",
-  MISSING: "border-slate-200 bg-white hover:border-slate-300",
-  VACATION: "timesheet-vacation-only"
-};
-
-const vacationFillColor = "var(--timesheet-vacation-fill)";
-const temporaryVacationHatchBackground = "var(--temporary-vacation-hatch-background)";
-const fullDayHours = 8;
 
 const newProjectOptionValue = "__new_project__";
 
@@ -297,245 +184,6 @@ function getVacationSaveActions(mode: "create" | "edit", status: VacationStatus)
   ];
 }
 
-function getWorkVacationMixVacationClipPath(row: TimesheetRow): string | undefined {
-  const orderedKinds: Array<"VACATION" | "WORK"> = [];
-
-  for (const entry of row.entries) {
-    if ((entry.kind === "WORK" || entry.kind === "VACATION") && !orderedKinds.includes(entry.kind)) {
-      orderedKinds.push(entry.kind);
-    }
-  }
-
-  if (!orderedKinds.includes("WORK") || !orderedKinds.includes("VACATION")) {
-    return undefined;
-  }
-
-  if (orderedKinds.length < 2) {
-    return undefined;
-  }
-
-  return orderedKinds[0] === "VACATION"
-    ? "polygon(0 0, 100% 0, 0 100%)"
-    : "polygon(100% 0, 100% 100%, 0 100%)";
-}
-
-function getCalendarCellStyle(row: TimesheetRow | undefined) {
-  if (!row) {
-    return undefined;
-  }
-
-  const vacationClipPath = getWorkVacationMixVacationClipPath(row);
-  const isTemporaryVacation = row.hasVacation && row.vacationStatus === "TEMPORARY";
-
-  if (vacationClipPath) {
-    return undefined;
-  }
-
-  const vacations = row.entries.filter((entry) => entry.kind === "VACATION");
-  if (vacations.length > 0 && vacations.every((entry) => entry.vacationDeductsAllowance === false)) {
-    return vacations.some((entry) => entry.vacationStatus === "TEMPORARY")
-      ? { backgroundImage: temporaryVacationHatchBackground }
-      : undefined;
-  }
-
-  if (isPartialVacationOnlyCell(row)) {
-    return undefined;
-  }
-
-  if (isTemporaryVacation) {
-    return { backgroundImage: temporaryVacationHatchBackground };
-  }
-
-  return undefined;
-}
-
-function getVacationOnlyFillRatio(row: TimesheetRow | undefined): number | undefined {
-  if (!row?.entries.length || row.entries.some((entry) => entry.kind !== "VACATION")) {
-    return undefined;
-  }
-
-  return clampVacationFillRatio(row.entries.reduce((sum, entry) => sum + (entry.vacationDeductsAllowance === false ? 0 : entry.hours), 0));
-}
-
-function isPartialVacationOnlyCell(row: TimesheetRow | undefined): boolean {
-  const fillRatio = getVacationOnlyFillRatio(row);
-  return fillRatio !== undefined && fillRatio < 1;
-}
-
-function getPartialVacationOnlyOverlayStyle(row: TimesheetRow | undefined) {
-  const fillRatio = getVacationOnlyFillRatio(row);
-
-  if (fillRatio === undefined || fillRatio <= 0 || fillRatio >= 1) {
-    return undefined;
-  }
-
-  const fillStop = `${Math.round(fillRatio * 100)}%`;
-  const fillMask = `linear-gradient(135deg, #000 0 ${fillStop}, transparent ${fillStop} 100%)`;
-  const isTemporaryVacation = row!.entries.some((entry) => entry.vacationDeductsAllowance !== false && entry.vacationStatus === "TEMPORARY");
-
-  return {
-    backgroundColor: vacationFillColor,
-    backgroundImage: isTemporaryVacation ? temporaryVacationHatchBackground : undefined,
-    WebkitMaskImage: fillMask,
-    maskImage: fillMask
-  };
-}
-
-function getVacationMixOverlayStyle(row: TimesheetRow | undefined) {
-  if (!row) {
-    return undefined;
-  }
-
-  const vacationClipPath = getWorkVacationMixVacationClipPath(row);
-
-  if (!vacationClipPath) {
-    return undefined;
-  }
-
-  const isTemporaryVacation = row.vacationStatus === "TEMPORARY";
-
-  return {
-    backgroundColor: vacationFillColor,
-    backgroundImage: isTemporaryVacation ? temporaryVacationHatchBackground : undefined,
-    clipPath: vacationClipPath
-  };
-}
-
-const aiModelPresets = [
-  { label: "빠름/저렴 - gemini-3.1-flash-lite", value: "gemini-3.1-flash-lite" },
-  { label: "균형 - gemini-3.5-flash", value: "gemini-3.5-flash" },
-  { label: "안정 대안 - gemini-2.5-flash", value: "gemini-2.5-flash" },
-  { label: "품질 우선 - gemini-2.5-pro", value: "gemini-2.5-pro" },
-  { label: "직접 입력", value: "__custom__" }
-];
-
-function truncateContent(value: string): string {
-  const trimmed = value.trim();
-
-  if (trimmed.length <= 42) {
-    return trimmed;
-  }
-
-  return `${trimmed.slice(0, 42)}...`;
-}
-
-function addDays(dateKey: string, days: number): string {
-  const date = parseDateKey(dateKey);
-  date.setDate(date.getDate() + days);
-  return toBrowserDateKey(date);
-}
-
-function addBusinessDays(dateKey: string, direction: -1 | 1): string {
-  let next = addDays(dateKey, direction);
-
-  while (isWeekendDateKey(next)) {
-    next = addDays(next, direction);
-  }
-
-  return next;
-}
-
-function getBusinessDateKeysInRange(startDateKey: string, endDateKey: string): string[] {
-  const start = startDateKey <= endDateKey ? startDateKey : endDateKey;
-  const end = startDateKey <= endDateKey ? endDateKey : startDateKey;
-  const dateKeys: string[] = [];
-  const cursor = parseDateKey(start);
-
-  while (toBrowserDateKey(cursor) <= end) {
-    const dateKey = toBrowserDateKey(cursor);
-
-    if (!isWeekendDateKey(dateKey)) {
-      dateKeys.push(dateKey);
-    }
-
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  return dateKeys;
-}
-
-function getDateKeyMonthCursor(dateKey: string): { monthIndex: number; year: number } {
-  const date = parseDateKey(dateKey);
-
-  return {
-    monthIndex: date.getMonth(),
-    year: date.getFullYear()
-  };
-}
-
-function getInclusiveDateSpan(startDateKey: string, endDateKey: string): number {
-  const start = parseDateKey(startDateKey).getTime();
-  const end = parseDateKey(endDateKey).getTime();
-  const dayMs = 24 * 60 * 60 * 1000;
-
-  return Math.floor((end - start) / dayMs) + 1;
-}
-
-function getDefaultSelectedDateForMonth(year: number, monthIndex: number): string {
-  const cursor = new Date(year, monthIndex, 1);
-
-  while (cursor.getMonth() === monthIndex) {
-    const dateKey = toBrowserDateKey(cursor);
-
-    if (!isWeekendDateKey(dateKey)) {
-      return dateKey;
-    }
-
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  return toBrowserDateKey(new Date(year, monthIndex, 1));
-}
-
-function buildDraftsFromMonthData(monthData: TimesheetMonthData): Record<string, TimesheetDayDraft> {
-  const drafts: Record<string, TimesheetDayDraft> = {};
-
-  for (const holiday of monthData.holidays) {
-    drafts[holiday.dateKey] = {
-      ...createEmptyDraft(holiday.dateKey),
-      holidayName: holiday.name
-    };
-  }
-
-  for (const entry of monthData.entries) {
-    const current = drafts[entry.dateKey] ?? createEmptyDraft(entry.dateKey);
-    drafts[entry.dateKey] = withClientIds({
-      ...current,
-      ...entry,
-      holidayName: current.holidayName || entry.holidayName
-    });
-  }
-
-  return drafts;
-}
-
-function buildInitialDrafts(monthData: TimesheetMonthData, todayKey: string): Record<string, TimesheetDayDraft> {
-  const drafts = buildDraftsFromMonthData(monthData);
-
-  if (drafts[todayKey]) {
-    return drafts;
-  }
-
-  const todayDraft = createDraftForDate(todayKey, drafts);
-
-  if (!todayDraft.entries[0]?.project) {
-    return drafts;
-  }
-
-  return {
-    ...drafts,
-    [todayKey]: todayDraft
-  };
-}
-
-function buildSelectedEntryIds(drafts: Record<string, TimesheetDayDraft>): Record<string, string> {
-  return Object.fromEntries(Object.values(drafts).flatMap((day) => day.entries[0] ? [[day.dateKey, day.entries[0].clientId]] : []));
-}
-
-function getMonthCacheKey(year: number, monthIndex: number): string {
-  return `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
-}
-
 function mergeProjects(current: string[], projects: string[]): string[] {
   const next = new Set(current);
 
@@ -548,434 +196,6 @@ function mergeProjects(current: string[], projects: string[]): string[] {
   }
 
   return Array.from(next).sort((left, right) => left.localeCompare(right, "ko-KR"));
-}
-
-function findPreviousProject(dateKey: string, records: Record<string, TimesheetDayDraft>): string {
-  const previousRecord = Object.values(records)
-    .flatMap((record) => record.entries.map((entry) => ({ dateKey: record.dateKey, entry })))
-    .filter((record) => record.dateKey < dateKey && record.entry.kind === "WORK" && record.entry.project.trim())
-    .sort((left, right) => right.dateKey.localeCompare(left.dateKey))[0];
-
-  return previousRecord?.entry.project ?? "";
-}
-
-function allocateDefaultNotionCards(cards: TimesheetEntryNotionCardDraft[], entryHours: number): TimesheetEntryNotionCardDraft[] {
-  return allocateNotionCardHours({
-    entryHours,
-    links: dedupeNotionCardsByPageId(cards).map((card) => ({
-      ...card,
-      allocationMode: card.source === "weekday_default" ? "manual" : "auto",
-      source: card.source === "weekday_default" ? "weekday_default" : "previous_business_day_default"
-    }))
-  });
-}
-
-function dedupeNotionCardsByPageId(cards: TimesheetEntryNotionCardDraft[]): TimesheetEntryNotionCardDraft[] {
-  const cardsByPageId = new Map<string, TimesheetEntryNotionCardDraft>();
-
-  for (const card of cards) {
-    const pageId = card.notionPageId.trim();
-
-    if (pageId && !cardsByPageId.has(pageId)) {
-      cardsByPageId.set(pageId, {
-        ...card,
-        notionPageId: pageId
-      });
-    }
-  }
-
-  return Array.from(cardsByPageId.values());
-}
-
-function getDateKeyWeekday(dateKey: string): number {
-  const [year, month, day] = dateKey.split("-").map(Number);
-
-  return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1).getDay();
-}
-
-function createWeekdayDefaultNotionCards(dateKey: string, defaults: NotionWeeklyDefaultCard[]): TimesheetEntryNotionCardDraft[] {
-  const weekday = getDateKeyWeekday(dateKey);
-
-  return defaults
-    .filter((card) => card.enabled && card.weekday === weekday && card.notionPageId.trim())
-    .map((card) => ({
-      allocatedHours: card.allocatedHours,
-      allocationMode: "manual",
-      category: card.category,
-      endDate: card.endDate,
-      notionPageId: card.notionPageId,
-      source: "weekday_default",
-      startDate: card.startDate,
-      status: card.status,
-      title: card.title
-    }));
-}
-
-function buildNotionCardSnapshotMap(params: {
-  candidatesByDate: Record<string, NotionCardCandidate[]>;
-  savedRecords: Record<string, TimesheetDayDraft>;
-}): Map<string, Partial<TimesheetEntryNotionCardDraft>> {
-  const snapshots = new Map<string, Partial<TimesheetEntryNotionCardDraft>>();
-
-  for (const day of Object.values(params.savedRecords)) {
-    for (const link of day.entries.flatMap((entry) => entry.notionCards)) {
-      snapshots.set(link.notionPageId, link);
-    }
-  }
-
-  for (const candidate of Object.values(params.candidatesByDate).flat()) {
-    snapshots.set(candidate.notionPageId, candidate);
-  }
-
-  return snapshots;
-}
-
-function mergeNotionCardSnapshot(
-  card: TimesheetEntryNotionCardDraft,
-  snapshot: Partial<TimesheetEntryNotionCardDraft> | undefined
-): TimesheetEntryNotionCardDraft {
-  if (!snapshot) {
-    return card;
-  }
-
-  return {
-    ...card,
-    category: snapshot.category ?? card.category,
-    endDate: snapshot.endDate ?? card.endDate,
-    lastWorkedDate: snapshot.lastWorkedDate ?? card.lastWorkedDate,
-    linkedHours: snapshot.linkedHours ?? card.linkedHours,
-    startDate: snapshot.startDate ?? card.startDate,
-    status: snapshot.status ?? card.status,
-    title: snapshot.title ?? card.title,
-    workDayCount: snapshot.workDayCount ?? card.workDayCount
-  };
-}
-
-function mergeNotionCardSnapshots(
-  cards: TimesheetEntryNotionCardDraft[],
-  snapshotsByPageId: Map<string, Partial<TimesheetEntryNotionCardDraft>>
-): TimesheetEntryNotionCardDraft[] {
-  return cards.map((card) => mergeNotionCardSnapshot(card, snapshotsByPageId.get(card.notionPageId)));
-}
-
-function isNotionCardOpenForDate(card: TimesheetEntryNotionCardDraft, dateKey: string, doneStatusValues: string[]): boolean {
-  if (!card.startDate || card.startDate > dateKey) {
-    return false;
-  }
-
-  if (card.endDate && card.endDate < dateKey) {
-    return false;
-  }
-
-  return Boolean(card.endDate) || !doneStatusValues.includes(card.status ?? "");
-}
-
-function findLocalPreviousNotionCards(params: {
-  dateKey: string;
-  doneStatusValues: string[];
-  savedRecords: Record<string, TimesheetDayDraft>;
-}): { cards: TimesheetEntryNotionCardDraft[]; foundPreviousEntry: boolean } {
-  const previousEntry = Object.values(params.savedRecords)
-    .flatMap((record) =>
-      record.entries.map((entry) => ({
-        dateKey: record.dateKey,
-        entry
-      }))
-    )
-    .filter((record) =>
-      record.dateKey < params.dateKey &&
-      record.entry.kind === "WORK" &&
-      record.entry.notionCards.some((card) => card.source !== "weekday_default")
-    )
-    .sort((left, right) =>
-      right.dateKey.localeCompare(left.dateKey) ||
-      left.entry.sortOrder - right.entry.sortOrder
-    )[0];
-
-  if (!previousEntry) {
-    return {
-      cards: [],
-      foundPreviousEntry: false
-    };
-  }
-
-  return {
-    cards: previousEntry.entry.notionCards
-      .filter((card) => card.source !== "weekday_default")
-      .filter((card) => isNotionCardOpenForDate(card, params.dateKey, params.doneStatusValues))
-      .map((card) => ({
-        ...card,
-        allocatedHours: 0,
-        allocationMode: "auto",
-        source: "previous_business_day_default"
-      })),
-    foundPreviousEntry: true
-  };
-}
-
-function createEntryForDate(dateKey: string, records: Record<string, TimesheetDayDraft>, kind: WorkRecordKind = "WORK"): TimesheetEntryDraft {
-  const entry = createEmptyEntryDraft(0);
-
-  return {
-    ...entry,
-    clientId: createClientId(),
-    hours: kind === "HOLIDAY" ? 0 : 8,
-    hoursTouched: false,
-    kind,
-    project: kind === "WORK" ? findPreviousProject(dateKey, records) : ""
-  };
-}
-
-function rebalanceDefaultWorkHours(entries: TimesheetEntryDraft[], newEntry: TimesheetEntryDraft): TimesheetEntryDraft[] {
-  if (newEntry.kind !== "WORK") {
-    return [...entries, newEntry];
-  }
-
-  const fixedWorkHours = entries
-    .filter((entry) => entry.kind === "WORK" && entry.hoursTouched)
-    .reduce((sum, entry) => sum + entry.hours, 0);
-  const flexibleWorkCount = entries.filter((entry) => entry.kind === "WORK" && !entry.hoursTouched).length + 1;
-  const sharedHours = Math.max(8 - fixedWorkHours, 0) / flexibleWorkCount;
-  const normalizedSharedHours = Number(sharedHours.toFixed(2));
-
-  return [
-    ...entries.map((entry) => entry.kind === "WORK" && !entry.hoursTouched ? withRebalancedNotionCards(entry, normalizedSharedHours) : entry),
-    withRebalancedNotionCards(newEntry, normalizedSharedHours)
-  ];
-}
-
-function withRebalancedNotionCards(entry: TimesheetEntryDraft, hours: number): TimesheetEntryDraft {
-  const nextEntry = {
-    ...entry,
-    hours,
-    hoursTouched: false
-  };
-
-  if (entry.kind !== "WORK" || entry.notionCards.length === 0) {
-    return nextEntry;
-  }
-
-  try {
-    return {
-      ...nextEntry,
-      notionCards: allocateNotionCardHours({
-        entryHours: hours,
-        links: entry.notionCards
-      })
-    };
-  } catch {
-    return nextEntry;
-  }
-}
-
-function createDraftForDate(dateKey: string, records: Record<string, TimesheetDayDraft>): TimesheetDayDraft {
-  const entry = createEntryForDate(dateKey, records);
-
-  return {
-    ...createEmptyDraft(dateKey),
-    entries: [entry]
-  };
-}
-
-function firstWorkEntry(day: TimesheetDayDraft): TimesheetEntryDraft | undefined {
-  return day.entries.find((entry) => entry.kind === "WORK");
-}
-
-function firstHolidayEntry(day: TimesheetDayDraft): TimesheetEntryDraft | undefined {
-  return day.entries.find((entry) => entry.kind === "HOLIDAY");
-}
-
-function effectiveEntryHours(entry: TimesheetEntryDraft): number {
-  return entry.kind === "HOLIDAY" && entry.hours === 0 ? fullDayHours : entry.hours;
-}
-
-function formatAllocatedHours(hours: number): string {
-  return `${Number(hours.toFixed(2))}h`;
-}
-
-function hasHolidayMarker(day: TimesheetDayDraft | undefined): boolean {
-  return Boolean(day?.holidayName || day?.entries.some((entry) => entry.kind === "HOLIDAY"));
-}
-
-function uniqueWorkProjectCount(day: TimesheetDayDraft): number {
-  return new Set(day.entries.filter((entry) => entry.kind === "WORK").map((entry) => entry.project.trim()).filter(Boolean)).size;
-}
-
-function rowFromDraft(dateKey: string, todayKey: string, draft: TimesheetDayDraft | undefined, isSaved: boolean): TimesheetRow {
-  const row = draft ?? createEmptyDraft(dateKey);
-  const firstWork = firstWorkEntry(row);
-  const firstHoliday = firstHolidayEntry(row);
-  const previewContent = firstWork ? row.shortVersion || firstWork.content : "";
-  const hasContent = isSaved && row.entries.length > 0;
-  const firstVacation = row.entries.find((entry) => entry.kind === "VACATION");
-  const hasVacation = Boolean(firstVacation);
-  const hasHoliday = Boolean(firstHoliday || row.holidayName);
-  const isVacationOnly = hasVacation && !firstWork && !hasHoliday;
-  const shouldWarnForMissingNotionCards = isSaved || !isAutoProjectOnlyDraft(row);
-  const hasUnlinkedNotionWork = shouldWarnForMissingNotionCards && row.entries.some((entry) => entry.kind === "WORK" && entry.notionCards.length === 0);
-  const hasNotionCardWarning = row.entries.some((entry) => entryHasNotionCardWarning(entry, shouldWarnForMissingNotionCards));
-
-  return {
-    ...row,
-    aiTranslation: firstWork?.aiTranslation ?? "",
-    content: firstWork?.content ?? "",
-    entryCount: row.entries.length,
-    hasNotionCardWarning,
-    hasUnlinkedNotionWork,
-    hasVacation,
-    hours: row.entries.reduce((sum, entry) => sum + effectiveEntryHours(entry), 0),
-    kind: firstWork?.kind ?? (hasHoliday ? "HOLIDAY" : hasVacation ? "VACATION" : "WORK"),
-    previewContent,
-    project: firstWork?.project ?? "",
-    projectCount: uniqueWorkProjectCount(row),
-    status: isVacationOnly
-      ? "VACATION"
-      : resolveStatus({
-          dateKey,
-          hasContent: hasContent || Boolean(row.shortVersion.trim()),
-          kind: hasHoliday ? "HOLIDAY" : "WORK",
-          todayKey
-        }),
-    holidayName: row.holidayName || firstHoliday?.holidayName || "",
-    vacationName: firstVacation?.vacationName ?? "",
-    vacationStatus: firstVacation?.vacationStatus ?? "CONFIRMED"
-  };
-}
-
-function isAutoProjectOnlyDraft(draft: TimesheetDayDraft | undefined): boolean {
-  if (!draft) {
-    return false;
-  }
-
-  const [entry] = draft.entries;
-
-  return (
-    draft.entries.length === 1 &&
-    entry !== undefined &&
-    entry.kind === "WORK" &&
-    entry.hours === 8 &&
-    Boolean(entry.project.trim()) &&
-    !entry.content.trim() &&
-    !entry.aiTranslation.trim() &&
-    !draft.shortVersion.trim()
-  );
-}
-
-function draftPreviewText(row: TimesheetRow): string {
-  return truncateContent(row.previewContent);
-}
-
-function toHourCents(value: number): number {
-  return Math.round(value * 100);
-}
-
-function toHoursFromCents(value: number): number {
-  return value / 100;
-}
-
-function getNotionAllocationError(entry: TimesheetEntryDraft): string {
-  if (entry.kind !== "WORK" || entry.notionCards.length === 0) {
-    return "";
-  }
-
-  if (!Number.isFinite(entry.hours) || entry.hours < 0) {
-    return "업무 시간이 올바르지 않습니다.";
-  }
-
-  if (entry.notionCards.some((link) => !Number.isFinite(link.allocatedHours) || link.allocatedHours < 0)) {
-    return "카드 배분 시간이 올바르지 않습니다.";
-  }
-
-  const entryHourCents = toHourCents(entry.hours);
-  const allocatedHourCents = entry.notionCards.reduce((sum, link) => sum + toHourCents(link.allocatedHours), 0);
-
-  if (allocatedHourCents === entryHourCents) {
-    return "";
-  }
-
-  return `배분 합계 ${toHoursFromCents(allocatedHourCents)}h / 업무 ${toHoursFromCents(entryHourCents)}h`;
-}
-
-function entryHasNotionCardWarning(entry: TimesheetEntryDraft, isSaved: boolean): boolean {
-  if (entry.kind !== "WORK") {
-    return false;
-  }
-
-  return (isSaved && entry.notionCards.length === 0) || Boolean(getNotionAllocationError(entry));
-}
-
-function sanitizeDayForSave(day: TimesheetDayDraft): TimesheetDayDraft {
-  const hasWork = day.entries.some((entry) => entry.kind === "WORK");
-
-  return {
-    ...day,
-    shortVersion: hasWork ? day.shortVersion : "",
-    entries: day.entries.map((entry, index) => ({
-      ...entry,
-      aiTranslation: entry.kind === "WORK" ? entry.aiTranslation : "",
-      content: entry.kind === "WORK" ? entry.content : "",
-      holidayName: entry.kind === "HOLIDAY" ? entry.holidayName : "",
-      hoursTouched: undefined,
-      project: entry.kind === "WORK" ? entry.project : "",
-      sortOrder: index,
-      vacationName: entry.kind === "VACATION" ? entry.vacationName : ""
-    }))
-  };
-}
-
-function entryKey(entry: TimesheetEntryDraft): string {
-  return entry.id || entry.clientId;
-}
-
-function hasExistingAiFields(day: TimesheetDayDraft): boolean {
-  return Boolean(day.shortVersion.trim() || day.entries.some((entry) => entry.kind === "WORK" && entry.aiTranslation.trim()));
-}
-
-function hasWorkContent(day: TimesheetDayDraft): boolean {
-  return day.entries.some((entry) => entry.kind === "WORK" && entry.content.trim());
-}
-
-function hasMissingAiFields(day: TimesheetDayDraft): boolean {
-  const workEntries = day.entries.filter((entry) => entry.kind === "WORK" && entry.content.trim());
-
-  return workEntries.length > 0 && (workEntries.some((entry) => !entry.aiTranslation.trim()) || !day.shortVersion.trim());
-}
-
-function hasWorkContentChange(savedDay: TimesheetDayDraft | undefined, currentDay: TimesheetDayDraft): boolean {
-  if (!savedDay) {
-    return false;
-  }
-
-  const savedWorkEntries = new Map(savedDay.entries.filter((entry) => entry.kind === "WORK").map((entry) => [entryKey(entry), entry]));
-
-  return currentDay.entries.some((entry) => {
-    if (entry.kind !== "WORK") {
-      return false;
-    }
-
-    const savedEntry = savedWorkEntries.get(entryKey(entry));
-
-    return !savedEntry || savedEntry.content.trim() !== entry.content.trim();
-  });
-}
-
-function isDefaultFutureVacationDraft(draft: TimesheetDayDraft | undefined): boolean {
-  if (!draft) {
-    return false;
-  }
-
-  const [entry] = draft.entries;
-
-  return (
-    draft.entries.length === 1 &&
-    entry !== undefined &&
-    entry.kind === "VACATION" &&
-    entry.hours === 8 &&
-    entry.vacationName === "휴가" &&
-    !entry.content.trim() &&
-    !entry.aiTranslation.trim() &&
-    !draft.shortVersion.trim()
-  );
 }
 
 function toAiRewriteRequest(day: TimesheetDayDraft): TimesheetAiRewriteRequest | null {
@@ -997,66 +217,6 @@ function toAiRewriteRequest(day: TimesheetDayDraft): TimesheetAiRewriteRequest |
     rewriteRequested,
     shortVersion: day.shortVersion
   };
-}
-
-function statusText(row: TimesheetRow): string {
-  if (row.hasVacation && row.entries.every((entry) => entry.kind === "VACATION")) {
-    return row.vacationName || "휴가";
-  }
-
-  if (row.status === "MISSING") {
-    if (row.kind === "WORK" && row.project.trim() && !draftPreviewText(row)) {
-      return "작성 예정";
-    }
-
-    return draftPreviewText(row) || "미기입";
-  }
-
-  return truncateContent(getDisplayContent(row)) || (row.kind === "WORK" ? "(내용 없음)" : "작성 예정");
-}
-
-function calendarStatusText(row: TimesheetRow, isSelected: boolean): string {
-  if (isSelected && row.status === "MISSING" && row.kind === "WORK" && !draftPreviewText(row)) {
-    return "작성 예정";
-  }
-
-  return statusText(row);
-}
-
-function listSummaryText(row: TimesheetRow, showFullContent = false): string {
-  if (row.hasVacation && row.entries.every((entry) => entry.kind === "VACATION")) {
-    return row.vacationName || "휴가";
-  }
-
-  if (row.kind === "HOLIDAY") {
-    return row.holidayName || "공휴일";
-  }
-
-  const firstWork = firstWorkEntry(row);
-  const rawContent = (firstWork?.content ?? row.content ?? "").trim();
-  const content = showFullContent ? rawContent : truncateContent(rawContent);
-
-  if (row.status === "MISSING") {
-    if (row.kind === "WORK" && row.project.trim() && !content) {
-      return "작성 예정";
-    }
-
-    return content || "미기입";
-  }
-
-  return content || (row.kind === "WORK" ? "(내용 없음)" : "작성 예정");
-}
-
-function listDayMeta(row: TimesheetRow): string {
-  if (row.status === "MISSING") {
-    return "0h";
-  }
-
-  const workHours = row.entries.filter((entry) => entry.kind === "WORK").reduce((sum, entry) => sum + effectiveEntryHours(entry), 0);
-  const vacationNames = row.entries.filter((entry) => entry.kind === "VACATION").map((entry) => entry.vacationName.trim() || "휴가");
-  const parts = [workHours ? `업무 ${workHours}h` : "", ...vacationNames, row.holidayName.trim()].filter(Boolean);
-
-  return parts.join(" · ") || `${row.hours}h`;
 }
 
 export function TimesheetWorkspace({
@@ -1117,9 +277,6 @@ export function TimesheetWorkspace({
   const [vacationColorsByYear, setVacationColorsByYear] = useState<Record<number, Record<string, VacationColor>>>(() => ({
     [initialYear]: initialMonthData.vacationColors
   }));
-  const [loadedMonthKeys, setLoadedMonthKeys] = useState(() => {
-    return new Set([getMonthCacheKey(initialYear, initialMonthIndex)]);
-  });
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState("");
   const [notionSyncError, setNotionSyncError] = useState("");
@@ -1134,48 +291,14 @@ export function TimesheetWorkspace({
   const [projectAddState, setProjectAddState] = useState<ProjectAddState>("idle");
   const [projectAddError, setProjectAddError] = useState("");
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [profileUsername, setProfileUsername] = useState(initialCurrentUser.username);
-  const [profileEmail, setProfileEmail] = useState(initialCurrentUser.email);
-  const [profilePassword, setProfilePassword] = useState("");
-  const [profileState, setProfileState] = useState<SettingsSaveState>("idle");
-  const [profileError, setProfileError] = useState("");
-  const [holidayApiKey, setHolidayApiKey] = useState(initialHolidayApiKey);
-  const [holidayApiKeyState, setHolidayApiKeyState] = useState<SettingsSaveState>("idle");
-  const [holidayApiKeyError, setHolidayApiKeyError] = useState("");
-  const [holidayApiKeyTestState, setHolidayApiKeyTestState] = useState<SettingsSaveState>("idle");
-  const [holidayApiKeyTestMessage, setHolidayApiKeyTestMessage] = useState("");
-  const [aiSetting, setAiSetting] = useState(initialAiSetting);
   const [aiRewriteRequests, setAiRewriteRequests] = useState(initialAiRewriteRequests);
   const [isAiRewriteQueueOpen, setIsAiRewriteQueueOpen] = useState(false);
-  const [aiEnabled, setAiEnabled] = useState(initialAiSetting.enabled);
-  const [aiApiKey, setAiApiKey] = useState("");
-  const [aiClearApiKey, setAiClearApiKey] = useState(false);
-  const [aiModel, setAiModel] = useState(initialAiSetting.model);
-  const [aiCustomModel, setAiCustomModel] = useState(aiModelPresets.some((preset) => preset.value === initialAiSetting.model) ? "" : initialAiSetting.model);
-  const [aiContextDays, setAiContextDays] = useState(initialAiSetting.contextDays);
-  const [aiBackfillMissing, setAiBackfillMissing] = useState(initialAiSetting.backfillMissing);
-  const [aiBackfillLimit, setAiBackfillLimit] = useState(initialAiSetting.backfillLimit);
-  const [aiCleanupMode, setAiCleanupMode] = useState<AiCleanupMode>(initialAiSetting.cleanupMode);
-  const [aiSettingState, setAiSettingState] = useState<SettingsSaveState>("idle");
-  const [aiSettingMessage, setAiSettingMessage] = useState("");
-  const [aiTestState, setAiTestState] = useState<SettingsSaveState>("idle");
-  const [aiTestMessage, setAiTestMessage] = useState("");
   const [holidayWarning, setHolidayWarning] = useState(initialMonthData.holidayWarning ?? "");
   const [holidayWarningMonthKeys, setHolidayWarningMonthKeys] = useState(() => {
     const initialMonthKey = getMonthCacheKey(initialYear, initialMonthIndex);
 
     return new Set(initialMonthData.holidayWarning ? [initialMonthKey] : []);
   });
-  const [holidayResetState, setHolidayResetState] = useState<HolidayResetState>("idle");
-  const [holidayResetError, setHolidayResetError] = useState("");
-  const [managedUsers, setManagedUsers] = useState(initialManagedUsers);
-  const [newUserUsername, setNewUserUsername] = useState("");
-  const [newUserEmail, setNewUserEmail] = useState("");
-  const [newUserPassword, setNewUserPassword] = useState("");
-  const [newUserRole, setNewUserRole] = useState<UserRole>("USER");
-  const [userCreateState, setUserCreateState] = useState<SettingsSaveState>("idle");
-  const [userCreateError, setUserCreateError] = useState("");
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
   const [isVacationRangeOpen, setIsVacationRangeOpen] = useState(false);
   const [vacationRangeStart, setVacationRangeStart] = useState(todayKey);
@@ -1200,13 +323,66 @@ export function TimesheetWorkspace({
     field: "summary" | "translation";
     previousValue: string;
   } | null>(null);
-  const [monthLoadState, setMonthLoadState] = useState<MonthLoadState>("idle");
-  const [monthLoadError, setMonthLoadError] = useState("");
-  const [isInitialMonthSyncing, setIsInitialMonthSyncing] = useState(true);
-  const [projectRecommendationLoadingKeys, setProjectRecommendationLoadingKeys] = useState<Set<string>>(() => new Set());
-  const [notionRecommendationLoadingKeys, setNotionRecommendationLoadingKeys] = useState<Set<string>>(() => new Set());
-  const previousNotionCardRecommendationKeys = useRef(new Set<string>());
-  const previousProjectRecommendationKeys = useRef(new Set<string>());
+  const settings = useTimesheetSettings({
+    createUserAction,
+    currentUser,
+    currentMonth: { monthIndex: monthCursor.monthIndex, year: monthCursor.year },
+    initialAiSetting,
+    initialHolidayApiKey,
+    initialManagedUsers,
+    onHolidayCacheReset: applyHolidayCacheReset,
+    onOpenRewriteQueue: () => setIsAiRewriteQueueOpen(true),
+    onProfileUpdated: setCurrentUser,
+    refreshRewriteQueue: refreshAiRewriteRequests,
+    resetAllHolidayCacheAction,
+    resetCurrentMonthHolidayCacheAction: resetHolidayCacheAction,
+    rewriteQueueCount: aiRewriteRequests.length,
+    saveHolidayApiKeyAction,
+    testGeminiApiKeyAction,
+    testHolidayApiKeyAction,
+    updateAiSettingAction,
+    updateProfileAction
+  });
+  const { aiSetting, isOpen: isSettingsOpen, modalProps: settingsModalProps, rewriteQueueCleanupMode } = settings;
+  const {
+    finishInitialSync,
+    getVisibleMonthKey,
+    isInitialMonthSyncing,
+    isMonthLoaded,
+    loadVisibleMonthData,
+    markMonthIdle,
+    markMonthLoaded,
+    markMonthLoading,
+    monthLoadError,
+    monthLoadState,
+    replaceLoadedMonths
+  } = useTimesheetMonthLoader({
+    initialLoadedMonthKey: getMonthCacheKey(initialYear, initialMonthIndex),
+    loadMonthAction,
+    monthIndex: monthCursor.monthIndex,
+    onMonthDataLoaded: applyLoadedVisibleMonthData,
+    vacationColorsByYear,
+    year: monthCursor.year
+  });
+  const {
+    isNotionRecommendationLoading: isNotionRecommendationLoadingFor,
+    isProjectRecommendationLoading: isProjectRecommendationLoadingFor,
+    recommendPreviousNotionCardsForDraft,
+    recommendPreviousProjectForDraft
+  } = useTimesheetRecommendations({
+    candidatesByDate: notionCandidates.candidatesByDate,
+    doneStatusValues: initialNotionDoneStatusValues,
+    findPreviousNotionCardsAction,
+    findPreviousProjectAction,
+    onApplyDatabaseNotionCards: applyDatabaseNotionRecommendation,
+    onApplyLocalNotionCards: applyLocalNotionRecommendation,
+    onApplyProjectRecommendation: applyProjectRecommendation,
+    records,
+    savedEntryDateKeys,
+    savedRecords,
+    selectedDateKey,
+    weeklyDefaults: initialNotionWeeklyDefaults
+  });
   const isDailyEditorModalActive = isCompactViewport && isDailyEditorRequested;
 
   useEffect(() => {
@@ -1234,7 +410,7 @@ export function TimesheetWorkspace({
     const browserYear = browserToday.getFullYear();
 
     if (browserTodayKey === initialTodayKey && browserYear === initialYear && browserMonthIndex === initialMonthIndex) {
-      setIsInitialMonthSyncing(false);
+      finishInitialSync();
       return;
     }
 
@@ -1304,7 +480,7 @@ export function TimesheetWorkspace({
 
           return next;
         });
-        setLoadedMonthKeys((current) => new Set(current).add(monthKey));
+        markMonthLoaded(monthKey);
         updateAiRewriteRequestsFromDays(monthData.entries);
       } catch {
         // Midnight refresh is opportunistic; normal month navigation still reports load errors.
@@ -1403,8 +579,10 @@ export function TimesheetWorkspace({
   const selectedListRowKey = selectedListTarget ? listRowKey(selectedListTarget.dateKey, selectedListTarget.entryClientId) : "";
   const selectedEditorKind: WorkRecordKind = selectedEntry?.kind ?? (selectedDay.holidayName ? "HOLIDAY" : isFutureDate ? "VACATION" : "WORK");
   const selectedNotionAllocationError = selectedEntry ? getNotionAllocationError(selectedEntry) : "";
-  const isSelectedProjectRecommendationLoading = Boolean(selectedEntry && projectRecommendationLoadingKeys.has(`${selectedDateKey}:${selectedEntry.clientId}`));
-  const isSelectedNotionRecommendationLoading = Boolean(selectedEntry && notionRecommendationLoadingKeys.has(`${selectedDateKey}:${selectedEntry.clientId}`));
+  const isSelectedProjectRecommendationLoading = Boolean(selectedEntry && isProjectRecommendationLoadingFor(selectedDateKey, selectedEntry.clientId));
+  const isSelectedNotionRecommendationLoading = Boolean(selectedEntry && isNotionRecommendationLoadingFor(selectedDateKey, selectedEntry.clientId));
+  const selectedNotionEntryClientId = selectedEntry ? selectedEntry.clientId || selectedEntry.id : "";
+  const selectedEntryLinkedNotionPageIds = selectedEntry ? selectedEntry.notionCards.map((link) => link.notionPageId) : [];
 
   const monthDateKeys = useMemo(
     () => Object.keys(rows).filter((dateKey) => dateKey.startsWith(`${monthCursor.year}-${String(monthCursor.monthIndex + 1).padStart(2, "0")}`)),
@@ -1432,7 +610,6 @@ export function TimesheetWorkspace({
   const shortcutModifierKey = useMemo(() => getSystemModifierKey(), []);
   const editorKindOptions = isFutureDate ? kindOptions.filter((option) => option.value !== "WORK") : kindOptions;
   const canDeleteSelected = savedEntryDateKeys.has(selectedDateKey);
-  const isAdmin = currentUser.role === "ADMIN";
   const selectedTotalHours = selectedDay.entries.reduce((sum, entry) => sum + entry.hours, 0);
   const selectedHasWork = selectedDay.entries.some((entry) => entry.kind === "WORK");
   const selectedIsHoliday = selectedEditorKind === "HOLIDAY";
@@ -1447,24 +624,65 @@ export function TimesheetWorkspace({
   const vacationRangeSaveActions = getVacationSaveActions(selectedVacationMode, vacationRangeStatus);
   const primaryVacationRangeSaveAction = vacationRangeSaveActions.find((action) => action.variant === "primary");
   const secondaryVacationRangeSaveActions = vacationRangeSaveActions.filter((action) => action.variant !== "primary");
-  const isDevelopment = process.env.NODE_ENV === "development";
-  const entryDragSensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8
-      }
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates
-    })
-  );
-
-  function getVisibleMonthKey() {
-    return getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
-  }
 
   function rememberVacationColors(year: number, monthData: TimesheetMonthData) {
     setVacationColorsByYear((current) => ({ ...current, [year]: monthData.vacationColors }));
+  }
+
+  function applyHolidayCacheReset(scope: "all" | "currentMonth", monthData: TimesheetMonthData) {
+    const monthKey = getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
+    const monthDrafts = buildDraftsFromMonthData(monthData);
+
+    rememberVacationColors(monthCursor.year, monthData);
+
+    const removeApiHolidayDrafts = (current: Record<string, TimesheetDayDraft>) => {
+      const next = { ...current };
+
+      for (const [dateKey, draft] of Object.entries(next)) {
+        if ((scope === "all" || dateKey.startsWith(`${monthKey}-`)) && draft.entries.length === 0 && draft.holidayName) {
+          delete next[dateKey];
+        }
+      }
+
+      return {
+        ...next,
+        ...monthDrafts
+      };
+    };
+
+    setRecords(removeApiHolidayDrafts);
+    setSavedRecords(removeApiHolidayDrafts);
+    setHolidayWarning(monthData.holidayWarning ?? "");
+    setHolidayWarningMonthKeys((current) => {
+      if (scope === "all") {
+        return new Set<string>();
+      }
+
+      const next = new Set(current);
+
+      if (monthData.holidayWarning) {
+        next.add(monthKey);
+      } else {
+        next.delete(monthKey);
+      }
+
+      return next;
+    });
+    setProjects((current) => mergeProjects(current, monthData.projects));
+    setSavedEntryDateKeys((current) => {
+      const next = new Set(current);
+
+      for (const entry of monthData.entries) {
+        next.add(entry.dateKey);
+      }
+
+      return next;
+    });
+    if (scope === "all") {
+      replaceLoadedMonths(monthKey);
+    } else {
+      markMonthLoaded(monthKey);
+    }
   }
 
   async function refreshVacationColors(dateKeys: string[]) {
@@ -1526,23 +744,9 @@ export function TimesheetWorkspace({
 
       return next;
     });
-    setLoadedMonthKeys((current) => new Set(current).add(monthKey));
-    setMonthLoadState("idle");
-    setIsInitialMonthSyncing(false);
-  }
-
-  async function loadVisibleMonthData() {
-    setMonthLoadState("loading");
-    setMonthLoadError("");
-
-    try {
-      return await loadMonthAction(monthCursor.year, monthCursor.monthIndex);
-    } catch (error) {
-      setMonthLoadState("error");
-      setMonthLoadError(error instanceof Error ? error.message : "월 데이터를 불러오지 못했습니다.");
-      setIsInitialMonthSyncing(false);
-      throw error;
-    }
+    markMonthLoaded(monthKey);
+    markMonthIdle();
+    finishInitialSync();
   }
 
   async function saveEntryAndNotify(entry: TimesheetDayDraft): Promise<TimesheetSaveResult> {
@@ -1572,86 +776,45 @@ export function TimesheetWorkspace({
     scope: "timesheet"
   });
 
-  useEffect(() => {
-    const monthKey = getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
+  function applyLoadedVisibleMonthData({ monthData, monthKey, year }: VisibleMonthLoadResult) {
+    rememberVacationColors(year, monthData);
+    const monthDrafts = buildDraftsFromMonthData(monthData);
 
-    if (loadedMonthKeys.has(monthKey) && vacationColorsByYear[monthCursor.year]) {
-      setMonthLoadState("idle");
-      setMonthLoadError("");
-      setIsInitialMonthSyncing(false);
-      return;
-    }
+    setHolidayWarning(monthData.holidayWarning ?? "");
+    setHolidayWarningMonthKeys((current) => {
+      const next = new Set(current);
 
-    let isActive = true;
-
-    async function loadMonth() {
-      setMonthLoadState("loading");
-      setMonthLoadError("");
-
-      try {
-        const monthData = await loadMonthAction(monthCursor.year, monthCursor.monthIndex);
-
-        if (!isActive) {
-          return;
-        }
-
-        rememberVacationColors(monthCursor.year, monthData);
-        const monthDrafts = buildDraftsFromMonthData(monthData);
-
-        setHolidayWarning(monthData.holidayWarning ?? "");
-        setHolidayWarningMonthKeys((current) => {
-          const next = new Set(current);
-
-          if (monthData.holidayWarning) {
-            next.add(monthKey);
-          } else {
-            next.delete(monthKey);
-          }
-
-          return next;
-        });
-        setRecords((current) => ({
-          ...current,
-          ...monthDrafts
-        }));
-        setSavedRecords((current) => ({
-          ...current,
-          ...monthDrafts
-        }));
-        setSelectedEntryIdByDate((current) => ({
-          ...current,
-          ...Object.fromEntries(Object.values(monthDrafts).flatMap((day) => day.entries[0] ? [[day.dateKey, day.entries[0].clientId]] : []))
-        }));
-        setProjects((current) => mergeProjects(current, monthData.projects));
-        setSavedEntryDateKeys((current) => {
-          const next = new Set(current);
-
-          for (const entry of monthData.entries) {
-            next.add(entry.dateKey);
-          }
-
-          return next;
-        });
-        setLoadedMonthKeys((current) => new Set(current).add(monthKey));
-        setMonthLoadState("idle");
-        setIsInitialMonthSyncing(false);
-      } catch (error) {
-        if (!isActive) {
-          return;
-        }
-
-        setMonthLoadState("error");
-        setMonthLoadError(error instanceof Error ? error.message : "월 데이터를 불러오지 못했습니다.");
-        setIsInitialMonthSyncing(false);
+      if (monthData.holidayWarning) {
+        next.add(monthKey);
+      } else {
+        next.delete(monthKey);
       }
-    }
 
-    void loadMonth();
+      return next;
+    });
+    setRecords((current) => ({
+      ...current,
+      ...monthDrafts
+    }));
+    setSavedRecords((current) => ({
+      ...current,
+      ...monthDrafts
+    }));
+    setSelectedEntryIdByDate((current) => ({
+      ...current,
+      ...Object.fromEntries(Object.values(monthDrafts).flatMap((day) => day.entries[0] ? [[day.dateKey, day.entries[0].clientId]] : []))
+    }));
+    setProjects((current) => mergeProjects(current, monthData.projects));
+    setSavedEntryDateKeys((current) => {
+      const next = new Set(current);
 
-    return () => {
-      isActive = false;
-    };
-  }, [loadMonthAction, loadedMonthKeys, monthCursor.monthIndex, monthCursor.year, vacationColorsByYear]);
+      for (const entry of monthData.entries) {
+        next.add(entry.dateKey);
+      }
+
+      return next;
+    });
+  }
 
   useEffect(() => {
     function warnBeforeUnload(event: BeforeUnloadEvent) {
@@ -1668,13 +831,35 @@ export function TimesheetWorkspace({
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [isDirty]);
 
-  useEffect(() => {
-    recommendPreviousProjectForDraft(selectedDateKey, records[selectedDateKey]);
-  }, [records, savedEntryDateKeys, selectedDateKey]);
+  function applyProjectRecommendation({ clientId, dateKey, project }: ProjectRecommendationApplication) {
+    setProjects((current) => mergeProjects(current, [project]));
+    setRecords((current) => {
+      const day = current[dateKey];
 
-  useEffect(() => {
-    recommendPreviousNotionCardsForDraft(selectedDateKey, records[selectedDateKey]);
-  }, [records, savedEntryDateKeys, selectedDateKey]);
+      if (!day) {
+        return current;
+      }
+
+      const entries = day.entries.map((entry) => {
+        if (entry.clientId !== clientId || entry.kind !== "WORK" || entry.project.trim()) {
+          return entry;
+        }
+
+        return {
+          ...entry,
+          project
+        };
+      });
+
+      return {
+        ...current,
+        [dateKey]: {
+          ...day,
+          entries
+        }
+      };
+    });
+  }
 
   function resetEntryFeedback() {
     setSaveState("idle");
@@ -1705,198 +890,68 @@ export function TimesheetWorkspace({
     });
   }
 
-  async function fillPreviousProjectFromDatabase(dateKey: string, clientId: string) {
-    const loadingKey = `${dateKey}:${clientId}`;
+  function applyDatabaseNotionRecommendation({ cards, clientId, dateKey }: DatabaseNotionRecommendationApplication) {
+    setRecords((current) => {
+      const day = current[dateKey];
 
-    setProjectRecommendationLoadingKeys((current) => new Set(current).add(loadingKey));
-
-    try {
-      const project = (await findPreviousProjectAction(dateKey)).trim();
-
-      if (!project) {
-        return;
+      if (!day) {
+        return current;
       }
 
-      setProjects((current) => mergeProjects(current, [project]));
-      setRecords((current) => {
-        const day = current[dateKey];
-
-        if (!day) {
-          return current;
+      const entries = day.entries.map((entry) => {
+        if (entry.clientId !== clientId || entry.kind !== "WORK" || entry.notionCards.some((card) => card.source !== "weekday_default")) {
+          return entry;
         }
 
-        const entries = day.entries.map((entry) => {
-          if (entry.clientId !== clientId || entry.kind !== "WORK" || entry.project.trim()) {
-            return entry;
-          }
+        const cardsByPageId = new Map(cards.map((card) => [card.notionPageId, card]));
+        const nextCards = entry.notionCards.map((card) => mergeNotionCardSnapshot(card, cardsByPageId.get(card.notionPageId)));
+        const nextPageIds = new Set(nextCards.map((card) => card.notionPageId));
 
-          return {
-            ...entry,
-            project
-          };
-        });
+        nextCards.push(...cards.filter((card) => !nextPageIds.has(card.notionPageId)));
 
         return {
-          ...current,
-          [dateKey]: {
-            ...day,
-            entries
-          }
+          ...entry,
+          notionCards: allocateDefaultNotionCards(nextCards, entry.hours)
         };
       });
-    } catch {
-      // Auto-fill is a convenience path; leave the draft editable if lookup fails.
-    } finally {
-      setProjectRecommendationLoadingKeys((current) => {
-        const next = new Set(current);
 
-        next.delete(loadingKey);
-
-        return next;
-      });
-    }
+      return {
+        ...current,
+        [dateKey]: {
+          ...day,
+          entries
+        }
+      };
+    });
   }
 
-  async function fillPreviousNotionCardsFromDatabase(dateKey: string, clientId: string) {
-    const loadingKey = `${dateKey}:${clientId}`;
+  function applyLocalNotionRecommendation({ cards, clientId, dateKey }: LocalNotionRecommendationApplication) {
+    setRecords((current) => {
+      const currentDay = current[dateKey];
 
-    setNotionRecommendationLoadingKeys((current) => new Set(current).add(loadingKey));
-
-    try {
-      const cards = await findPreviousNotionCardsAction(dateKey);
-
-      if (cards.length === 0) {
-        return;
+      if (!currentDay) {
+        return current;
       }
 
-      setRecords((current) => {
-        const day = current[dateKey];
-
-        if (!day) {
-          return current;
+      const entries = currentDay.entries.map((currentEntry) => {
+        if (currentEntry.clientId !== clientId || currentEntry.kind !== "WORK" || currentEntry.notionCards.length > 0) {
+          return currentEntry;
         }
 
-        const entries = day.entries.map((entry) => {
-          if (entry.clientId !== clientId || entry.kind !== "WORK" || entry.notionCards.some((card) => card.source !== "weekday_default")) {
-            return entry;
-          }
-
-          const cardsByPageId = new Map(cards.map((card) => [card.notionPageId, card]));
-          const nextCards = entry.notionCards.map((card) => mergeNotionCardSnapshot(card, cardsByPageId.get(card.notionPageId)));
-          const nextPageIds = new Set(nextCards.map((card) => card.notionPageId));
-
-          nextCards.push(...cards.filter((card) => !nextPageIds.has(card.notionPageId)));
-
-          return {
-            ...entry,
-            notionCards: allocateDefaultNotionCards(nextCards, entry.hours)
-          };
-        });
-
         return {
-          ...current,
-          [dateKey]: {
-            ...day,
-            entries
-          }
+          ...currentEntry,
+          notionCards: allocateDefaultNotionCards(cards, currentEntry.hours)
         };
       });
-    } catch {
-      // Auto-fill is a convenience path; leave the draft editable if lookup fails.
-    } finally {
-      setNotionRecommendationLoadingKeys((current) => {
-        const next = new Set(current);
 
-        next.delete(loadingKey);
-
-        return next;
-      });
-    }
-  }
-
-  function recommendPreviousProjectForDraft(dateKey: string, day: TimesheetDayDraft | undefined) {
-    if (isWeekendDateKey(dateKey) || savedEntryDateKeys.has(dateKey)) {
-      return;
-    }
-
-    const entry = day?.entries[0];
-
-    if (entry?.kind === "WORK" && !entry.project.trim()) {
-      const recommendationKey = `${dateKey}:${entry.clientId}`;
-
-      if (previousProjectRecommendationKeys.current.has(recommendationKey)) {
-        return;
-      }
-
-      previousProjectRecommendationKeys.current.add(recommendationKey);
-      void fillPreviousProjectFromDatabase(dateKey, entry.clientId);
-    }
-  }
-
-  function recommendPreviousNotionCardsForDraft(dateKey: string, day: TimesheetDayDraft | undefined) {
-    if (isWeekendDateKey(dateKey) || savedEntryDateKeys.has(dateKey)) {
-      return;
-    }
-
-    const entry = day?.entries[0];
-
-    if (entry?.kind === "WORK" && entry.notionCards.length === 0) {
-      const recommendationKey = `${dateKey}:${entry.clientId}`;
-
-      if (previousNotionCardRecommendationKeys.current.has(recommendationKey)) {
-        return;
-      }
-
-      previousNotionCardRecommendationKeys.current.add(recommendationKey);
-
-      const snapshotsByPageId = buildNotionCardSnapshotMap({
-        candidatesByDate: notionCandidates.candidatesByDate,
-        savedRecords
-      });
-      const weekdayCards = mergeNotionCardSnapshots(
-        createWeekdayDefaultNotionCards(dateKey, initialNotionWeeklyDefaults),
-        snapshotsByPageId
-      );
-      const previousCards = findLocalPreviousNotionCards({
-        dateKey,
-        doneStatusValues: initialNotionDoneStatusValues,
-        savedRecords
-      });
-      const localCards = [...weekdayCards, ...previousCards.cards];
-
-      if (localCards.length > 0) {
-        setRecords((current) => {
-          const currentDay = current[dateKey];
-
-          if (!currentDay) {
-            return current;
-          }
-
-          const entries = currentDay.entries.map((currentEntry) => {
-            if (currentEntry.clientId !== entry.clientId || currentEntry.kind !== "WORK" || currentEntry.notionCards.length > 0) {
-              return currentEntry;
-            }
-
-            return {
-              ...currentEntry,
-              notionCards: allocateDefaultNotionCards(localCards, currentEntry.hours)
-            };
-          });
-
-          return {
-            ...current,
-            [dateKey]: {
-              ...currentDay,
-              entries
-            }
-          };
-        });
-      }
-
-      if (!previousCards.foundPreviousEntry) {
-        void fillPreviousNotionCardsFromDatabase(dateKey, entry.clientId);
-      }
-    }
+      return {
+        ...current,
+        [dateKey]: {
+          ...currentDay,
+          entries
+        }
+      };
+    });
   }
 
   function discardSelectedDraft() {
@@ -1944,6 +999,7 @@ export function TimesheetWorkspace({
         [dateKey]: draft
       };
     });
+
     setSelectedEntryIdByDate((selected) => ({
       ...selected,
       [dateKey]: draft.entries[0]?.clientId ?? ""
@@ -1971,10 +1027,7 @@ export function TimesheetWorkspace({
   }
 
   function updateMonthCursor(nextCursor: { monthIndex: number; year: number }) {
-    if (!loadedMonthKeys.has(getMonthCacheKey(nextCursor.year, nextCursor.monthIndex))) {
-      setMonthLoadState("loading");
-      setMonthLoadError("");
-    }
+    markMonthLoading(getMonthCacheKey(nextCursor.year, nextCursor.monthIndex));
 
     setMonthCursor(nextCursor);
   }
@@ -2112,12 +1165,11 @@ export function TimesheetWorkspace({
       const cursor = getDateKeyMonthCursor(dateKey);
       return getMonthCacheKey(cursor.year, cursor.monthIndex);
     }));
-    const knownMonthKeys = new Set(loadedMonthKeys);
     const warningMonthKeys = new Set(holidayWarningMonthKeys);
     let loadedDrafts: Record<string, TimesheetDayDraft> = {};
 
     for (const monthKey of monthKeys) {
-      if (knownMonthKeys.has(monthKey) && !warningMonthKeys.has(monthKey)) {
+      if (isMonthLoaded(monthKey) && !warningMonthKeys.has(monthKey)) {
         continue;
       }
 
@@ -2131,7 +1183,6 @@ export function TimesheetWorkspace({
         ...loadedDrafts,
         ...monthDrafts
       };
-      knownMonthKeys.add(monthKey);
 
       setRecords((current) => ({
         ...current,
@@ -2167,7 +1218,7 @@ export function TimesheetWorkspace({
 
         return next;
       });
-      setLoadedMonthKeys((current) => new Set(current).add(monthKey));
+      markMonthLoaded(monthKey);
     }
 
     return loadedDrafts;
@@ -2286,22 +1337,13 @@ export function TimesheetWorkspace({
     return Boolean(savedEntryDateKeys.has(dateKey) || draft?.entries.length || draft?.shortVersion.trim());
   }
 
-  async function saveVacationDays(
-    dateKeys: string[],
-    vacationName: string,
-    hours: number,
-    vacationStatus: VacationStatus = "CONFIRMED",
-    vacationDeductsAllowance = true,
-    onProgress?: (completed: number, total: number) => void
-  ): Promise<TimesheetDayDraft[]> {
+  async function saveVacationDays(dateKeys: string[], vacationName: string, hours: number, vacationStatus: VacationStatus = "CONFIRMED", vacationDeductsAllowance = true, onProgress?: (completed: number, total: number) => void): Promise<TimesheetDayDraft[]> {
     const savedDays: TimesheetDayDraft[] = [];
     const total = dateKeys.length;
 
     try {
       for (const dateKey of dateKeys) {
-        const saveResult = await saveEntryAction(
-          sanitizeDayForSave(createVacationDay(dateKey, vacationName, hours, vacationStatus, vacationDeductsAllowance))
-        );
+        const saveResult = await saveEntryAction(sanitizeDayForSave(createVacationDay(dateKey, vacationName, hours, vacationStatus, vacationDeductsAllowance)));
         const savedDay = withClientIds(saveResult.day);
 
         showNotionSyncError(saveResult.notionSyncError);
@@ -2386,8 +1428,6 @@ export function TimesheetWorkspace({
     return savedDays;
   }
 
-  // Kept pure: callers run this inside state updaters, i.e. during render,
-  // where kicking off an action would update the Router mid-render.
   function createDraftForSelectedDate(current: Record<string, TimesheetDayDraft>): TimesheetDayDraft {
     if (selectedDateKey > todayKey) {
       return createFutureDraftForDate(selectedDateKey);
@@ -2767,16 +1807,9 @@ export function TimesheetWorkspace({
       }
 
       setVacationRangeProgress({ completed: 0, total: targetDateKeys.length });
-      const savedDays = await saveVacationDays(
-        targetDateKeys,
-        vacationRangeName,
-        vacationRangeHours,
-        vacationStatus,
-        vacationRangeDeductsAllowance,
-        (completed, total) => {
-          setVacationRangeProgress({ completed, total });
-        }
-      );
+      const savedDays = await saveVacationDays(targetDateKeys, vacationRangeName, vacationRangeHours, vacationStatus, vacationRangeDeductsAllowance, (completed, total) => {
+        setVacationRangeProgress({ completed, total });
+      });
       const selectedSavedDay = savedDays.find((day) => day.dateKey === selectedDateKey);
 
       if (selectedSavedDay) {
@@ -3201,10 +2234,6 @@ export function TimesheetWorkspace({
       setProjectAddState("error");
       setProjectAddError("프로젝트를 추가하지 못했습니다.");
     }
-  }
-
-  function getSelectedAiModel(): string {
-    return aiModel === "__custom__" ? aiCustomModel.trim() || "gemini-3.1-flash-lite" : aiModel;
   }
 
   function mergeSavedDays(days: TimesheetDayDraft[]) {
@@ -3650,272 +2679,6 @@ export function TimesheetWorkspace({
     }
   }
 
-  function openSettings() {
-    setProfileUsername(currentUser.username);
-    setProfileEmail(currentUser.email);
-    setProfilePassword("");
-    setProfileState("idle");
-    setProfileError("");
-    setHolidayApiKeyState("idle");
-    setHolidayApiKeyError("");
-    setHolidayApiKeyTestState("idle");
-    setHolidayApiKeyTestMessage("");
-    setAiEnabled(aiSetting.enabled);
-    setAiApiKey("");
-    setAiClearApiKey(false);
-    setAiModel(aiModelPresets.some((preset) => preset.value === aiSetting.model) ? aiSetting.model : "__custom__");
-    setAiCustomModel(aiModelPresets.some((preset) => preset.value === aiSetting.model) ? "" : aiSetting.model);
-    setAiContextDays(aiSetting.contextDays);
-    setAiBackfillMissing(aiSetting.backfillMissing);
-    setAiBackfillLimit(aiSetting.backfillLimit);
-    setAiCleanupMode(aiSetting.cleanupMode);
-    setAiSettingState("idle");
-    setAiSettingMessage("");
-    setAiTestState("idle");
-    setAiTestMessage("");
-    void refreshAiRewriteRequests();
-    setHolidayResetState("idle");
-    setHolidayResetError("");
-    setUserCreateState("idle");
-    setUserCreateError("");
-    setIsSettingsOpen(true);
-  }
-
-  useEffect(() => {
-    function openTimesheetSettings(event: Event) {
-      event.preventDefault();
-      openSettings();
-    }
-
-    window.addEventListener("ajam:open-settings", openTimesheetSettings);
-    return () => window.removeEventListener("ajam:open-settings", openTimesheetSettings);
-  });
-
-  async function saveProfile() {
-    setProfileState("saving");
-    setProfileError("");
-
-    try {
-      const updatedUser = await updateProfileAction({
-        email: profileEmail,
-        password: profilePassword || undefined,
-        username: profileUsername
-      });
-
-      setCurrentUser(updatedUser);
-      setProfilePassword("");
-      setManagedUsers((current) => current.map((user) => (user.id === updatedUser.id ? updatedUser : user)));
-      setProfileState("saved");
-    } catch (error) {
-      setProfileState("error");
-      setProfileError(error instanceof Error ? error.message : "계정 정보를 저장하지 못했습니다.");
-    }
-  }
-
-  async function saveHolidayApiKey() {
-    setHolidayApiKeyState("saving");
-    setHolidayApiKeyError("");
-
-    try {
-      await saveHolidayApiKeyAction(holidayApiKey);
-      setHolidayApiKeyState("saved");
-    } catch (error) {
-      setHolidayApiKeyState("error");
-      setHolidayApiKeyError(error instanceof Error ? error.message : "API 키를 저장하지 못했습니다.");
-    }
-  }
-
-  async function testHolidayApiKey() {
-    setHolidayApiKeyTestState("saving");
-    setHolidayApiKeyTestMessage("");
-
-    try {
-      const result = await testHolidayApiKeyAction(holidayApiKey, monthCursor.year, monthCursor.monthIndex);
-      const label = getMonthLabel(monthCursor.year, monthCursor.monthIndex);
-      setHolidayApiKeyTestState("saved");
-      setHolidayApiKeyTestMessage(result.holidays.length > 0 ? label + " 공휴일 " + result.holidays.length + "건 확인됨" : label + " 응답은 정상이며 공휴일은 없습니다.");
-    } catch (error) {
-      setHolidayApiKeyTestState("error");
-      setHolidayApiKeyTestMessage(error instanceof Error ? error.message : "API 키 테스트에 실패했습니다.");
-    }
-  }
-
-  async function saveAiSetting() {
-    setAiSettingState("saving");
-    setAiSettingMessage("");
-
-    try {
-      const updated = await updateAiSettingAction({
-        apiKey: aiApiKey || undefined,
-        backfillLimit: aiBackfillLimit,
-        backfillMissing: aiBackfillMissing,
-        clearApiKey: aiClearApiKey,
-        contextDays: aiContextDays,
-        cleanupMode: aiCleanupMode,
-        enabled: aiEnabled,
-        model: getSelectedAiModel()
-      });
-
-      setAiSetting(updated);
-      setAiApiKey("");
-      setAiClearApiKey(false);
-      setAiSettingState("saved");
-      setAiSettingMessage("AI 자동 정리 설정을 저장했습니다.");
-    } catch (error) {
-      setAiSettingState("error");
-      setAiSettingMessage(error instanceof Error ? error.message : "AI 설정을 저장하지 못했습니다.");
-    }
-  }
-
-  async function testAiSetting() {
-    setAiTestState("saving");
-    setAiTestMessage("");
-
-    try {
-      await testGeminiApiKeyAction({ apiKey: aiApiKey || undefined, model: getSelectedAiModel() });
-      setAiTestState("saved");
-      setAiTestMessage("Gemini API key를 확인했습니다.");
-    } catch (error) {
-      setAiTestState("error");
-      setAiTestMessage(error instanceof Error ? error.message : "Gemini API key 테스트에 실패했습니다.");
-    }
-  }
-
-  async function createUser() {
-    setUserCreateState("saving");
-    setUserCreateError("");
-
-    try {
-      const user = await createUserAction({
-        email: newUserEmail,
-        password: newUserPassword,
-        role: newUserRole,
-        username: newUserUsername
-      });
-
-      setManagedUsers((current) => [...current, user].sort((left, right) => left.username.localeCompare(right.username, "ko-KR")));
-      setNewUserUsername("");
-      setNewUserEmail("");
-      setNewUserPassword("");
-      setNewUserRole("USER");
-      setUserCreateState("saved");
-    } catch (error) {
-      setUserCreateState("error");
-      setUserCreateError(error instanceof Error ? error.message : "사용자를 추가하지 못했습니다.");
-    }
-  }
-
-  async function resetCurrentMonthHolidays() {
-    if (!isAdmin) {
-      return;
-    }
-
-    setHolidayResetState("saving");
-    setHolidayResetError("");
-
-    try {
-      const monthData = await resetHolidayCacheAction(monthCursor.year, monthCursor.monthIndex);
-      const monthKey = getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
-      const monthDrafts = buildDraftsFromMonthData(monthData);
-      rememberVacationColors(monthCursor.year, monthData);
-      const mergeResetMonth = (current: Record<string, TimesheetDayDraft>) => {
-        const next = { ...current };
-
-        for (const [dateKey, draft] of Object.entries(next)) {
-          if (dateKey.startsWith(monthKey + "-") && draft.entries.length === 0 && draft.holidayName) {
-            delete next[dateKey];
-          }
-        }
-
-        return {
-          ...next,
-          ...monthDrafts
-        };
-      };
-
-      setRecords(mergeResetMonth);
-      setSavedRecords(mergeResetMonth);
-      setHolidayWarning(monthData.holidayWarning ?? "");
-      setHolidayWarningMonthKeys((current) => {
-        const next = new Set(current);
-
-        if (monthData.holidayWarning) {
-          next.add(monthKey);
-        } else {
-          next.delete(monthKey);
-        }
-
-        return next;
-      });
-      setProjects((current) => mergeProjects(current, monthData.projects));
-      setSavedEntryDateKeys((current) => {
-        const next = new Set(current);
-
-        for (const entry of monthData.entries) {
-          next.add(entry.dateKey);
-        }
-
-        return next;
-      });
-      setLoadedMonthKeys((current) => new Set(current).add(monthKey));
-      setHolidayResetState("saved");
-      broadcastViewRefresh(["timesheet", "vacations", "ai-summary"], "mutation");
-    } catch {
-      setHolidayResetState("error");
-      setHolidayResetError("공휴일 정보를 다시 불러오지 못했습니다.");
-    }
-  }
-
-  async function resetAllHolidays() {
-    if (!isAdmin || !isDevelopment) {
-      return;
-    }
-
-    setHolidayResetState("saving");
-    setHolidayResetError("");
-
-    try {
-      const monthData = await resetAllHolidayCacheAction(monthCursor.year, monthCursor.monthIndex);
-      const monthDrafts = buildDraftsFromMonthData(monthData);
-      rememberVacationColors(monthCursor.year, monthData);
-      const removeApiHolidayDrafts = (current: Record<string, TimesheetDayDraft>) => {
-        const next = { ...current };
-
-        for (const [dateKey, draft] of Object.entries(next)) {
-          if (draft.entries.length === 0 && draft.holidayName) {
-            delete next[dateKey];
-          }
-        }
-
-        return {
-          ...next,
-          ...monthDrafts
-        };
-      };
-
-      setRecords(removeApiHolidayDrafts);
-      setSavedRecords(removeApiHolidayDrafts);
-      setHolidayWarning(monthData.holidayWarning ?? "");
-      setHolidayWarningMonthKeys(new Set());
-      setProjects((current) => mergeProjects(current, monthData.projects));
-      setSavedEntryDateKeys((current) => {
-        const next = new Set(current);
-
-        for (const entry of monthData.entries) {
-          next.add(entry.dateKey);
-        }
-
-        return next;
-      });
-      setLoadedMonthKeys(new Set([getMonthCacheKey(monthCursor.year, monthCursor.monthIndex)]));
-      setHolidayResetState("saved");
-      broadcastViewRefresh(["timesheet", "vacations", "ai-summary"], "mutation");
-    } catch (error) {
-      setHolidayResetState("error");
-      setHolidayResetError(error instanceof Error ? error.message : "공휴일 정보를 삭제하지 못했습니다.");
-    }
-  }
-
   if (isInitialMonthSyncing) {
     return (
       <AppLoadingScreen
@@ -4040,939 +2803,206 @@ export function TimesheetWorkspace({
         </section>
 
         {viewMode === "calendar" || isDailyEditorRequested ? (
-        <div
-          className={cn(
-            isDailyEditorRequested
-              ? "fixed inset-0 z-40 flex items-end justify-center bg-slate-950/35 sm:px-4 sm:py-6 lg:sticky lg:top-4 lg:block lg:self-start lg:bg-transparent lg:p-0"
-              : "hidden lg:sticky lg:top-4 lg:block lg:self-start"
-          )}
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget && isDailyEditorModalActive) {
-              closeDailyEditor();
-            }
-          }}
-          role="presentation"
-        >
-        <aside
-          aria-labelledby={isDailyEditorModalActive ? "daily-editor-title" : undefined}
-          aria-modal={isDailyEditorModalActive ? "true" : undefined}
-          className="max-h-[92dvh] w-full overflow-y-auto rounded-t-xl border border-slate-200 bg-white shadow-2xl outline-none sm:max-w-2xl sm:rounded-xl lg:max-h-[calc(100vh-2rem)] lg:max-w-none lg:overflow-y-auto lg:rounded-lg lg:shadow-sm"
-          data-calendar-shortcuts-ignore
-          onFocusCapture={() => {
-            setIsDailyEditorRequested(true);
-          }}
-          ref={dailyEditorRef}
-          role={isDailyEditorModalActive ? "dialog" : undefined}
-          tabIndex={isDailyEditorModalActive ? -1 : undefined}
-        >
-          <div className="sticky top-0 z-30 border-b border-slate-200 bg-white px-5 py-4 lg:static">
-            <div className="flex items-center justify-between gap-2 sm:gap-3">
-              <div className="flex min-w-0 items-center gap-1">
-                <button
-                  aria-label="이전 날짜"
-                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 lg:hidden"
-                  disabled={monthLoadState === "loading"}
-                  onClick={() => selectDate(addBusinessDays(selectedDateKey, -1))}
-                  type="button"
-                >
-                  <ChevronLeft aria-hidden="true" className="size-5" />
-                </button>
-                <h2 className="truncate text-lg font-bold text-slate-950 sm:text-xl lg:mt-1 lg:text-2xl" id="daily-editor-title">{formatKoreanDate(selectedDateKey)}</h2>
-                <button
-                  aria-label="다음 날짜"
-                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 lg:hidden"
-                  disabled={monthLoadState === "loading"}
-                  onClick={() => selectDate(addBusinessDays(selectedDateKey, 1))}
-                  type="button"
-                >
-                  <ChevronRight aria-hidden="true" className="size-5" />
-                </button>
-              </div>
-              <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-                {!isViewingToday && !isDailyEditorModalActive ? (
-                  <Button disabled={monthLoadState === "loading"} onClick={goToday} variant="secondary">
-                    <RotateCcw aria-hidden="true" className="size-4" />
-                    오늘로 돌아가기
-                  </Button>
-                ) : null}
-                {viewMode === "list" || isDailyEditorModalActive ? (
-                <button
-                  aria-label="날짜 상세 닫기"
-                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-100"
-                  onClick={closeDailyEditor}
-                  ref={closeEditorButtonRef}
-                  type="button"
-                >
-                  <X aria-hidden="true" className="size-5" />
-                </button>
-                ) : null}
-              </div>
-            </div>
-          </div>
-
-          {isSelectedWeekend ? (
-            <WeekendRelaxView
-              dateKey={selectedDateKey}
-              onNavigateNextBusinessDay={() => selectDate(addBusinessDays(selectedDateKey, 1))}
-              onNavigatePreviousBusinessDay={() => selectDate(addBusinessDays(selectedDateKey, -1))}
-            />
-          ) : (
-            <div className={cn("space-y-5 p-5", isFutureWork && "opacity-70")}>
-            {selectedHasWork ? (
-              <Field label="짧은 버전">
-                <Input disabled={isFutureWork} onChange={(event) => updateSelectedShortVersion(event.target.value)} placeholder="월간 캘린더에 표시할 한 줄 요약" value={selectedDay.shortVersion} />
-              </Field>
-            ) : null}
-
-            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-baseline gap-2">
-                  <span className={cn("text-base font-bold", selectedTotalHours > 8 ? "text-red-600" : "text-slate-950")}>{selectedTotalHours}h</span>
-                  <span className="text-xs font-medium text-slate-400">업무시간</span>
-                </div>
-                <div className="flex gap-2">
-                  <Button className="h-9 px-3" disabled={isFutureWork} onClick={() => addEntry(selectedEditorKind)} type="button" variant="secondary">
-                    <Plus aria-hidden="true" className="size-4" />
-                    추가
-                  </Button>
-                </div>
-              </div>
-              {selectedTotalHours > 8 ? <p className="mt-2 text-sm font-semibold text-red-600">하루 합계가 8시간을 초과했습니다.</p> : null}
-            </div>
-
-            <div className="space-y-2">
-              <SegmentedControl items={editorKindOptions} onChange={updateKind} value={selectedEditorKind} />
-            </div>
-
-            {selectedDay.entries.length > 1 ? (
-              <DndContext collisionDetection={closestCenter} onDragEnd={handleEntryDragEnd} sensors={entryDragSensors}>
-                <SortableContext items={selectedDay.entries.map((entry) => entry.clientId)} strategy={verticalListSortingStrategy}>
-                  <div className="space-y-2">
-                    {selectedDay.entries.map((entry, index) => (
-                      <SortableEntryItem
-                        entry={entry}
-                        index={index}
-                        isSelected={entry.clientId === selectedEntry?.clientId}
-                        key={entry.clientId}
-                        notionCardWarning={entryHasNotionCardWarning(entry, true)}
-                        onMoveDown={() => moveEntry(entry.clientId, 1)}
-                        onMoveUp={() => moveEntry(entry.clientId, -1)}
-                        onRemove={() => removeEntry(entry.clientId)}
-                        onSelect={() => selectEntry(entry.clientId)}
-                        totalCount={selectedDay.entries.length}
-                      />
-                    ))}
-                  </div>
-                </SortableContext>
-              </DndContext>
-            ) : null}
-            {selectedDay.entries.length === 0 && !selectedIsHoliday ? <p className="rounded-md border border-dashed border-slate-200 px-3 py-5 text-center text-sm font-medium text-slate-500">등록된 업무나 휴가가 없습니다.</p> : null}
-
-            {selectedIsHoliday ? (
-              <Field label="공휴일명">
-                <Input disabled={isFutureWork} onChange={(event) => updateHolidayName(event.target.value)} placeholder="예: 어린이날" value={selectedEntry?.kind === "HOLIDAY" ? selectedEntry.holidayName : selectedDay.holidayName} />
-              </Field>
-            ) : selectedEntry ? (
-              selectedEntry.kind === "WORK" ? (
-                <>
-                  <div className="grid grid-cols-[minmax(0,1fr)_112px] gap-3">
-                    <Field label="진행한 프로젝트">
-                      <div className="relative">
-                        <select
-                          aria-busy={isSelectedProjectRecommendationLoading}
-                          className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 pr-9 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                          disabled={isFutureWork}
-                          onChange={updateProject}
-                          value={selectedEntry.project}
-                        >
-                          <option value="">프로젝트 선택</option>
-                          {projects.map((project) => (
-                            <option key={project} value={project}>
-                              {project}
-                            </option>
-                          ))}
-                          <option value={newProjectOptionValue}>새 프로젝트 등록...</option>
-                        </select>
-                        {isSelectedProjectRecommendationLoading ? (
-                          <span className="pointer-events-none absolute right-8 top-1/2 inline-flex -translate-y-1/2 text-slate-400" role="status">
-                            <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
-                            <span className="sr-only">이전 프로젝트 불러오는 중</span>
-                          </span>
-                        ) : null}
-                      </div>
-                    </Field>
-
-                    <Field label="일한 시간">
-                      <Input disabled={isFutureWork} max={24} min={0} onChange={(event) => updateSelectedEntryHours(Number(event.target.value))} step={0.5} type="number" value={selectedEntry.hours} />
-                    </Field>
-                  </div>
-
-                  <Field label="내용">
-                    <Textarea disabled={isFutureWork} onChange={(event) => updateSelectedEntry({ content: event.target.value })} placeholder="오늘 진행한 일을 간단히 적어주세요." rows={5} value={selectedEntry.content} />
-                  </Field>
-
-                  <Field label="영문 번역본">
-                    <Textarea disabled={isFutureWork} onChange={(event) => updateSelectedAiTranslation(event.target.value)} placeholder="오늘 진행한 일을 영어로 간단히 적어주세요." rows={4} value={selectedEntry.aiTranslation} />
-                  </Field>
-
-                  <NotionCardLinkSection
-                    allocationError={selectedNotionAllocationError}
-                    candidates={notionCandidates.candidatesByDate[selectedDateKey] ?? []}
-                    cardDateRanges={monthCardDateRanges}
-                    disabled={isFutureWork}
-                    entry={selectedEntry}
-                    isAutoLoading={isSelectedNotionRecommendationLoading}
-                    selectedDateKey={selectedDateKey}
-                    onAllocatedHoursChange={(notionPageId, allocatedHours) => updateNotionCardAllocatedHours(selectedEntry.clientId || selectedEntry.id, notionPageId, allocatedHours)}
-                    onOpenPicker={() => {
-                      setIncludeDoneNotionCandidates(false);
-                      setEditingNotionEntryClientId(selectedEntry.clientId || selectedEntry.id);
-                      notionCandidates.loadCandidates({
-                        dateKey: selectedDateKey,
-                        includeDone: false,
-                        linkedPageIds: selectedEntry.notionCards.map((link) => link.notionPageId)
-                      });
-                    }}
-                    onRemoveCard={(notionPageId) => toggleNotionCardForEntry(selectedEntry.clientId || selectedEntry.id, notionPageId)}
-                    onResetAutoAllocation={() => resetNotionCardAutoAllocation(selectedEntry.clientId || selectedEntry.id)}
-                  />
-                </>
-              ) : selectedEntry.kind === "VACATION" ? (
-                <>
-                  <Field label="휴가 유형">
-                    <Input disabled={isFutureWork} onChange={(event) => updateSelectedEntry({ vacationName: event.target.value })} placeholder="예: 연차, 오전 반차" value={selectedEntry.vacationName} />
-                  </Field>
-                  <Field label="휴가 시간">
-                    <Input disabled={isFutureWork} max={24} min={0} onChange={(event) => updateSelectedEntry({ hours: Number(event.target.value) })} step={0.5} type="number" value={selectedEntry.hours} />
-                  </Field>
-                  <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
-                    <input
-                      checked={selectedEntry.vacationDeductsAllowance !== false}
-                      className="mt-0.5 size-4 shrink-0 accent-slate-950"
-                      disabled={isFutureWork || saveState === "saving"}
-                      onChange={(event) => updateSelectedEntry({ vacationDeductsAllowance: event.target.checked })}
-                      type="checkbox"
-                    />
-                    <span className="block text-sm font-bold text-slate-800">연차 총량에서 차감</span>
-                  </label>
-                </>
-              ) : null
-            ) : null}
-
-            <div className="sticky bottom-0 z-20 -mx-5 -mb-5 border-t border-slate-100 bg-white px-5 pb-5 pt-4 shadow-[0_-8px_20px_-16px_rgba(15,23,42,0.45)] lg:static lg:mx-0 lg:mb-0 lg:px-0 lg:pb-0 lg:pt-5 lg:shadow-none">
-              {isSelectedDayScheduledCleanupPending() ? (
-                <p className="mb-3 inline-flex w-full items-center justify-end gap-1 text-right text-xs font-semibold leading-5 text-amber-700">
-                  <span>AI 예약 정리 대기 ·</span>
-                  <ShortcutHint keys={[shortcutModifierKey]} />
-                  <span>저장 클릭으로 즉시 정리</span>
-                </p>
-              ) : null}
-              {selectedIsSingleVacation ? (
-                <div className="mb-3 flex justify-end">
-                  <button
-                    className="text-sm font-semibold text-slate-600 underline-offset-4 transition hover:text-slate-950 hover:underline disabled:cursor-not-allowed disabled:text-slate-300"
-                    disabled={saveState === "saving" || deleteState === "deleting" || vacationRangeState === "saving"}
-                    onClick={() => void openVacationRangeModal()}
-                    type="button"
-                  >
-                    기간 설정
-                  </button>
-                </div>
-              ) : null}
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  {canDeleteSelected ? (
-                    <button
-                      className="inline-flex items-center gap-2 text-sm font-semibold text-red-600 underline-offset-4 transition hover:text-red-700 hover:underline disabled:cursor-not-allowed disabled:text-red-300"
-                      disabled={deleteState === "deleting"}
-                      onClick={requestDeleteSelectedDate}
-                      type="button"
-                    >
-                      {deleteState === "deleting" ? "삭제 중" : "삭제"}
-                      <ShortcutHint keys={["Del"]} />
-                    </button>
-                  ) : null}
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="text-right">
-                    <p className={cn("text-sm font-medium", saveState === "error" || deleteState === "error" ? "text-red-600" : "text-slate-500")}>
-                      {deleteState === "error" ? deleteError : saveState === "saved" ? "저장됨" : saveState === "saving" ? "저장 중" : saveError}
-                    </p>
-                  </div>
-                  {selectedEntry?.kind === "VACATION" ? (
-                    <>
-                      {secondarySelectedVacationSaveActions.map((action) => (
-                        <Button
-                          className={cn("h-10", action.variant === "ghost" ? "px-2" : "px-4")}
-                          disabled={isSaveDisabled()}
-                          key={action.status}
-                          onClick={() => void saveSelectedDraft({ vacationActionLabel: action.label, vacationStatus: action.status })}
-                          type="button"
-                          variant={action.variant}
-                        >
-                          {action.label}
-                        </Button>
-                      ))}
-                      {primarySelectedVacationSaveAction ? (
-                        <Button className="h-10 px-4" disabled={isSaveDisabled()} onClick={() => void saveSelectedDraft({ vacationActionLabel: primarySelectedVacationSaveAction.label, vacationStatus: primarySelectedVacationSaveAction.status })} type="button">
-                          {saveState === "saving" ? "저장 중" : primarySelectedVacationSaveAction.label}
-                          <ShortcutHint keys={[shortcutModifierKey, "↵"]} />
-                        </Button>
-                      ) : null}
-                    </>
-                  ) : (
-                    <Button className="h-10 px-4" disabled={isSaveDisabled()} onClick={(event) => void saveSelectedDraft({ forceImmediateAiAfterSave: event.ctrlKey || event.metaKey })}>
-                      {saveState === "saving" ? "저장 중" : "저장"}
-                      <ShortcutHint keys={[shortcutModifierKey, "↵"]} />
-                    </Button>
-                  )}
-                </div>
-              </div>
-              {aiCleanupDateKey === selectedDateKey && aiCleanupState !== "idle" ? (
-                <p className={cn("mt-2 text-right text-xs font-semibold leading-5", aiCleanupState === "error" ? "text-red-600" : aiCleanupState === "running" ? "text-slate-700" : "text-emerald-700")}>
-                  {aiCleanupState === "running" ? "AI 정리 중" : aiCleanupMessage}
-                </p>
-              ) : null}
-            </div>
-          </div>
-          )}
-
-          {!isSelectedWeekend && isFutureWork ? (
-            <div className="mx-5 mb-5 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-500">
-              미래 날짜는 아직 작성하지 않습니다.
-            </div>
-          ) : null}
-        </aside>
-        </div>
+          <DailyEditor
+            ai={{
+              cleanupMessage: aiCleanupMessage,
+              cleanupState: aiCleanupState,
+              isCleanupStatusVisible: aiCleanupDateKey === selectedDateKey && aiCleanupState !== "idle",
+              isScheduledCleanupPending: isSelectedDayScheduledCleanupPending()
+            }}
+            day={{
+              dateKey: selectedDateKey,
+              draft: selectedDay,
+              editorKind: selectedEditorKind,
+              hasWork: selectedHasWork,
+              isFutureWork,
+              isHoliday: selectedIsHoliday,
+              isSingleVacation: selectedIsSingleVacation,
+              isViewingToday,
+              isWeekend: isSelectedWeekend,
+              kindOptions: editorKindOptions,
+              selectedEntry,
+              totalHours: selectedTotalHours
+            }}
+            editing={{
+              isProjectRecommendationLoading: isSelectedProjectRecommendationLoading,
+              newProjectOptionValue,
+              onAiTranslationChange: updateSelectedAiTranslation,
+              onContentChange: (value) => updateSelectedEntry({ content: value }),
+              onHolidayNameChange: updateHolidayName,
+              onHoursChange: updateSelectedEntryHours,
+              onKindChange: updateKind,
+              onProjectChange: updateProject,
+              onSelectedEntryChange: updateSelectedEntry,
+              onShortVersionChange: updateSelectedShortVersion,
+              projects
+            }}
+            entryList={{
+              onAddEntry: addEntry,
+              onDragEnd: handleEntryDragEnd,
+              onMoveEntry: moveEntry,
+              onRemoveEntry: removeEntry,
+              onSelectEntry: selectEntry
+            }}
+            navigation={{
+              closeButtonRef: closeEditorButtonRef,
+              editorRef: dailyEditorRef,
+              isActive: isDailyEditorModalActive,
+              isMonthLoading: monthLoadState === "loading",
+              isRequested: isDailyEditorRequested,
+              onClose: closeDailyEditor,
+              onFocusCapture: () => setIsDailyEditorRequested(true),
+              onGoToday: goToday,
+              onSelectDate: selectDate,
+              showCloseButton: viewMode === "list" || isDailyEditorModalActive
+            }}
+            notion={{
+              allocationError: selectedNotionAllocationError,
+              candidates: notionCandidates.candidatesByDate[selectedDateKey] ?? [],
+              cardDateRanges: monthCardDateRanges,
+              isRecommendationLoading: isSelectedNotionRecommendationLoading,
+              onAllocatedHoursChange: (notionPageId, allocatedHours) => updateNotionCardAllocatedHours(selectedNotionEntryClientId, notionPageId, allocatedHours),
+              onOpenPicker: () => {
+                setIncludeDoneNotionCandidates(false);
+                setEditingNotionEntryClientId(selectedNotionEntryClientId);
+                notionCandidates.loadCandidates({
+                  dateKey: selectedDateKey,
+                  includeDone: false,
+                  linkedPageIds: selectedEntryLinkedNotionPageIds
+                });
+              },
+              onRemoveCard: (notionPageId) => toggleNotionCardForEntry(selectedNotionEntryClientId, notionPageId),
+              onResetAutoAllocation: () => resetNotionCardAutoAllocation(selectedNotionEntryClientId)
+            }}
+            persistence={{
+              canDelete: canDeleteSelected,
+              deleteError,
+              deleteState,
+              isSaveDisabled: isSaveDisabled(),
+              onSave: (event) => void saveSelectedDraft({ forceImmediateAiAfterSave: event.ctrlKey || event.metaKey }),
+              onSaveWithVacationAction: (action) => void saveSelectedDraft({ vacationActionLabel: action.label, vacationStatus: action.status }),
+              onRequestDelete: requestDeleteSelectedDate,
+              primaryVacationSaveAction: primarySelectedVacationSaveAction,
+              saveError,
+              saveState,
+              secondaryVacationSaveActions: secondarySelectedVacationSaveActions,
+              shortcutModifierKey
+            }}
+            vacation={{
+              isRangeSaving: vacationRangeState === "saving",
+              onOpenRangeModal: () => void openVacationRangeModal()
+            }}
+          />
         ) : null}
       </div>
 
       {isSettingsOpen ? (
-        <ModalShell onClose={() => setIsSettingsOpen(false)} title="설정">
-          <div className="max-h-[78vh] space-y-5 overflow-y-auto pr-1">
-            <section className="rounded-md border border-slate-200 bg-slate-50 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-950">내 설정</h3>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">계정 정보와 개인 AI 자동 정리를 관리합니다.</p>
-                </div>
-                <Badge tone={isAdmin ? "green" : "gray"}>{isAdmin ? "관리자" : "일반"}</Badge>
-              </div>
-
-              <div className="mt-4">
-                <ThemeSetting />
-              </div>
-
-              <div className="mt-4 rounded-md border border-slate-200 bg-white p-4">
-                <h4 className="text-sm font-bold text-slate-950">계정 정보</h4>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <Field label="아이디">
-                    <Input onChange={(event) => setProfileUsername(event.target.value)} value={profileUsername} />
-                  </Field>
-                  <Field label="이메일">
-                    <Input autoComplete="email" onChange={(event) => setProfileEmail(event.target.value)} placeholder="reminder@example.com" type="email" value={profileEmail} />
-                  </Field>
-                  <Field label="새 비밀번호">
-                    <Input autoComplete="new-password" onChange={(event) => setProfilePassword(event.target.value)} placeholder="변경 시에만 입력" type="password" value={profilePassword} />
-                  </Field>
-                </div>
-                {profileState === "saved" ? <p className="mt-3 text-sm font-semibold text-emerald-700">계정 정보를 저장했습니다.</p> : null}
-                {profileState === "error" ? <p className="mt-3 text-sm font-semibold text-red-600">{profileError}</p> : null}
-                <div className="mt-4 flex items-end justify-between gap-3">
-                  <form action={logoutAction}>
-                    <button className="text-sm font-semibold text-red-600 transition hover:text-red-700" type="submit">
-                      로그아웃
-                    </button>
-                  </form>
-                  <Button disabled={profileState === "saving"} onClick={() => void saveProfile()} type="button">
-                    {profileState === "saving" ? "저장 중" : "계정 저장"}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50/50 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-950">개인 AI 자동 정리</h4>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">내 Gemini API key로 빈 영문 번역본과 짧은 버전을 채웁니다.</p>
-                  </div>
-                  <Badge tone={aiSetting.apiKeySaved ? "green" : "gray"}>{aiSetting.apiKeySaved ? "개인 key 저장됨" : "개인 key 없음"}</Badge>
-                </div>
-
-                <div className="mt-4 space-y-4">
-                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                    <input checked={aiEnabled} className="size-4 accent-slate-950" onChange={(event) => setAiEnabled(event.target.checked)} type="checkbox" />
-                    AI 자동 정리 사용
-                  </label>
-
-                  <div>
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-bold text-slate-700">AI 정리 방식</p>
-                      <button
-                        className={cn(
-                          "rounded-md border px-2 py-1 text-xs font-bold transition",
-                          aiRewriteRequests.length > 0
-                            ? "border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-300"
-                            : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
-                        )}
-                        onClick={() => setIsAiRewriteQueueOpen(true)}
-                        type="button"
-                      >
-                        {aiRewriteRequests.length}개 대기중
-                      </button>
-                    </div>
-                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                      {[
-                        { description: "저장 직후 실행", label: "즉시", value: "immediate" },
-                        { description: "n8n에서 일괄 실행", label: "예약", value: "scheduled" },
-                        { description: "직접 실행만 사용", label: "수동", value: "manual" }
-                      ].map((option) => (
-                        <label
-                          className={cn(
-                            "cursor-pointer rounded-md border bg-white px-3 py-2 transition",
-                            aiCleanupMode === option.value ? "border-slate-950 ring-2 ring-slate-100" : "border-slate-200 hover:border-slate-300"
-                          )}
-                          key={option.value}
-                        >
-                          <input
-                            checked={aiCleanupMode === option.value}
-                            className="sr-only"
-                            onChange={() => setAiCleanupMode(option.value as AiCleanupMode)}
-                            type="radio"
-                          />
-                          <span className="block text-sm font-bold text-slate-950">{option.label}</span>
-                          <span className="mt-1 block text-xs font-medium leading-5 text-slate-500">{option.description}</span>
-                        </label>
-                      ))}
-                    </div>
-                    {aiRewriteRequests.length > 0 && aiCleanupMode !== "scheduled" ? (
-                      <p className="mt-2 text-xs font-semibold leading-5 text-amber-700">
-                        대기 목록은 보존되지만, 예약 모드가 아니면 n8n 예약 정리에서 처리되지 않습니다.
-                      </p>
-                    ) : null}
-                  </div>
-
-                <Field label="Gemini API key">
-                  <Input
-                    autoComplete="off"
-                    onChange={(event) => {
-                      setAiApiKey(event.target.value);
-                      if (event.target.value) {
-                        setAiClearApiKey(false);
-                      }
-                    }}
-                    placeholder={aiSetting.apiKeySaved ? "새 key 입력 시 교체" : "Gemini API key"}
-                    type="password"
-                    value={aiApiKey}
-                  />
-                </Field>
-
-                {aiSetting.apiKeySaved ? (
-                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-600">
-                    <input checked={aiClearApiKey} className="size-4 accent-slate-950" disabled={Boolean(aiApiKey)} onChange={(event) => setAiClearApiKey(event.target.checked)} type="checkbox" />
-                    저장된 API key 삭제
-                  </label>
-                ) : null}
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="모델">
-                    <select
-                      className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                      onChange={(event) => setAiModel(event.target.value)}
-                      value={aiModel}
-                    >
-                      {aiModelPresets.map((preset) => (
-                        <option key={preset.value} value={preset.value}>
-                          {preset.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  {aiModel === "__custom__" ? (
-                    <Field label="직접 입력 모델명">
-                      <Input onChange={(event) => setAiCustomModel(event.target.value)} placeholder="gemini-..." value={aiCustomModel} />
-                    </Field>
-                  ) : (
-                    <Field label="참고할 이전 저장 WORK 날짜">
-                      <select
-                        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                        onChange={(event) => setAiContextDays(Number(event.target.value))}
-                        value={aiContextDays}
-                      >
-                        {[0, 3, 5, 10].map((value) => (
-                          <option key={value} value={value}>
-                            최근 {value}개
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                  )}
-                </div>
-
-                {aiModel === "__custom__" ? (
-                  <Field label="참고할 이전 저장 WORK 날짜">
-                    <select
-                      className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                      onChange={(event) => setAiContextDays(Number(event.target.value))}
-                      value={aiContextDays}
-                    >
-                      {[0, 3, 5, 10].map((value) => (
-                        <option key={value} value={value}>
-                          최근 {value}개
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                ) : null}
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                    <input checked={aiBackfillMissing} className="size-4 accent-slate-950" onChange={(event) => setAiBackfillMissing(event.target.checked)} type="checkbox" />
-                    이전 빈 번역/요약 보정
-                  </label>
-                  <Field label="한 번에 보정할 이전 날짜">
-                    <select
-                      className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                      disabled={!aiBackfillMissing}
-                      onChange={(event) => setAiBackfillLimit(Number(event.target.value))}
-                      value={aiBackfillLimit}
-                    >
-                      {[1, 3, 5].map((value) => (
-                        <option key={value} value={value}>
-                          {value}일
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                </div>
-
-                  <p className="text-xs font-medium leading-5 text-slate-500">미기입, 작성 예정, draft, 휴가, 공휴일, 빈 내용 업무는 참고/보정 대상에서 제외됩니다. 기존 번역본과 요약은 덮어쓰지 않습니다.</p>
-                </div>
-
-                {(aiSettingState !== "idle" || aiTestMessage) ? (
-                  <div className="mt-3 space-y-1">
-                    {aiSettingMessage ? <p className={cn("text-sm font-semibold", aiSettingState === "error" ? "text-red-600" : "text-emerald-700")}>{aiSettingMessage}</p> : null}
-                    {aiTestMessage ? <p className={cn("text-sm font-semibold", aiTestState === "error" ? "text-red-600" : "text-emerald-700")}>{aiTestMessage}</p> : null}
-                  </div>
-                ) : null}
-
-                <div className="mt-4 flex flex-wrap justify-end gap-2">
-                  <Button disabled={aiTestState === "saving"} onClick={() => void testAiSetting()} type="button" variant="secondary">
-                    {aiTestState === "saving" ? "테스트 중" : "키 테스트"}
-                  </Button>
-                  <Button disabled={aiSettingState === "saving"} onClick={() => void saveAiSetting()} type="button">
-                    {aiSettingState === "saving" ? "저장 중" : "AI 설정 저장"}
-                  </Button>
-                </div>
-              </div>
-            </section>
-
-            {isAdmin ? (
-              <section className="rounded-md border border-slate-200 bg-white p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-950">사이트 설정</h3>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">관리자만 공휴일, 캐시, 사용자 설정을 변경할 수 있습니다.</p>
-                  </div>
-                  <Badge tone="green">관리자 전용</Badge>
-                </div>
-
-                <div className="mt-4 space-y-4">
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-                    <h4 className="text-sm font-bold text-slate-950">공휴일 API</h4>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">data.go.kr 서비스 키를 저장하고 현재 월 기준으로 테스트합니다.</p>
-                    <div className="mt-4">
-                      <Field label="공공데이터포털 서비스 키">
-                        <Input onChange={(event) => setHolidayApiKey(event.target.value)} placeholder="서비스 키" type="password" value={holidayApiKey} />
-                      </Field>
-                    </div>
-                    {(holidayApiKeyState === "saved" || holidayApiKeyState === "error" || holidayApiKeyTestMessage) ? (
-                      <div className="mt-3 space-y-1">
-                        {holidayApiKeyState === "saved" ? <p className="text-sm font-semibold text-emerald-700">API 키를 저장했습니다.</p> : null}
-                        {holidayApiKeyState === "error" ? <p className="text-sm font-semibold text-red-600">{holidayApiKeyError}</p> : null}
-                        {holidayApiKeyTestMessage ? (
-                          <p className={cn("text-sm font-semibold", holidayApiKeyTestState === "error" ? "text-red-600" : "text-emerald-700")}>{holidayApiKeyTestMessage}</p>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    <div className="mt-4 flex flex-wrap justify-end gap-2">
-                      <Button disabled={holidayApiKeyTestState === "saving"} onClick={() => void testHolidayApiKey()} type="button" variant="secondary">
-                        {holidayApiKeyTestState === "saving" ? "테스트 중" : "키 테스트"}
-                      </Button>
-                      <Button disabled={holidayApiKeyState === "saving"} onClick={() => void saveHolidayApiKey()} type="button">
-                        {holidayApiKeyState === "saving" ? "저장 중" : "키 저장"}
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-                    <h4 className="text-sm font-bold text-slate-950">공휴일 캐시</h4>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">현재 표시 중인 월의 공휴일 캐시를 삭제하고 다시 조회합니다.</p>
-                    {holidayResetState === "saved" ? <p className="mt-3 text-sm font-semibold text-emerald-700">공휴일 정보를 다시 불러왔습니다.</p> : null}
-                    {holidayResetState === "error" ? <p className="mt-3 text-sm font-semibold text-red-600">{holidayResetError}</p> : null}
-                    <div className="mt-4 flex flex-wrap justify-end gap-2">
-                      {isDevelopment ? (
-                        <Button disabled={holidayResetState === "saving"} onClick={() => void resetAllHolidays()} type="button" variant="secondary">
-                          <Trash2 aria-hidden="true" className="size-4" />
-                          모든 API 공휴일 삭제
-                        </Button>
-                      ) : null}
-                      <Button disabled={holidayResetState === "saving"} onClick={() => void resetCurrentMonthHolidays()} type="button" variant="secondary">
-                        <RotateCcw aria-hidden="true" className="size-4" />
-                        {holidayResetState === "saving" ? "다시 불러오는 중" : "현재 월 공휴일 리셋"}
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-                    <h4 className="text-sm font-bold text-slate-950">사용자 관리</h4>
-                    <div className="mt-3 divide-y divide-slate-100 rounded-md border border-slate-200 bg-white">
-                      {managedUsers.map((user) => (
-                        <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm" key={user.id}>
-                          <div className="min-w-0">
-                            <span className="block truncate font-semibold text-slate-950">{user.username}</span>
-                            <span className="block truncate text-xs font-medium text-slate-500">{user.email || "이메일 없음"}</span>
-                          </div>
-                          <Badge tone={user.role === "ADMIN" ? "green" : "gray"}>{user.role === "ADMIN" ? "관리자" : "일반"}</Badge>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <Field label="아이디">
-                        <Input onChange={(event) => setNewUserUsername(event.target.value)} value={newUserUsername} />
-                      </Field>
-                      <Field label="이메일">
-                        <Input autoComplete="email" onChange={(event) => setNewUserEmail(event.target.value)} placeholder="reminder@example.com" type="email" value={newUserEmail} />
-                      </Field>
-                      <Field label="비밀번호">
-                        <Input autoComplete="new-password" onChange={(event) => setNewUserPassword(event.target.value)} type="password" value={newUserPassword} />
-                      </Field>
-                      <Field label="권한">
-                        <select
-                          className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                          onChange={(event) => setNewUserRole(event.target.value === "ADMIN" ? "ADMIN" : "USER")}
-                          value={newUserRole}
-                        >
-                          <option value="USER">일반</option>
-                          <option value="ADMIN">관리자</option>
-                        </select>
-                      </Field>
-                    </div>
-                    {userCreateState === "saved" ? <p className="mt-3 text-sm font-semibold text-emerald-700">사용자를 추가했습니다.</p> : null}
-                    {userCreateState === "error" ? <p className="mt-3 text-sm font-semibold text-red-600">{userCreateError}</p> : null}
-                    <div className="mt-4 flex justify-end">
-                      <Button disabled={userCreateState === "saving"} onClick={() => void createUser()} type="button">
-                        <Plus aria-hidden="true" className="size-4" />
-                        {userCreateState === "saving" ? "추가 중" : "사용자 추가"}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </section>
-            ) : null}
-
-            <div className="flex justify-end border-t border-slate-100 pt-4">
-              <Button onClick={() => setIsSettingsOpen(false)} variant="secondary">
-                닫기
-              </Button>
-            </div>
-          </div>
-        </ModalShell>
+        <SettingsModal {...settingsModalProps} />
       ) : null}
 
       {isAiRewriteQueueOpen ? (
-        <ModalShell onClose={() => setIsAiRewriteQueueOpen(false)} onConfirm={() => setIsAiRewriteQueueOpen(false)} title="AI 예약 정리 대기 목록">
-          <div className="space-y-4">
-            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium leading-6 text-slate-600">
-              {aiCleanupMode === "scheduled"
-                ? "아래 날짜는 n8n 예약 정리 때 빈 AI 필드를 채우거나, 덮어쓰기 예약이 있으면 기존 값을 다시 작성합니다."
-                : "대기 목록은 보존되어 있지만, AI 정리 방식이 예약이 아니면 n8n 예약 정리에서 처리되지 않습니다."}
-            </div>
-            {aiRewriteRequests.length > 0 ? (
-              <div className="max-h-[420px] overflow-y-auto rounded-md border border-slate-200">
-                {aiRewriteRequests.map((request) => (
-                  <div className="border-b border-slate-100 px-3 py-3 last:border-b-0" key={request.dateKey}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-bold text-slate-950">{formatKoreanDate(request.dateKey)}</p>
-                        <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
-                          WORK {request.entryCount}개 · {request.cleanupType === "rewrite" ? "기존 AI 필드 덮어쓰기 예약" : "빈 AI 필드 채우기 대기"}
-                        </p>
-                      </div>
-                      <Badge tone={aiCleanupMode === "scheduled" ? request.cleanupType === "rewrite" ? "orange" : "blue" : "gray"}>
-                        {aiCleanupMode === "scheduled" ? request.cleanupType === "rewrite" ? "덮어쓰기" : "채우기" : "보류"}
-                      </Badge>
-                    </div>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">
-                      {request.shortVersion.trim() || truncateContent(request.previewContent) || "(내용 없음)"}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-md border border-slate-200 bg-white px-3 py-6 text-center text-sm font-semibold text-slate-500">
-                대기중인 AI 예약 정리가 없습니다.
-              </div>
-            )}
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <Button onClick={() => setIsAiRewriteQueueOpen(false)} type="button">
-                확인
-                <ShortcutHint keys={["↵"]} />
-              </Button>
-            </div>
-          </div>
-        </ModalShell>
+        <AiRewriteQueueModal
+          cleanupMode={rewriteQueueCleanupMode}
+          onClose={() => setIsAiRewriteQueueOpen(false)}
+          requests={aiRewriteRequests}
+        />
       ) : null}
 
       {isProjectModalOpen ? (
-        <ModalShell onClose={closeProjectModal} title="새 프로젝트 등록">
-          <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void addProject(); }}>
-            <Field label="프로젝트명">
-              <Input autoFocus onChange={(event) => setNewProjectName(event.target.value)} placeholder="예: 고객 포털 개선" value={newProjectName} />
-            </Field>
-            {projectAddState === "error" ? <p className="text-sm font-semibold text-red-600">{projectAddError}</p> : null}
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <Button onClick={closeProjectModal} type="button" variant="secondary">
-                취소
-                <ShortcutHint keys={["Esc"]} />
-              </Button>
-              <Button disabled={projectAddState === "saving"} type="submit">
-                <Plus aria-hidden="true" className="size-4" />
-                {projectAddState === "saving" ? "등록 중" : "등록"}
-                <ShortcutHint keys={["↵"]} />
-              </Button>
-            </div>
-          </form>
-        </ModalShell>
+        <ProjectCreateModal
+          error={projectAddState === "error" ? projectAddError : ""}
+          name={newProjectName}
+          onClose={closeProjectModal}
+          onNameChange={setNewProjectName}
+          onSubmit={() => {
+            void addProject();
+          }}
+          saving={projectAddState === "saving"}
+        />
       ) : null}
 
       {isVacationRangeOpen ? (
-        <ModalShell onClose={closeVacationRangeModal} onConfirm={() => void applyVacationRange(vacationRangeConflictKeys.length > 0, primaryVacationRangeSaveAction?.status ?? vacationRangeStatus)} title="휴가 기간 설정">
-          <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              {canEditVacationRangeStart ? (
-                <Field label="시작날짜">
-                  <Input disabled={vacationRangeState === "saving"} onChange={(event) => { setVacationRangeStart(event.target.value); setVacationRangeConflictKeys([]); if (vacationRangeEnd < event.target.value) setVacationRangeEnd(event.target.value); }} type="date" value={vacationRangeStart} />
-                </Field>
-              ) : (
-                <Field label="시작날짜">
-                  <div className="flex h-10 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700">
-                    {formatKoreanDate(vacationRangeStart)}
-                  </div>
-                </Field>
-              )}
-              <Field label="끝날짜">
-                <Input disabled={vacationRangeState === "saving"} min={vacationRangeStart} onChange={(event) => { setVacationRangeEnd(event.target.value); setVacationRangeConflictKeys([]); }} type="date" value={vacationRangeEnd} />
-              </Field>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_120px]">
-              <Field label="휴가 유형">
-                <Input disabled={vacationRangeState === "saving"} onChange={(event) => setVacationRangeName(event.target.value)} placeholder="예: 연차, 오전 반차" value={vacationRangeName} />
-              </Field>
-              <Field label="휴가 시간">
-                <Input disabled={vacationRangeState === "saving"} max={24} min={0} onChange={(event) => setVacationRangeHours(Number(event.target.value))} step={0.5} type="number" value={vacationRangeHours} />
-              </Field>
-            </div>
-            {vacationRangeConflictKeys.length > 0 ? (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium leading-6 text-amber-900">
-                기존 기록이 있는 {vacationRangeConflictKeys.length}일이 휴가로 교체됩니다. 공휴일은 교체하지 않습니다.
-              </div>
-            ) : null}
-            {vacationRangeProgress.total > 0 ? (
-              <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-                <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
-                  <span>저장 진행</span>
-                  <span>{vacationRangeProgress.completed}/{vacationRangeProgress.total}</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                  <div
-                    className="h-full rounded-full bg-slate-950 transition-all"
-                    style={{ width: `${Math.round((vacationRangeProgress.completed / vacationRangeProgress.total) * 100)}%` }}
-                  />
-                </div>
-              </div>
-            ) : null}
-            {vacationRangeMessage ? <p className="text-sm font-semibold text-emerald-700">{vacationRangeMessage}</p> : null}
-            {vacationRangeState === "error" ? <p className="text-sm font-semibold text-red-600">{vacationRangeError}</p> : null}
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <Button disabled={vacationRangeState === "saving"} onClick={closeVacationRangeModal} type="button" variant="secondary">
-                취소
-                <ShortcutHint keys={["Esc"]} />
-              </Button>
-              {secondaryVacationRangeSaveActions.map((action) => (
-                <Button
-                  className={cn(action.variant === "ghost" && "px-2")}
-                  disabled={vacationRangeState === "saving"}
-                  key={action.status}
-                  onClick={() => void applyVacationRange(vacationRangeConflictKeys.length > 0, action.status)}
-                  type="button"
-                  variant={action.variant}
-                >
-                  {action.label}
-                </Button>
-              ))}
-              {primaryVacationRangeSaveAction ? (
-                <Button disabled={vacationRangeState === "saving"} onClick={() => void applyVacationRange(vacationRangeConflictKeys.length > 0, primaryVacationRangeSaveAction.status)} type="button">
-                  {vacationRangeState === "saving" ? "저장 중" : vacationRangeConflictKeys.length > 0 ? `교체하고 ${primaryVacationRangeSaveAction.label}` : primaryVacationRangeSaveAction.label}
-                  <ShortcutHint keys={["↵"]} />
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        </ModalShell>
+        <VacationRangeModal
+          canEditStart={canEditVacationRangeStart}
+          conflictCount={vacationRangeConflictKeys.length}
+          error={vacationRangeError}
+          fallbackStatus={vacationRangeStatus}
+          message={vacationRangeMessage}
+          onApply={(confirmReplace, status) => void applyVacationRange(confirmReplace, status)}
+          onClose={closeVacationRangeModal}
+          onEndChange={(value) => { setVacationRangeEnd(value); setVacationRangeConflictKeys([]); }}
+          onHoursChange={setVacationRangeHours}
+          onNameChange={setVacationRangeName}
+          onStartChange={(value) => { setVacationRangeStart(value); setVacationRangeConflictKeys([]); if (vacationRangeEnd < value) setVacationRangeEnd(value); }}
+          primaryAction={primaryVacationRangeSaveAction}
+          progress={vacationRangeProgress}
+          rangeEnd={vacationRangeEnd}
+          rangeHours={vacationRangeHours}
+          rangeName={vacationRangeName}
+          rangeStart={vacationRangeStart}
+          saving={vacationRangeState === "saving"}
+          secondaryActions={secondaryVacationRangeSaveActions}
+          showError={vacationRangeState === "error"}
+        />
       ) : null}
 
       {connectedVacationPrompt && connectedVacationAction === "delete" ? (
-        <ModalShell onClose={() => setConnectedVacationPrompt(null)} onConfirm={() => void deleteConnectedVacationPrompt()} title="연결된 휴가 삭제">
-          <div className="space-y-4">
-            <p className="text-sm leading-6 text-slate-600">
-              붙어있는 휴가 {connectedVacationPrompt.dateKeys.length}일이 있습니다. 연결된 휴가를 함께 삭제할까요?
-            </p>
-            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600">
-              {formatKoreanDate(connectedVacationPrompt.dateKeys[0]!)} - {formatKoreanDate(connectedVacationPrompt.dateKeys[connectedVacationPrompt.dateKeys.length - 1]!)}
-            </div>
-            <ProgressBar label="삭제 진행" progress={connectedVacationProgress} />
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <Button disabled={isConnectedVacationSaving} onClick={() => setConnectedVacationPrompt(null)} type="button" variant="secondary">
-                취소
-                <ShortcutHint keys={["Esc"]} />
-              </Button>
-              <Button disabled={isConnectedVacationSaving} onClick={() => { setConnectedVacationPrompt(null); void deleteSelectedEntry({ skipConnectedVacation: true }); }} type="button" variant="secondary">
-                현재 날짜만 삭제
-              </Button>
-              <Button disabled={isConnectedVacationSaving} onClick={() => void deleteConnectedVacationPrompt()} type="button" variant="danger">
-                {isConnectedVacationSaving ? "삭제 중" : "함께 삭제"}
-                <ShortcutHint keys={["↵"]} />
-              </Button>
-            </div>
-          </div>
-        </ModalShell>
+        <ConnectedVacationDeleteModal
+          dateCount={connectedVacationPrompt.dateKeys.length}
+          endDateKey={connectedVacationPrompt.dateKeys[connectedVacationPrompt.dateKeys.length - 1]!}
+          onCancel={() => setConnectedVacationPrompt(null)}
+          onDeleteAll={() => void deleteConnectedVacationPrompt()}
+          onDeleteCurrentDate={() => { setConnectedVacationPrompt(null); void deleteSelectedEntry({ skipConnectedVacation: true }); }}
+          progress={connectedVacationProgress}
+          saving={isConnectedVacationSaving}
+          startDateKey={connectedVacationPrompt.dateKeys[0]!}
+        />
       ) : null}
 
       {connectedVacationPrompt && connectedVacationAction === "save" ? (
-        <ModalShell onClose={() => setConnectedVacationPrompt(null)} onConfirm={() => void saveConnectedVacationPrompt()} title="연결된 휴가 수정">
-          <div className="space-y-4">
-            <p className="text-sm leading-6 text-slate-600">
-              붙어있는 휴가 {connectedVacationPrompt.dateKeys.length}일이 있습니다. 현재 휴가 유형과 상태를 연결된 휴가에 함께 적용할까요? 각 날짜의 휴가 시간은 유지됩니다.
-            </p>
-            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600">
-              {formatKoreanDate(connectedVacationPrompt.dateKeys[0]!)} - {formatKoreanDate(connectedVacationPrompt.dateKeys[connectedVacationPrompt.dateKeys.length - 1]!)}
-            </div>
-            <ProgressBar label="저장 진행" progress={connectedVacationProgress} />
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <Button disabled={isConnectedVacationSaving} onClick={() => setConnectedVacationPrompt(null)} type="button" variant="secondary">
-                취소
-                <ShortcutHint keys={["Esc"]} />
-              </Button>
-              <Button disabled={isConnectedVacationSaving} onClick={() => { setConnectedVacationPrompt(null); void saveSelectedDraft({ skipConnectedVacation: true, vacationStatus: connectedVacationPrompt.vacationStatus }); }} type="button" variant="secondary">
-                현재 날짜만 {connectedVacationPrompt.actionLabel}
-              </Button>
-              <Button disabled={isConnectedVacationSaving} onClick={() => void saveConnectedVacationPrompt()} type="button">
-                {isConnectedVacationSaving ? "저장 중" : `함께 ${connectedVacationPrompt.actionLabel}`}
-                <ShortcutHint keys={["↵"]} />
-              </Button>
-            </div>
-          </div>
-        </ModalShell>
+        <ConnectedVacationSaveModal
+          actionLabel={connectedVacationPrompt.actionLabel}
+          dateCount={connectedVacationPrompt.dateKeys.length}
+          endDateKey={connectedVacationPrompt.dateKeys[connectedVacationPrompt.dateKeys.length - 1]!}
+          onCancel={() => setConnectedVacationPrompt(null)}
+          onSaveAll={() => void saveConnectedVacationPrompt()}
+          onSaveCurrentDate={() => { setConnectedVacationPrompt(null); void saveSelectedDraft({ skipConnectedVacation: true, vacationStatus: connectedVacationPrompt.vacationStatus }); }}
+          progress={connectedVacationProgress}
+          saving={isConnectedVacationSaving}
+          startDateKey={connectedVacationPrompt.dateKeys[0]!}
+        />
       ) : null}
 
       {aiRewritePromptDateKey ? (
-        <ModalShell onClose={() => setAiRewritePromptDateKey("")} onConfirm={() => { setAiRewritePromptDateKey(""); void saveSelectedDraft({ overwriteAiAfterSave: true, skipAiRewritePrompt: true }); }} title="AI 번역/요약 업데이트">
-          <div className="space-y-4">
-            <p className="text-sm leading-6 text-slate-600">
-              {formatKoreanDate(aiRewritePromptDateKey)}의 내용이 변경되었고 기존 영문 번역본 또는 짧은 버전이 있습니다. {aiSetting.cleanupMode === "scheduled" ? "저장 후 이 날짜를 n8n 예약 정리의 덮어쓰기 대상으로 표시할까요?" : "저장 후 AI가 현재 날짜의 번역본과 요약을 새 내용 기준으로 다시 작성할까요?"}
-            </p>
-            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600">
-              {aiSetting.cleanupMode === "scheduled"
-                ? "예약 정리는 기본적으로 빈 AI 필드만 채우고, 덮어쓰기는 이 날짜에만 한 번 예약됩니다."
-                : "이전 날짜 보정은 기존처럼 비어 있는 AI 필드만 채우고, 덮어쓰기는 현재 날짜에만 적용됩니다."}
-            </div>
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <Button onClick={() => setAiRewritePromptDateKey("")} type="button" variant="secondary">
-                취소
-                <ShortcutHint keys={["Esc"]} />
-              </Button>
-              <Button onClick={() => { setAiRewritePromptDateKey(""); void saveSelectedDraft({ skipAiRewritePrompt: true }); }} type="button" variant="secondary">
-                저장만
-              </Button>
-              <Button onClick={() => { setAiRewritePromptDateKey(""); void saveSelectedDraft({ overwriteAiAfterSave: true, skipAiRewritePrompt: true }); }} type="button">
-                AI도 업데이트
-                <ShortcutHint keys={["↵"]} />
-              </Button>
-            </div>
-          </div>
-        </ModalShell>
+        <AiRewritePromptModal
+          dateKey={aiRewritePromptDateKey}
+          onCancel={() => setAiRewritePromptDateKey("")}
+          onSaveOnly={() => { setAiRewritePromptDateKey(""); void saveSelectedDraft({ skipAiRewritePrompt: true }); }}
+          onSaveWithAi={() => { setAiRewritePromptDateKey(""); void saveSelectedDraft({ overwriteAiAfterSave: true, skipAiRewritePrompt: true }); }}
+          scheduled={aiSetting.cleanupMode === "scheduled"}
+        />
       ) : null}
 
       {aiOverwriteEditPrompt ? (
-        <ModalShell onClose={revertScheduledOverwriteManualEdit} onConfirm={disableScheduledOverwriteAfterManualEdit} title="예약 AI 덮어쓰기 경고">
-          <div className="space-y-4">
-            <p className="text-sm leading-6 text-slate-600">
-              이 날짜는 예약 AI 정리에서 기존 {aiOverwriteEditPrompt.field === "summary" ? "짧은 버전" : "영문 번역본"}을 덮어쓰도록 대기 중입니다. 지금 수동으로 수정한 값을 보호하려면 이 날짜의 예약 덮어쓰기를 꺼주세요.
-            </p>
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold leading-6 text-amber-900">
-              덮어쓰기를 유지하면 다음 n8n 예약 실행 때 이 값이 다시 작성될 수 있습니다.
-            </div>
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <Button onClick={revertScheduledOverwriteManualEdit} type="button" variant="secondary">
-                수정 취소
-                <ShortcutHint keys={["Esc"]} />
-              </Button>
-              <Button onClick={keepScheduledOverwriteAfterManualEdit} type="button" variant="secondary">
-                덮어쓰기 유지
-              </Button>
-              <Button onClick={disableScheduledOverwriteAfterManualEdit} type="button">
-                이 날짜만 끄기
-                <ShortcutHint keys={["↵"]} />
-              </Button>
-            </div>
-          </div>
-        </ModalShell>
+        <AiOverwritePromptModal
+          isSummary={aiOverwriteEditPrompt.field === "summary"}
+          onDisable={disableScheduledOverwriteAfterManualEdit}
+          onKeep={keepScheduledOverwriteAfterManualEdit}
+          onRevert={revertScheduledOverwriteManualEdit}
+        />
       ) : null}
 
       {isDeleteConfirmOpen ? (
-        <ModalShell onClose={() => setIsDeleteConfirmOpen(false)} onConfirm={confirmDeleteSelectedDate} title="기록 삭제">
-          <div className="space-y-4">
-            <p className="text-sm leading-6 text-slate-600">
-              {formatKoreanDate(selectedDateKey)}의 저장된 업무 기록을 삭제할까요? 이 날짜의 업무, 휴가, 공휴일 entry가 함께 삭제됩니다.
-            </p>
-            <div className="rounded-md border border-red-100 bg-red-50 px-3 py-2 text-sm font-semibold leading-6 text-red-700">
-              삭제 후에는 해당 날짜가 다시 미기입 상태로 돌아갑니다.
-            </div>
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <Button onClick={() => setIsDeleteConfirmOpen(false)} type="button" variant="secondary">
-                취소
-                <ShortcutHint keys={["Esc"]} />
-              </Button>
-              <Button disabled={deleteState === "deleting"} onClick={confirmDeleteSelectedDate} type="button" variant="danger">
-                {deleteState === "deleting" ? "삭제 중" : "삭제"}
-                <ShortcutHint keys={["↵"]} />
-              </Button>
-            </div>
-          </div>
-        </ModalShell>
+        <DeleteConfirmModal
+          dateKey={selectedDateKey}
+          isDeleting={deleteState === "deleting"}
+          onCancel={() => setIsDeleteConfirmOpen(false)}
+          onConfirm={confirmDeleteSelectedDate}
+        />
       ) : null}
 
       {notionSyncError ? (
-        <ModalShell onClose={() => setNotionSyncError("")} onConfirm={() => setNotionSyncError("")} title="Notion 필드 업데이트 실패">
-          <div className="space-y-4">
-            <p className="text-sm leading-6 text-slate-600">
-              업무 기록은 저장/삭제됐지만 연결된 Notion 카드의 숫자/날짜 필드 업데이트에 실패했습니다.
-            </p>
-            <div className="rounded-md border border-red-100 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
-              {notionSyncError}
-            </div>
-            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600">
-              Notion 연결 설정에서 업무 기간 시간, 작업일수, 가용 시간, 마지막 작업일, aJam 업데이트 시간 필드 매핑과 integration 권한을 확인해 주세요.
-            </div>
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <Button onClick={() => setNotionSyncError("")} type="button">
-                확인
-                <ShortcutHint keys={["↵"]} />
-              </Button>
-            </div>
-          </div>
-        </ModalShell>
+        <NotionSyncErrorModal error={notionSyncError} onClose={() => setNotionSyncError("")} />
       ) : null}
 
       <NotionCardPickerModal
@@ -5000,603 +3030,13 @@ export function TimesheetWorkspace({
       />
 
       {pendingNavigation ? (
-        <ModalShell onClose={cancelPendingNavigation} onConfirm={confirmPendingNavigation} title="저장되지 않은 변경">
-          <div className="space-y-4">
-            <p className="text-sm leading-6 text-slate-600">
-              현재 날짜의 변경사항이 아직 저장되지 않았습니다. 저장하지 않고 {pendingNavigation.kind === "closeEditor" ? "닫으면" : "이동하면"} 마지막 저장 상태로 되돌아갑니다.
-            </p>
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <Button onClick={cancelPendingNavigation} variant="secondary">
-                계속 작성
-                <ShortcutHint keys={["Esc"]} />
-              </Button>
-              <Button onClick={confirmPendingNavigation} variant="danger">
-                저장하지 않고 {pendingNavigation.kind === "closeEditor" ? "닫기" : "이동"}
-                <ShortcutHint keys={["↵"]} />
-              </Button>
-            </div>
-          </div>
-        </ModalShell>
+        <PendingNavigationConfirmModal
+          kind={pendingNavigation.kind === "closeEditor" ? "closeEditor" : "navigate"}
+          onCancel={cancelPendingNavigation}
+          onConfirm={confirmPendingNavigation}
+        />
       ) : null}
     </>
-  );
-}
-
-function Metric({
-  icon: Icon,
-  label,
-  tone,
-  value
-}: {
-  icon: LucideIcon;
-  label: string;
-  tone?: "red";
-  value: string;
-}) {
-  return (
-    <div
-      aria-label={`${label} ${value}`}
-      className="flex min-w-0 flex-col items-center justify-center gap-1 border-r border-slate-200 px-1 py-1 last:border-r-0 sm:flex-row sm:gap-3 sm:px-4 sm:py-2"
-      role="group"
-      title={`${label} ${value}`}
-    >
-      <div className={cn("flex size-8 shrink-0 items-center justify-center rounded-md bg-white text-slate-500 shadow-sm sm:size-9", tone === "red" && "text-red-600")}>
-        <Icon aria-hidden="true" className="size-4" />
-      </div>
-      <div aria-hidden="true" className="hidden min-w-0 text-center min-[360px]:block sm:text-left">
-        <p className="hidden text-xs font-semibold text-slate-500 sm:block">{label}</p>
-        <p className={cn("truncate text-sm font-bold text-slate-950 sm:text-lg", tone === "red" && "text-red-600")}>{value}</p>
-      </div>
-    </div>
-  );
-}
-
-function vacationBadgeLabel(status: TimesheetStatus, vacationStatus: VacationStatus, publicLeave = false) {
-  if (status === "VACATION" && publicLeave) {
-    return vacationStatus === "TEMPORARY" ? "임시 공가" : "공가";
-  }
-  if (status === "VACATION" && vacationStatus === "TEMPORARY") {
-    return "임시";
-  }
-
-  return statusLabel[status];
-}
-
-function StatusBadge({ status, vacationStatus = "CONFIRMED", publicLeave = false }: { status: TimesheetStatus; vacationStatus?: VacationStatus; publicLeave?: boolean }) {
-  if (status === "FUTURE") {
-    return null;
-  }
-
-  const usesOutlineDot = status === "VACATION" && vacationStatus === "TEMPORARY";
-
-  return (
-    <Badge className={usesOutlineDot ? "vacation-temporary-badge" : undefined} tone={badgeToneByStatus[status]}>
-      <span className={cn("mr-1 size-1.5 rounded-full", usesOutlineDot ? "border border-current bg-transparent" : "bg-current")} />
-      {vacationBadgeLabel(status, vacationStatus, publicLeave)}
-    </Badge>
-  );
-}
-
-function CalendarStatusBadges({ row }: { row: TimesheetRow }) {
-  const vacations = row.entries.filter((entry) => entry.kind === "VACATION");
-  const deducting = vacations.filter((entry) => entry.vacationDeductsAllowance !== false);
-  const nonDeducting = vacations.filter((entry) => entry.vacationDeductsAllowance === false);
-
-  return (
-    <div className="flex flex-wrap justify-end gap-1">
-      {deducting.length > 0 ? row.status === "VACATION"
-        ? <StatusBadge status="VACATION" vacationStatus={deducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "TEMPORARY" : "CONFIRMED"} />
-        : <Badge className={deducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "vacation-temporary-badge" : undefined} tone="blue"><span className={cn("size-1.5 rounded-full", deducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "border border-current bg-transparent" : "bg-current")} /></Badge>
-        : null}
-      {nonDeducting.length > 0 ? <StatusBadge publicLeave status="VACATION" vacationStatus={nonDeducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "TEMPORARY" : "CONFIRMED"} /> : null}
-      {row.status !== "VACATION" ? <StatusBadge status={row.status} /> : null}
-    </div>
-  );
-}
-
-function hasTimeMismatch(row: TimesheetRow): boolean {
-  return row.entryCount > 0 && row.status !== "MISSING" && row.status !== "HOLIDAY" && Math.abs(row.hours - 8) > 0.001;
-}
-
-function TimeMismatchIcon({ hours }: { hours: number }) {
-  return (
-    <span
-      className="inline-flex shrink-0 items-center justify-center text-orange-600"
-      title={`총 시간이 8시간이 아닙니다. 현재 ${hours}h입니다.`}
-    >
-      <Clock3 aria-label="총 시간 경고" className="size-3.5" />
-    </span>
-  );
-}
-
-function NotionCardWarningIcon() {
-  return (
-    <span
-      className="inline-flex shrink-0 items-center justify-center text-amber-500"
-      title="Notion 카드가 없거나 배분 시간이 업무 시간과 맞지 않습니다."
-    >
-      <AlertTriangle aria-label="Notion 카드 경고" className="size-3.5" />
-    </span>
-  );
-}
-
-function ProgressBar({ label, progress }: { label: string; progress: { completed: number; total: number } }) {
-  if (progress.total <= 0) {
-    return null;
-  }
-
-  const percentage = Math.round((progress.completed / progress.total) * 100);
-
-  return (
-    <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-      <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
-        <span>{label}</span>
-        <span>{progress.completed}/{progress.total}</span>
-      </div>
-      <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-        <div className="h-full rounded-full bg-slate-950 transition-all" style={{ width: `${percentage}%` }} />
-      </div>
-    </div>
-  );
-}
-
-function getTimesheetVacationColor(row: TimesheetRow | undefined, vacationColors: Record<string, VacationColor>): VacationColor {
-  const vacation = row?.entries.find((entry) => entry.kind === "VACATION");
-  return vacationColors[normalizeVacationName(vacation?.vacationName ?? "")] ?? "blue";
-}
-
-function getTimesheetVacationColorStyle(color: VacationColor): CSSProperties | undefined {
-  return color.startsWith("#") ? ({ "--timesheet-vacation-color": color } as CSSProperties) : undefined;
-}
-
-function CalendarView({
-  celebratingDateKey,
-  rows,
-  selectedDateKey,
-  setSelectedDateKey,
-  todayKey,
-  vacationColors,
-  weeks
-}: {
-  celebratingDateKey: string;
-  rows: Record<string, TimesheetRow>;
-  selectedDateKey: string;
-  setSelectedDateKey: (dateKey: string) => void;
-  todayKey: string;
-  vacationColors: Record<string, VacationColor>;
-  weeks: ReturnType<typeof getBusinessCalendarWeeks>;
-}) {
-  const dateButtonRefs = useRef(new Map<string, HTMLButtonElement>());
-  const previousSelectedDateKeyRef = useRef(selectedDateKey);
-
-  useEffect(() => {
-    if (previousSelectedDateKeyRef.current === selectedDateKey) {
-      return;
-    }
-
-    previousSelectedDateKeyRef.current = selectedDateKey;
-    dateButtonRefs.current.get(selectedDateKey)?.focus({ preventScroll: true });
-  }, [selectedDateKey]);
-
-  useEffect(() => {
-    if (!celebratingDateKey) {
-      return;
-    }
-
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      return;
-    }
-
-    const element = dateButtonRefs.current.get(celebratingDateKey);
-
-    if (!element) {
-      return;
-    }
-
-    const rect = element.getBoundingClientRect();
-    const origin = {
-      x: (rect.left + rect.width / 2) / window.innerWidth,
-      y: (rect.top + rect.height / 2) / window.innerHeight
-    };
-
-    void confetti({
-      colors: ["#fb7185", "#f59e0b", "#34d399", "#38bdf8", "#e879f9", "#a3e635"],
-      origin,
-      particleCount: 85,
-      scalar: 0.85,
-      spread: 78,
-      startVelocity: 34,
-      ticks: 180
-    });
-  }, [celebratingDateKey]);
-
-  return (
-    <div className="p-2 sm:p-4">
-      <div className="grid grid-cols-5 border-b border-slate-200 pb-2">
-        {weekdays.map((weekday) => (
-          <div className="text-center text-xs font-bold text-slate-400 sm:px-2 sm:text-left" key={weekday}>
-            {weekday}
-          </div>
-        ))}
-      </div>
-      <div className="grid gap-1 pt-2 sm:gap-2 sm:pt-3">
-        {weeks.map((week, index) => (
-          <div className="grid grid-cols-5 gap-1 sm:gap-2" key={`${index}-${week.map((cell) => cell?.dateKey ?? "blank").join("-")}`}>
-            {week.map((cell, cellIndex) => {
-              if (!cell) {
-                return <div className="min-h-16 rounded-md border border-dashed border-slate-100 bg-slate-50/60 sm:min-h-24 lg:min-h-32" key={`blank-${cellIndex}`} />;
-              }
-
-              const row = rows[cell.dateKey];
-              const vacations = row?.entries.filter((entry) => entry.kind === "VACATION") ?? [];
-              const nonDeducting = vacations.filter((entry) => entry.vacationDeductsAllowance === false);
-              const deducting = vacations.filter((entry) => entry.vacationDeductsAllowance !== false);
-              const publicLeaveLabel = nonDeducting.length > 0
-                ? vacationBadgeLabel("VACATION", nonDeducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "TEMPORARY" : "CONFIRMED", true)
-                : "";
-              const primaryLabel = row && (row.status !== "VACATION" || deducting.length > 0)
-                ? vacationBadgeLabel(row.status, deducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "TEMPORARY" : "CONFIRMED")
-                : "";
-              const vacationMixOverlayStyle = getVacationMixOverlayStyle(row);
-              const partialVacationOnlyOverlayStyle = getPartialVacationOnlyOverlayStyle(row);
-              const isPartialVacationOnly = isPartialVacationOnlyCell(row);
-              const vacationColor = getTimesheetVacationColor(row, vacationColors);
-              const presetVacationColor = vacationColor.startsWith("#") ? undefined : vacationColor as VacationColorPreset;
-              const calendarCellStyle = {
-                ...getCalendarCellStyle(row),
-                ...getTimesheetVacationColorStyle(vacationColor)
-              };
-
-              return (
-                <button
-                  className={cn(
-                    "relative flex min-h-16 flex-col justify-between overflow-hidden rounded-md border p-1.5 text-left transition sm:min-h-24 sm:p-2 lg:min-h-32 lg:p-3",
-                    row?.hasVacation && "timesheet-vacation-theme",
-                    nonDeducting.length > 0 && deducting.length === 0 && "timesheet-public-leave",
-                    row && (isPartialVacationOnly
-                      ? cell.dateKey > todayKey
-                        ? "timesheet-vacation-border bg-slate-100 text-slate-400"
-                        : "timesheet-vacation-border bg-white"
-                      : cellToneByStatus[row.status]),
-                    selectedDateKey === cell.dateKey && "ring-2 ring-slate-950 ring-offset-2"
-                  )}
-                  data-timesheet-vacation-color={row?.hasVacation ? presetVacationColor : undefined}
-                  id={`timesheet-calendar-date-${cell.dateKey}`}
-                  key={cell.dateKey}
-                  onClick={() => setSelectedDateKey(cell.dateKey)}
-                  ref={(element) => {
-                    if (element) {
-                      dateButtonRefs.current.set(cell.dateKey, element);
-                    } else {
-                      dateButtonRefs.current.delete(cell.dateKey);
-                    }
-                  }}
-                  style={calendarCellStyle}
-                  type="button"
-                >
-                  {vacationMixOverlayStyle ? <span aria-hidden="true" className="pointer-events-none absolute inset-0 z-0" style={vacationMixOverlayStyle} /> : null}
-                  {partialVacationOnlyOverlayStyle ? <span aria-hidden="true" className="pointer-events-none absolute inset-0 z-0" style={partialVacationOnlyOverlayStyle} /> : null}
-                  <div className="relative z-10 flex items-start justify-between gap-2">
-                    <span className="flex items-center gap-0.5">
-                      <span
-                        className={cn(
-                          "flex size-6 items-center justify-center rounded-full text-xs font-bold sm:size-7 sm:text-sm",
-                          cell.dateKey === todayKey ? "bg-slate-950 text-white" : row?.status === "HOLIDAY" ? "text-red-600" : "text-slate-950"
-                        )}
-                      >
-                        {cell.day}
-                      </span>
-                      {row && hasTimeMismatch(row) ? <TimeMismatchIcon hours={row.hours} /> : null}
-                      {row?.hasNotionCardWarning ? <NotionCardWarningIcon /> : null}
-                    </span>
-                    {row ? <div className="hidden sm:block"><CalendarStatusBadges row={row} /></div> : null}
-                  </div>
-                  <p className="relative z-10 truncate text-center text-[10px] font-semibold text-slate-500 sm:hidden">
-                    {[primaryLabel, publicLeaveLabel].filter(Boolean).join(" · ")}
-                  </p>
-                  <div className="relative z-10 mt-2 hidden min-w-0 space-y-1 sm:block lg:mt-3">
-                    {row?.kind === "WORK" && row.project ? (
-                      <div className="flex min-w-0 items-center gap-1">
-                        <p className="min-w-0 truncate text-xs font-bold text-slate-950">{row.project}</p>
-                        {row.projectCount > 1 ? <span className="shrink-0 text-[10px] font-bold text-slate-500">+{row.projectCount}</span> : null}
-                      </div>
-                    ) : null}
-                    <p className={cn("line-clamp-2 break-words text-sm leading-5 text-slate-600", row && row.entryCount > 1 && "pr-8", row?.status === "MISSING" && !draftPreviewText(row) && "font-bold text-red-600")}>
-                      {row ? calendarStatusText(row, selectedDateKey === cell.dateKey) : ""}
-                    </p>
-                  </div>
-                  {row && row.entryCount > 1 ? <span className="absolute bottom-1 right-1 z-20 rounded-full bg-slate-900 px-1.5 py-0.5 text-[10px] font-bold text-white sm:bottom-2 sm:right-2 sm:text-xs lg:bottom-3 lg:right-3 lg:px-2">{row.entryCount}</span> : null}
-                </button>
-              );
-            })}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ListView({
-  dateKeys,
-  rows,
-  savedRecords,
-  selectedEntryId,
-  selectedDateKey,
-  selectedRowKey,
-  setSelectedDateKey,
-  setSelectedEntry,
-  showFullContent
-}: {
-  dateKeys: string[];
-  rows: Record<string, TimesheetRow>;
-  savedRecords: Record<string, TimesheetDayDraft>;
-  selectedEntryId: string;
-  selectedDateKey: string;
-  selectedRowKey: string;
-  setSelectedDateKey: (dateKey: string) => void;
-  setSelectedEntry: (dateKey: string, entryClientId: string) => void;
-  showFullContent: boolean;
-}) {
-  const rowButtonRefs = useRef(new Map<string, HTMLButtonElement>());
-  const previousSelectedRowKeyRef = useRef(selectedRowKey);
-  const cardDateRanges = useMemo(() => getSavedNotionCardDateRanges(savedRecords, dateKeys), [dateKeys, savedRecords]);
-
-  useEffect(() => {
-    if (previousSelectedRowKeyRef.current === selectedRowKey) {
-      return;
-    }
-
-    previousSelectedRowKeyRef.current = selectedRowKey;
-    rowButtonRefs.current.get(selectedRowKey)?.focus({ preventScroll: true });
-  }, [selectedRowKey]);
-
-  return (
-    <div className="overflow-x-auto p-4">
-      <div className="grid min-w-[980px] grid-cols-[112px_88px_minmax(120px,0.8fr)_minmax(200px,1.2fr)_minmax(200px,1.1fr)] gap-3 border-b border-slate-200 px-3 pb-2 text-xs font-bold text-slate-400">
-        <span>상태</span>
-        <span>시간</span>
-        <span>프로젝트</span>
-        <span>내용</span>
-        <span>AI 번역본</span>
-      </div>
-      <div className="divide-y divide-slate-100">
-        {dateKeys.map((dateKey) => {
-          const row = rows[dateKey]!;
-          const emptyRowKey = listRowKey(dateKey, "");
-          const emptyStatusLabel = row.status === "MISSING" ? "입력안됨" : row.kind === "HOLIDAY" ? "공휴일" : row.kind === "VACATION" && row.vacationStatus === "TEMPORARY" ? "임시" : row.kind === "VACATION" ? "휴가" : "업무";
-          const emptyStatusTone: "blue" | "green" | "orange" | "white" = row.status === "MISSING" ? "white" : row.kind === "HOLIDAY" ? "orange" : row.kind === "VACATION" ? "blue" : "green";
-          const dayHeader = (
-            <div className={cn("grid grid-cols-[112px_88px_minmax(120px,0.8fr)_minmax(200px,1.2fr)_minmax(200px,1.1fr)] gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2", selectedDateKey === dateKey && "bg-blue-50/70")}>
-              <div className="col-span-2 flex min-w-0 items-center gap-2">
-                <span className="font-bold text-slate-950">{formatKoreanDate(dateKey)}</span>
-                <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-500">{listDayMeta(row)}</span>
-                {hasTimeMismatch(row) ? <TimeMismatchIcon hours={row.hours} /> : null}
-                {row.hasNotionCardWarning ? <NotionCardWarningIcon /> : null}
-              </div>
-              {row.shortVersion.trim() ? (
-                <p className={cn("col-span-3 min-w-0 text-sm font-semibold text-slate-700", showFullContent ? "whitespace-pre-wrap break-words" : "truncate")}>{row.shortVersion.trim()}</p>
-              ) : null}
-            </div>
-          );
-
-          if (row.status === "MISSING" || row.entries.length === 0) {
-            return (
-              <div className="min-w-[980px]" key={dateKey}>
-                {dayHeader}
-                <button
-                  className={cn(
-                    "grid w-full grid-cols-[112px_88px_minmax(120px,0.8fr)_minmax(200px,1.2fr)_minmax(200px,1.1fr)] gap-3 px-3 py-3 text-left text-sm transition hover:bg-slate-50",
-                    row.status === "MISSING" && "bg-amber-50 hover:bg-amber-100/70",
-                    selectedDateKey === dateKey && "bg-slate-100"
-                  )}
-                  id={`timesheet-list-row-${emptyRowKey}`}
-                  onClick={() => setSelectedDateKey(dateKey)}
-                  ref={(element) => {
-                    if (element) rowButtonRefs.current.set(emptyRowKey, element);
-                    else rowButtonRefs.current.delete(emptyRowKey);
-                  }}
-                  type="button"
-                >
-                  <span><Badge tone={emptyStatusTone}>{emptyStatusLabel}</Badge></span>
-                  <span className="font-semibold text-slate-700">{row.status === "MISSING" ? "0h" : `${row.hours}h`}</span>
-                  <span className="truncate font-medium text-slate-700">{row.kind === "HOLIDAY" ? row.holidayName || "-" : row.kind === "VACATION" ? row.vacationName || "휴가" : row.project}</span>
-                  <span className={cn(showFullContent ? "whitespace-pre-wrap break-words" : "truncate", "text-slate-600", row.status === "MISSING" && "font-bold text-red-600")}>{listSummaryText(row, showFullContent)}</span>
-                  <span className="truncate text-slate-500">-</span>
-                </button>
-              </div>
-            );
-          }
-
-          return (
-            <div className="min-w-[980px]" key={dateKey}>
-              {dayHeader}
-              <div className="divide-y divide-slate-100">
-                {row.entries.map((entry) => {
-                  const entryRowKey = listRowKey(dateKey, entry.clientId);
-                  const isSelected = selectedDateKey === dateKey && selectedEntryId === entry.clientId;
-                  const entryContent = entry.kind === "WORK" ? entry.content.trim() || "(내용 없음)" : "-";
-                  const entryTranslation = entry.kind === "WORK" ? entry.aiTranslation.trim() || "-" : "-";
-                  const hasEntryNotionWarning = entryHasNotionCardWarning(entry, row.status !== "MISSING");
-
-                  return (
-                    <button
-                      className={cn(
-                        "grid w-full grid-cols-[112px_88px_minmax(120px,0.8fr)_minmax(200px,1.2fr)_minmax(200px,1.1fr)] gap-3 px-3 py-3 text-left text-sm transition hover:bg-slate-50",
-                        isSelected && "bg-slate-50 ring-1 ring-inset ring-slate-300"
-                      )}
-                      id={`timesheet-list-row-${entryRowKey}`}
-                      key={entry.clientId}
-                      onClick={() => setSelectedEntry(dateKey, entry.clientId)}
-                      ref={(element) => {
-                        if (element) rowButtonRefs.current.set(entryRowKey, element);
-                        else rowButtonRefs.current.delete(entryRowKey);
-                      }}
-                      type="button"
-                    >
-                      <span><span className="inline-flex items-center gap-1.5"><Badge tone={entryKindTone(entry)}>{entryKindLabel(entry)}</Badge>{hasEntryNotionWarning ? <NotionCardWarningIcon /> : null}</span></span>
-                      <span className="font-semibold text-slate-700">{effectiveEntryHours(entry)}h</span>
-                      <span className="truncate font-medium text-slate-700">{entryTitle(entry)}</span>
-                      <span className={cn("min-w-0 break-words text-slate-600", showFullContent ? "whitespace-pre-wrap" : "line-clamp-2")}>{entryContent}</span>
-                      <span className={cn("min-w-0 break-words text-slate-500", showFullContent ? "whitespace-pre-wrap" : "line-clamp-2")}>{entryTranslation}</span>
-                      {entry.kind === "WORK" && entry.notionCards.length > 0 ? (
-                        <span className="col-span-3 col-start-3 flex min-w-0 flex-wrap items-center gap-1.5 pt-1">
-                          {entry.notionCards.map((card) => {
-                            const role = getNotionCardWorkDateRole(dateKey, card.notionPageId, cardDateRanges);
-                            const roleBadge = role === "first"
-                              ? { className: "bg-emerald-200/80 text-emerald-800", label: "시작" }
-                              : role === "last"
-                                ? { className: "bg-purple-200/80 text-purple-800", label: "종료" }
-                                : role === "single"
-                                  ? { className: "bg-teal-200/80 text-teal-800", label: "시작/종료" }
-                                  : null;
-
-                            return (
-                              <span
-                                className="inline-flex min-w-0 max-w-full items-center gap-1 rounded border border-slate-200 bg-slate-100/70 px-1.5 py-0.5 text-[11px] font-semibold text-slate-700"
-                                key={card.notionPageId}
-                                title={`${card.title || card.notionPageId} · ${formatAllocatedHours(card.allocatedHours)}${card.status ? ` · ${card.status}` : ""}`}
-                              >
-                                {roleBadge ? <span className={`shrink-0 rounded px-1 py-0.2 text-[10px] font-bold ${roleBadge.className}`}>{roleBadge.label}</span> : null}
-                                <span className="min-w-0 truncate">{card.title || card.notionPageId}</span>
-                                <span className="shrink-0 font-bold text-slate-950">{formatAllocatedHours(card.allocatedHours)}</span>
-                                {card.status ? <span className="shrink-0 text-[10px] text-slate-400">{card.status}</span> : null}
-                              </span>
-                            );
-                          })}
-                        </span>
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function listRowKey(dateKey: string, entryClientId: string): string {
-  return `${dateKey}:${entryClientId}`;
-}
-
-function entryTitle(entry: TimesheetEntryDraft): string {
-  if (entry.kind === "VACATION") {
-    return entry.vacationName || "휴가";
-  }
-
-  if (entry.kind === "HOLIDAY") {
-    return entry.holidayName || "공휴일";
-  }
-
-  return entry.project;
-}
-
-function entryKindLabel(entry: TimesheetEntryDraft): string {
-  if (entry.kind === "VACATION") {
-    if (entry.vacationStatus === "TEMPORARY") {
-      return "임시";
-    }
-
-    return "휴가";
-  }
-
-  if (entry.kind === "HOLIDAY") {
-    return "공휴일";
-  }
-
-  return "업무";
-}
-
-function entryKindTone(entry: TimesheetEntryDraft) {
-  if (entry.kind === "VACATION") {
-    return "blue";
-  }
-
-  if (entry.kind === "HOLIDAY") {
-    return "orange";
-  }
-
-  return "green";
-}
-
-function entryContentPreview(entry: TimesheetEntryDraft): string {
-  return truncateContent(entry.content);
-}
-
-function SortableEntryItem({
-  entry,
-  index,
-  isSelected,
-  notionCardWarning,
-  onMoveDown,
-  onMoveUp,
-  onRemove,
-  onSelect,
-  totalCount
-}: {
-  entry: TimesheetEntryDraft;
-  index: number;
-  isSelected: boolean;
-  notionCardWarning: boolean;
-  onMoveDown: () => void;
-  onMoveUp: () => void;
-  onRemove: () => void;
-  onSelect: () => void;
-  totalCount: number;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: entry.clientId });
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition
-  };
-
-  return (
-    <div
-      className={cn("rounded-md border bg-white p-3 shadow-sm transition", isSelected ? "border-slate-950 ring-2 ring-slate-950/10" : "border-slate-200")}
-      ref={setNodeRef}
-      style={style}
-    >
-      <div className="flex items-start gap-2">
-        <button className="mt-0.5 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" type="button" {...attributes} {...listeners}>
-          <GripVertical aria-hidden="true" className="size-4" />
-          <span className="sr-only">순서 변경</span>
-        </button>
-        <button className="block min-w-0 flex-1 rounded-sm text-left" onClick={onSelect} type="button">
-          <div className="flex items-center gap-2">
-            <Badge tone={entryKindTone(entry)}>{entryKindLabel(entry)}</Badge>
-            <span className="min-w-0 truncate text-sm font-semibold text-slate-800">{entryTitle(entry)}</span>
-            <span className="text-sm font-bold text-slate-950">{effectiveEntryHours(entry)}h</span>
-            {notionCardWarning ? <NotionCardWarningIcon /> : null}
-          </div>
-          {entry.kind === "WORK" && entryContentPreview(entry) ? <p className="mt-1 line-clamp-2 text-xs font-medium leading-4 text-slate-500">{entryContentPreview(entry)}</p> : null}
-        </button>
-        <div className="flex shrink-0 items-center gap-1">
-          <button className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30" disabled={index === 0} onClick={onMoveUp} type="button">
-            <ArrowUp aria-hidden="true" className="size-4" />
-            <span className="sr-only">위로 이동</span>
-          </button>
-          <button className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30" disabled={index === totalCount - 1} onClick={onMoveDown} type="button">
-            <ArrowDown aria-hidden="true" className="size-4" />
-            <span className="sr-only">아래로 이동</span>
-          </button>
-          <button className="rounded-md p-1 text-red-500 transition hover:bg-red-50 hover:text-red-700" onClick={onRemove} type="button">
-            <Trash2 aria-hidden="true" className="size-4" />
-            <span className="sr-only">삭제</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Field({ children, label }: { children: ReactNode; label: string }) {
-  return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      {children}
-    </div>
   );
 }
 
@@ -5619,75 +3059,4 @@ function isTextEditingTarget(target: EventTarget): boolean {
   }
 
   return Boolean(element.closest("input, textarea, select, [contenteditable='true']"));
-}
-
-function ShortcutKey({ children }: { children: ReactNode }) {
-  return (
-    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded-md border border-current/20 bg-current/10 px-1.5 font-mono text-[10px] font-black leading-none tracking-normal">
-      {children}
-    </kbd>
-  );
-}
-
-function ShortcutHint({ keys }: { keys: ReactNode[] }) {
-  return (
-    <span aria-hidden="true" className="inline-flex items-center gap-1 opacity-80">
-      {keys.map((key, index) => (
-        <ShortcutKey key={index}>{key}</ShortcutKey>
-      ))}
-    </span>
-  );
-}
-
-function ModalShell({ children, onClose, onConfirm, title }: { children: ReactNode; onClose: () => void; onConfirm?: () => void; title: string }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    dialogRef.current?.focus();
-  }, []);
-
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.nativeEvent.isComposing) {
-      return;
-    }
-
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
-
-    if (event.key !== "Enter" || !onConfirm) {
-      return;
-    }
-
-    const target = event.target as HTMLElement;
-
-    if (target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.closest("button")) {
-      return;
-    }
-
-    event.preventDefault();
-    onConfirm();
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-6"
-      onKeyDown={handleKeyDown}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose();
-        }
-      }}
-      role="presentation"
-    >
-      <div aria-labelledby="modal-title" aria-modal="true" className="w-full max-w-2xl rounded-lg border border-slate-200 bg-white p-5 shadow-2xl shadow-slate-950/20 outline-none" ref={dialogRef} role="dialog" tabIndex={-1}>
-        <h2 className="text-lg font-bold text-slate-950" id="modal-title">
-          {title}
-        </h2>
-        <div className="mt-4">{children}</div>
-      </div>
-    </div>
-  );
 }
