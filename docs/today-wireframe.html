@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>오늘 · aJam 와이어프레임</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      color-scheme: light;
+      --page: #f1f5f9;
+      --surface: #fff;
+      --inset: #f8fafc;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --muted: #475569;
+      --primary: #020617;
+      --focus: #64748b;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --page: #1f1f1f;
+        --surface: #252526;
+        --inset: #2d2d30;
+        --border: #3c3c3c;
+        --text: #f1f5f9;
+        --muted: #cbd5e1;
+        --primary: #0e639c;
+        --focus: #9cdcfe;
+      }
+    }
+    body { margin: 0; background: var(--page); color: var(--text); font: 14px/1.5 "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+    header { background: var(--surface); border-bottom: 1px solid var(--border); box-shadow: 0 1px 2px rgb(15 23 42 / 5%); }
+    nav, main { max-width: 1600px; margin: auto; padding: 16px 20px; }
+    nav { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+    .brand { margin-right: 16px; font-size: 20px; line-height: 1.2; }
+    .brand small { display: block; font-size: 14px; }
+    nav > span { padding: 8px 10px; border-bottom: 2px solid transparent; font-weight: 700; }
+    nav [aria-current] { border-bottom-color: var(--text); }
+    main { padding-bottom: 48px; }
+    h1 { margin: 0; font-size: 24px; }
+    h2 { margin: 0 0 12px; font-size: 20px; }
+    p { margin: 0; }
+    .intro { margin-bottom: 20px; }
+    .muted, small { color: var(--muted); }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); gap: 16px; align-items: start; }
+    section { padding: 20px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 1px 2px rgb(15 23 42 / 5%); }
+    section + section { margin-top: 16px; }
+    form { display: grid; gap: 6px; margin-bottom: 14px; }
+    :is(input, select, button, textarea) { font: inherit; }
+    :is(input, select, button, textarea) { min-height: 40px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: inherit; }
+    :is(input, select, button, textarea):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    button { cursor: pointer; white-space: nowrap; font-weight: 600; }
+    button:disabled { cursor: default; opacity: .45; }
+    button.primary { background: var(--primary); border-color: var(--primary); color: white; }
+    [hidden] { display: none !important; }
+    .tabs { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 16px; }
+    [role="tab"][aria-selected="true"] { background: var(--primary); color: white; }
+    .allocation { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-content: start; align-items: center; gap: 8px; }
+    .allocation .card-info { grid-column: 1 / -1; min-width: 0; padding-left: 22px; }
+    .allocation label { white-space: nowrap; }
+    .allocation > button { width: max-content; }
+    .card-info strong, .card-info small { display: block; }
+    .card.task { position: relative; display: grid; grid-template-columns: minmax(190px, 230px) minmax(0, 1fr); gap: 14px; background: var(--surface); margin-top: 8px; padding: 12px; }
+    .task .remove-card { position: absolute; left: 8px; top: 8px; min-height: 24px; width: 24px; padding: 0; border-color: transparent; background: transparent; color: var(--muted); font-size: 18px; }
+    .task .remove-card:hover { color: var(--text); background: var(--inset); }
+    .linked-cards { background: var(--inset); padding: 12px; margin-block: 12px; border: 1px solid var(--border); border-radius: 6px; }
+    [name="content"] { height: 75px; min-height: 75px; margin-top: 6px; }
+    .inline-comment { min-width: 0; }
+    .inline-comment textarea { height: 72px; min-height: 72px; margin-top: 6px; font-size: 13px; }
+    .comment-toolbar { display: flex; align-items: center; gap: 4px; min-height: 24px; }
+    .latest-comment-meta { flex: 1; min-width: 0; color: var(--muted); font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .comment-toolbar button { flex-shrink: 0; min-height: 24px; padding: 2px 6px; border-color: transparent; font-size: 11px; }
+    .comment-toolbar button:hover { background: var(--inset); }
+    .comment-toolbar .primary { border-color: var(--primary); }
+    .comment-toolbar .primary:hover { background: var(--primary); opacity: .85; }
+    .inline-status { max-width: 90px; color: var(--muted); font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .inline-status:empty { display: none; }
+    .comment-meta { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+    .comment-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+    #comments-list { max-height: 38dvh; overflow-y: auto; margin-block: 16px; }
+    .comment-actions { display: flex; gap: 8px; margin-top: 8px; }
+    .comment-actions button { min-height: 28px; padding: 3px 8px; font-size: 12px; }
+    .auto-hours { font-size: 12px; color: var(--muted); }
+    .allocation input { width: 88px; }
+    .candidates { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 8px; margin: 8px 0 12px; }
+    .candidate { display: grid; gap: 3px; text-align: left; white-space: normal; }
+    .candidate:hover { border-color: var(--focus); }
+    .candidate[aria-disabled="true"] { background: var(--inset); cursor: default; }
+    .candidate-meta { color: var(--muted); font-size: 12px; font-weight: 500; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+    .work-fields { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 8px; }
+    .work-fields :is(select, input) { width: 100%; }
+    #work-form { margin-bottom: 0; }
+    #work-form .actions { align-items: center; margin: 6px 0 0; }
+    dialog { width: min(560px, calc(100% - 32px)); max-height: 85dvh; padding: 20px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
+    dialog::backdrop { background: rgb(15 23 42 / 45%); }
+    dialog .actions { justify-content: flex-end; margin: 0; }
+    textarea { display: block; width: 100%; min-height: 72px; resize: vertical; }
+    label { display: block; font-weight: 600; }
+    .card { background: var(--inset); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-top: 12px; }
+    .card h3 { margin: 0; font-size: 16px; }
+    .preview-note { overflow-wrap: anywhere; white-space: pre-wrap; }
+    @media (max-width: 1023px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 680px) {
+      .card.task { grid-template-columns: 1fr; gap: 10px; }
+    }
+    @media (max-width: 480px) {
+      nav, main { padding-inline: 14px; }
+      .brand { flex-basis: 100%; }
+      section { padding: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <nav aria-label="aJam 메뉴 배치">
+      <strong class="brand">업무 기록 관리<small>aJam by junglesub</small></strong>
+      <span aria-current="page">오늘</span>
+      <span class="muted">업무 기록</span>
+      <span class="muted">Notion 카드</span>
+    </nav>
+  </header>
+  <main>
+    <div class="intro">
+      <h1>오늘</h1>
+      <p class="muted"><time datetime="2026-11-11">2026년 11월 11일 수요일</time> · 예시 화면</p>
+    </div>
+    <div class="layout">
+      <div>
+        <section aria-labelledby="work-heading">
+          <h2 id="work-heading">업무 기록</h2>
+          <div class="tabs">
+            <div class="tabs" id="work-tabs" role="tablist" aria-label="업무 항목"></div>
+            <button type="button" id="add-work-entry" aria-label="업무 항목 추가">+</button>
+          </div>
+          <form id="work-form" novalidate>
+            <div id="work-entries"></div>
+            <div class="actions">
+              <button class="primary" type="submit">업무 기록 확정</button>
+              <small id="work-status" role="status"></small>
+            </div>
+          </form>
+        </section>
+      </div>
+      <aside aria-label="업무 캘린더">
+        <section aria-labelledby="preview-heading">
+          <h2 id="preview-heading">캘린더 미리보기</h2>
+          <p class="muted">11월 11일</p>
+          <h3>전체 요약</h3>
+          <p class="muted">작성 중인 모든 업무</p>
+          <p id="preview-total"></p>
+          <div id="preview-work" class="preview-note"></div>
+          <p><small>미리보기용 입력이에요. 새로고침하면 초기화돼요.</small></p>
+        </section>
+      </aside>
+    </div>
+  </main>
+  <dialog id="other-cards" aria-labelledby="other-cards-heading">
+    <h2 id="other-cards-heading">Notion 카드 추가</h2>
+    <label for="card-search">카드 검색</label>
+    <input id="card-search" type="search" placeholder="카드 이름 또는 카테고리" style="width:100%">
+    <div class="candidates"></div>
+    <form class="actions" method="dialog"><button>닫기</button></form>
+  </dialog>
+  <dialog id="comments-dialog" aria-labelledby="comments-heading">
+    <h2 id="comments-heading">Notion 댓글</h2>
+    <p id="comments-card-title"></p>
+    <small>댓글 미리보기 · 예시 데이터</small>
+    <div id="comments-list"></div>
+    <form id="comment-form">
+      <label for="comment-text">댓글 남기기</label>
+      <textarea id="comment-text" required placeholder="이 카드에 남길 진행 상황이나 질문"></textarea>
+      <small>게시하면 해당 Notion 카드에서 볼 수 있어요. 현재 화면은 동작 예시예요.</small>
+      <div class="actions">
+        <button type="button" id="cancel-edit" hidden>수정 취소</button>
+        <button type="submit" id="add-as-new" hidden>새 댓글로 추가</button>
+        <button class="primary" type="submit" id="post-comment">Notion에 게시</button>
+      </div>
+    </form>
+    <form class="actions" method="dialog"><button>닫기</button></form>
+  </dialog>
+  <template id="work-entry-template">
+    <div role="tabpanel">
+      <div class="work-fields">
+        <label>진행한 프로젝트
+          <select name="project" required>
+            <option value="">프로젝트 선택</option>
+            <option>업무 기록 개선</option>
+            <option>운영 지원</option>
+          </select>
+        </label>
+        <label>근무시간
+          <input name="hours" type="number" min="0" max="24" step="0.5" required>
+        </label>
+      </div>
+      <label>내용<textarea name="content" placeholder="오늘 진행한 업무를 적으세요"></textarea></label>
+      <div class="linked-cards">
+        <h3>연결된 Notion 카드</h3>
+        <div class="tasks"></div>
+        <div class="actions">
+          <button type="button" data-open="other-cards">+ 카드</button>
+          <button type="button" class="reset-allocation">자동 배분</button>
+        </div>
+        <p class="allocation-error" role="status"></p>
+      </div>
+    </div>
+  </template>
+  <script>
+    const workEntries = document.querySelector('#work-entries');
+    const tabs = document.querySelector('#work-tabs');
+    const workForm = document.querySelector('#work-form');
+    const workStatus = document.querySelector('#work-status');
+    const candidates = [
+      ['월간 리포트 필터 검토', '리포트'],
+      ['로그인 오류 재현', '인증'],
+      ['알림 문구 리뷰', '알림'],
+      ['휴가 달력 모바일 확인', '휴가'],
+      ['업무 기록 검색 개선', '업무 기록'],
+      ['동기화 오류 로그 확인', 'Notion'],
+      ['분기 리포트 내보내기 점검', '리포트'],
+      ['배포 체크리스트 검토', '배포']
+    ];
+    let activeEntry;
+    let draftTimer;
+
+    function selectEntry(entry) {
+      activeEntry = entry;
+      for (const panel of workEntries.children) panel.hidden = panel !== entry;
+      for (const tab of tabs.children) {
+        const selected = tab.getAttribute('aria-controls') === entry.id;
+        tab.setAttribute('aria-selected', String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+      }
+      refreshCandidates();
+    }
+
+    function refreshCandidates() {
+      for (const button of document.querySelectorAll('.candidate')) {
+        const added = Array.from(activeEntry.querySelectorAll('.task')).some(
+          (task) => task.dataset.title === button.querySelector('strong').textContent
+        );
+        button.setAttribute('aria-disabled', String(added));
+        button.querySelector('.candidate-state').textContent = added ? '추가됨' : '+ 이 업무에 추가';
+      }
+    }
+
+    function addWorkEntry() {
+      const entry = document.querySelector('#work-entry-template').content.firstElementChild.cloneNode(true);
+      const index = workEntries.children.length + 1;
+      entry.id = 'entry-' + index;
+      entry.setAttribute('aria-labelledby', 'tab-' + index);
+      entry.querySelector('[name="hours"]').value = '8';
+      workEntries.append(entry);
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.id = 'tab-' + index;
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-controls', entry.id);
+      tab.textContent = '업무 ' + index;
+      tab.addEventListener('click', () => selectEntry(entry));
+      tabs.append(tab);
+      selectEntry(entry);
+      addTask('월간 리포트 필터 검토', true, '전일 업무');
+      addTask('알림 문구 리뷰', true, '요일별 자동');
+      entry.querySelectorAll('.task input')[1].value = '1';
+      return entry;
+    }
+
+    function addTask(title, isNotion, source = '') {
+      const duplicate = Array.from(activeEntry.querySelectorAll('.task')).some((task) => task.dataset.title === title);
+      if (duplicate) return;
+      const task = document.createElement('div');
+      task.className = 'card task';
+      task.dataset.title = title;
+      task.dataset.notion = String(isNotion);
+      const row = document.createElement('div');
+      row.className = 'allocation';
+      const name = document.createElement('strong');
+      name.textContent = title;
+      const info = document.createElement('div');
+      info.className = 'card-info';
+      info.append(name);
+      const status = document.createElement('small');
+      const category = candidates.find((card) => card[0] === title)?.[1] || '미분류';
+      status.textContent = '진행 중 · ' + category + (source ? ' · ' + source : '');
+      info.append(status);
+      row.append(info);
+      if (isNotion) {
+        const label = document.createElement('label');
+        label.textContent = '시간 ';
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0';
+        input.max = '24';
+        input.step = '0.25';
+        input.placeholder = '자동';
+        input.setAttribute('aria-label', title + ' 배분 시간');
+        label.append(input);
+        row.append(label);
+        const autoHours = document.createElement('small');
+        autoHours.className = 'auto-hours';
+        row.append(autoHours);
+      }
+      const comments = document.createElement('button');
+      comments.type = 'button';
+      comments.textContent = '전체';
+      comments.title = '전체 댓글 보기';
+      comments.setAttribute('aria-label', title + ' 댓글 보기');
+      comments.addEventListener('click', () => openComments(title));
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'remove-card';
+      remove.textContent = '×';
+      remove.setAttribute('aria-label', title + ' 연결 해제');
+      remove.addEventListener('click', () => {
+        task.remove();
+        refreshCandidates();
+        changed();
+      });
+      task.append(remove, row);
+      const editor = document.createElement('div');
+      editor.className = 'inline-comment';
+      const metadata = document.createElement('span');
+      metadata.className = 'latest-comment-meta';
+      const textarea = document.createElement('textarea');
+      textarea.setAttribute('aria-label', title + ' 마지막 댓글');
+      textarea.addEventListener('input', () => {
+        editor.dataset.dirty = 'true';
+        editor.querySelector('.inline-status').textContent = '저장 전';
+      });
+      const actions = document.createElement('div');
+      actions.className = 'comment-toolbar';
+      const update = document.createElement('button');
+      update.type = 'button';
+      update.className = 'primary update-inline';
+      update.textContent = '업데이트';
+      update.addEventListener('click', () => saveInlineComment(task, false));
+      const addNew = document.createElement('button');
+      addNew.type = 'button';
+      addNew.className = 'new-inline';
+      addNew.textContent = '새로 추가';
+      addNew.setAttribute('aria-label', title + ' 새 댓글로 추가');
+      addNew.addEventListener('click', () => saveInlineComment(task, true));
+      const reset = document.createElement('button');
+      reset.type = 'button';
+      reset.textContent = '↶';
+      reset.title = '댓글 입력 되돌리기';
+      reset.setAttribute('aria-label', title + ' 댓글 입력 되돌리기');
+      reset.addEventListener('click', () => {
+        editor.dataset.dirty = 'false';
+        refreshCardComments();
+      });
+      const inlineStatus = document.createElement('small');
+      inlineStatus.className = 'inline-status';
+      inlineStatus.setAttribute('role', 'status');
+      actions.append(metadata, inlineStatus, comments, reset, addNew, update);
+      editor.append(actions, textarea);
+      task.append(editor);
+      activeEntry.querySelector('.tasks').append(task);
+      refreshCardComments();
+      refreshCandidates();
+      changed();
+    }
+
+    function renderSummary() {
+      const preview = document.querySelector('#preview-work');
+      preview.replaceChildren();
+      let total = 0;
+      let valid = true;
+      for (const [index, entry] of Array.from(workEntries.children).entries()) {
+        const hours = Number(entry.querySelector('[name="hours"]').value) || 0;
+        total += hours;
+        const project = entry.querySelector('[name="project"]').value || '프로젝트 선택 전';
+        const tasks = Array.from(entry.querySelectorAll('.task'));
+        const cardInputs = Array.from(entry.querySelectorAll('.task input'));
+        const manual = cardInputs.filter((input) => input.value !== '');
+        const automatic = cardInputs.length - manual.length;
+        const manualTotal = manual.reduce((sum, input) => sum + Number(input.value), 0);
+        const over = manualTotal > hours;
+        const error = entry.querySelector('.allocation-error');
+        error.textContent = over ? '카드 배분 시간이 이 업무의 근무시간을 초과했어요.' : '';
+        valid = valid && !over;
+        const summary = document.createElement('article');
+        summary.className = 'card';
+        const heading = document.createElement('strong');
+        heading.textContent = '업무 ' + (index + 1) + ' · ' + project + ' · ' + hours + '시간';
+        const content = document.createElement('p');
+        content.textContent = entry.querySelector('[name="content"]').value;
+        summary.append(heading, content);
+        for (const task of tasks) {
+          const input = task.querySelector('input');
+          const text = document.createElement('p');
+          let time = '';
+          if (input) {
+            const allocated = input.value === '' ? Math.max(0, hours - manualTotal) / automatic : Number(input.value);
+            time = ' · ' + Math.round(allocated * 100) / 100 + '시간';
+            task.querySelector('.auto-hours').textContent = input.value === '' ? '자동 ' + Math.round(allocated * 100) / 100 + 'h' : '수동';
+          }
+          text.textContent = task.dataset.title + time;
+          summary.append(text);
+        }
+        preview.append(summary);
+      }
+      document.querySelector('#preview-total').textContent = workEntries.children.length + '개 업무 · 총 ' + total + '시간';
+      return valid;
+    }
+
+    function changed() {
+      renderSummary();
+      clearTimeout(draftTimer);
+      workStatus.textContent = '임시 저장 중';
+      draftTimer = setTimeout(() => { workStatus.textContent = '임시 저장됨 (예시)'; }, 500);
+    }
+
+    document.addEventListener('click', (event) => {
+      const opener = event.target.closest('[data-open]');
+      if (opener) document.getElementById(opener.dataset.open).showModal();
+      const card = event.target.closest('.candidate');
+      if (card && card.getAttribute('aria-disabled') !== 'true') addTask(card.querySelector('strong').textContent, true);
+      if (event.target.closest('.reset-allocation')) {
+        for (const input of activeEntry.querySelectorAll('.task input')) input.value = '';
+        changed();
+      }
+    });
+    tabs.addEventListener('keydown', (event) => {
+      const directions = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+      if (!directions.includes(event.key)) return;
+      event.preventDefault();
+      const index = Array.from(tabs.children).indexOf(document.activeElement);
+      let next = event.key === 'ArrowLeft' ? index - 1 : index + 1;
+      if (event.key === 'Home') next = 0;
+      if (event.key === 'End') next = tabs.children.length - 1;
+      const tab = tabs.children[(next + tabs.children.length) % tabs.children.length];
+      tab.click();
+      tab.focus();
+    });
+    document.querySelector('#add-work-entry').addEventListener('click', () => {
+      addWorkEntry();
+      tabs.lastElementChild.focus();
+      changed();
+    });
+    workForm.addEventListener('input', (event) => {
+      if (!event.target.closest('.inline-comment')) changed();
+    });
+    workForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const invalid = Array.from(workEntries.querySelectorAll('input, select, textarea')).find((input) => !input.validity.valid);
+      if (invalid) {
+        selectEntry(invalid.closest('[role="tabpanel"]'));
+        invalid.reportValidity();
+        return;
+      }
+      if (!renderSummary()) {
+        workStatus.textContent = '카드 배분 시간을 확인해 주세요.';
+        return;
+      }
+      clearTimeout(draftTimer);
+      workStatus.textContent = '전체 업무 확정 (예시)';
+    });
+    const commentDialog = document.querySelector('#comments-dialog');
+    const commentText = document.querySelector('#comment-text');
+    const postComment = document.querySelector('#post-comment');
+    const cancelEdit = document.querySelector('#cancel-edit');
+    const addAsNew = document.querySelector('#add-as-new');
+    const commentThreads = new Map();
+    let commentCard;
+    let editingComment = null;
+
+    function resetCommentEditor() {
+      editingComment = null;
+      commentText.value = '';
+      postComment.textContent = 'Notion에 게시';
+      cancelEdit.hidden = true;
+      addAsNew.hidden = true;
+    }
+
+    function getCommentThread(title) {
+      if (!commentThreads.has(title)) {
+        commentThreads.set(title, [
+          { author: '동료', time: '오늘 09:30', text: '빈 결과일 때 안내 문구도 확인 부탁드려요.', owned: false },
+          { author: 'aJam 연결', time: '오늘 10:15', text: '날짜 필터 재현 완료. 오후에 빈 결과 화면을 확인할 예정입니다.', owned: true }
+        ]);
+      }
+      return commentThreads.get(title);
+    }
+
+    function refreshCardComments() {
+      for (const task of workEntries.querySelectorAll('.task')) {
+        const editor = task.querySelector('.inline-comment');
+        if (editor.dataset.dirty === 'true') continue;
+        const thread = getCommentThread(task.dataset.title);
+        const latest = thread[thread.length - 1];
+        editor.commentTarget = latest;
+        const metadata = editor.querySelector('.latest-comment-meta');
+        metadata.textContent = latest ? latest.author + ' · ' + latest.time : '아직 댓글이 없어요';
+        metadata.title = metadata.textContent;
+        editor.querySelector('textarea').value = latest?.text || '';
+        editor.querySelector('.update-inline').disabled = !latest?.owned;
+        editor.querySelector('.inline-status').textContent = latest && !latest.owned ? '새 댓글로 이어서 작성할 수 있어요.' : '';
+      }
+    }
+
+    function saveInlineComment(task, addNew) {
+      const editor = task.querySelector('.inline-comment');
+      const text = editor.querySelector('textarea').value.trim();
+      const thread = getCommentThread(task.dataset.title);
+      if (!text) {
+        editor.querySelector('.inline-status').textContent = '댓글 내용을 입력해 주세요.';
+        return;
+      }
+      if (addNew) {
+        thread.push({ author: 'aJam 연결', time: '방금', text, owned: true });
+      } else {
+        const target = editor.commentTarget;
+        if (!target?.owned || !thread.includes(target)) {
+          editor.querySelector('.inline-status').textContent = '원본을 확인하거나 새 댓글로 추가해 주세요.';
+          return;
+        }
+        target.text = text;
+        target.time = '방금 수정';
+      }
+      editor.dataset.dirty = 'false';
+      refreshCardComments();
+      editor.querySelector('.inline-status').textContent = addNew ? '새 댓글 추가됨 (예시)' : '업데이트됨 (예시)';
+    }
+
+    function openComments(title) {
+      commentCard = title;
+      getCommentThread(title);
+      document.querySelector('#comments-card-title').textContent = title;
+      resetCommentEditor();
+      renderComments();
+      commentDialog.showModal();
+    }
+
+    function renderComments() {
+      refreshCardComments();
+      const list = document.querySelector('#comments-list');
+      list.replaceChildren();
+      const thread = commentThreads.get(commentCard);
+      for (const comment of thread) {
+        const article = document.createElement('article');
+        article.className = 'card';
+        const meta = document.createElement('div');
+        meta.className = 'comment-meta';
+        const author = document.createElement('strong');
+        author.textContent = comment.author;
+        const time = document.createElement('small');
+        time.textContent = comment.time;
+        meta.append(author, time);
+        const body = document.createElement('p');
+        body.className = 'comment-body';
+        body.textContent = comment.text;
+        article.append(meta, body);
+        if (comment.owned) {
+          const actions = document.createElement('div');
+          actions.className = 'comment-actions';
+          const edit = document.createElement('button');
+          edit.type = 'button';
+          edit.textContent = '수정';
+          edit.addEventListener('click', () => {
+            editingComment = comment;
+            commentText.value = comment.text;
+            postComment.textContent = '업데이트';
+            cancelEdit.hidden = false;
+            addAsNew.hidden = false;
+            commentText.focus();
+          });
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.textContent = '삭제';
+          remove.addEventListener('click', () => {
+            if (remove.textContent !== '삭제 확인') {
+              remove.textContent = '삭제 확인';
+              return;
+            }
+            thread.splice(thread.indexOf(comment), 1);
+            if (editingComment === comment) resetCommentEditor();
+            renderComments();
+          });
+          actions.append(edit, remove);
+          article.append(actions);
+        }
+        list.append(article);
+      }
+    }
+
+    cancelEdit.addEventListener('click', resetCommentEditor);
+    document.querySelector('#comment-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      const text = commentText.value.trim();
+      if (!text) return;
+      if (editingComment && event.submitter !== addAsNew) {
+        editingComment.text = text;
+        editingComment.time = '방금 수정';
+      } else {
+        commentThreads.get(commentCard).push({ author: 'aJam 연결', time: '방금', text, owned: true });
+      }
+      resetCommentEditor();
+      renderComments();
+    });
+
+    for (const [title, category] of candidates) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'candidate';
+      const name = document.createElement('strong');
+      name.textContent = title;
+      const meta = document.createElement('span');
+      meta.className = 'candidate-meta';
+      meta.textContent = category + ' · ' + (title === '배포 체크리스트 검토' ? '시작 전' : '진행 중');
+      const state = document.createElement('span');
+      state.className = 'candidate-state';
+      button.append(name, meta, state);
+      document.querySelector('#other-cards .candidates').append(button);
+    }
+    document.querySelector('#card-search').addEventListener('input', (event) => {
+      const query = event.target.value.trim().toLocaleLowerCase();
+      for (const button of document.querySelectorAll('.candidate')) {
+        button.hidden = !button.textContent.toLocaleLowerCase().includes(query);
+      }
+    });
+    addWorkEntry();
+    renderSummary();
+  </script>
+</body>
+</html>
