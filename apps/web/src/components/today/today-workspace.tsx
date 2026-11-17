@@ -41,6 +41,7 @@ import {
   NotionCardCommentsRow,
   type SharedCardCommentsState
 } from "./notion-card-comments";
+import { PendingNavigationConfirmModal } from "@/components/timesheet/timesheet-simple-modals";
 
 type TodayWorkspaceProps = {
   initialDateKey: string;
@@ -107,6 +108,9 @@ export function TodayWorkspace({ initialDateKey, projects }: TodayWorkspaceProps
   const [commentEditorsByPageId, setCommentEditorsByPageId] = useState<
     Record<string, CardCommentEditorState>
   >({});
+  const commentEditorsRef = useRef(commentEditorsByPageId);
+  commentEditorsRef.current = commentEditorsByPageId;
+  const [pendingLeave, setPendingLeave] = useState<{ href: string; kind: "comment" | "navigate" } | null>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const [copyFeedback, setCopyFeedback] = useState("");
@@ -198,21 +202,27 @@ export function TodayWorkspace({ initialDateKey, projects }: TodayWorkspaceProps
 
   // Navigation protection (beforeunload + in-app link clicks)
   useEffect(() => {
+    function hasUnsavedCommentEdits() {
+      return Object.values(commentEditorsRef.current).some(
+        (editor) => editor.isDirty || editor.historyNewText.trim().length > 0
+      );
+    }
     function handleBeforeUnload(event: BeforeUnloadEvent) {
-      if (lifecycleRef.current?.getSnapshot().hasUnsavedChanges) {
+      if (lifecycleRef.current?.getSnapshot().hasUnsavedChanges || hasUnsavedCommentEdits()) {
         event.preventDefault();
       }
     }
     function handleDocumentClick(event: MouseEvent) {
-      if (!lifecycleRef.current?.getSnapshot().hasUnsavedChanges) return;
+      const unsavedWork = lifecycleRef.current?.getSnapshot().hasUnsavedChanges ?? false;
+      const unsavedComment = hasUnsavedCommentEdits();
+      if (!unsavedWork && !unsavedComment) return;
       const target = event.target as HTMLElement | null;
       const anchor = target?.closest("a[href]") as HTMLAnchorElement | null;
       if (!anchor) return;
       if (anchor.target === "_blank" || anchor.origin !== window.location.origin) return;
-      if (!window.confirm("저장되지 않은 변경사항이 있습니다. 이동하시겠습니까?")) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
+      event.preventDefault();
+      event.stopPropagation();
+      setPendingLeave({ href: anchor.href, kind: unsavedComment ? "comment" : "navigate" });
     }
     window.addEventListener("beforeunload", handleBeforeUnload);
     document.addEventListener("click", handleDocumentClick, true);
@@ -812,6 +822,17 @@ export function TodayWorkspace({ initialDateKey, projects }: TodayWorkspaceProps
         onToggleCard={handleToggleCard}
         open={pickerOpen}
       />
+      {pendingLeave ? (
+        <PendingNavigationConfirmModal
+          kind={pendingLeave.kind}
+          onCancel={() => setPendingLeave(null)}
+          onConfirm={() => {
+            const href = pendingLeave.href;
+            setPendingLeave(null);
+            window.location.assign(href);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

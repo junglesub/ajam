@@ -70,20 +70,23 @@ export function PendingNavigationConfirmModal({
   onConfirm
 }: {
   draftSaveFailed?: boolean;
-  kind: "closeEditor" | "navigate";
+  kind: "closeEditor" | "comment" | "navigate";
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const action = kind === "closeEditor" ? "닫으면" : "이동하면";
   const confirmLabel = kind === "closeEditor" ? "닫기" : "이동";
+  const message = kind === "comment"
+    ? "작성 중인 댓글이 있습니다. 저장하지 않고 이동하면 댓글 입력이 사라집니다."
+    : draftSaveFailed
+      ? `임시 저장에 실패했습니다. 저장하지 않고 ${action} 이번 수정은 버려지고, 마지막 확정 기록으로 되돌아갑니다.`
+      : `현재 날짜의 변경사항이 아직 저장되지 않았습니다. 저장하지 않고 ${action} 마지막 확정 기록으로 되돌아갑니다.`;
 
   return (
     <ModalShell onClose={onCancel} onConfirm={onConfirm} title="저장되지 않은 변경">
       <div className="space-y-4">
         <p className="text-sm leading-6 text-slate-600">
-          {draftSaveFailed
-            ? `임시 저장에 실패했습니다. 저장하지 않고 ${action} 이번 수정은 버려지고, 마지막 확정 기록으로 되돌아갑니다.`
-            : `현재 날짜의 변경사항이 아직 저장되지 않았습니다. 저장하지 않고 ${action} 마지막 확정 기록으로 되돌아갑니다.`}
+          {message}
         </p>
         <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
           <Button onClick={onCancel} variant="secondary">
