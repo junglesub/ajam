@@ -240,132 +240,134 @@ export function NotionCardCommentsRow({
   }
 
   const metaParts = [card.status, card.category, sourceLabel(card.source)].filter(Boolean).join(" · ");
+  const allocationLabel = allocationStatusText.startsWith("수동") ? "수동" : "자동";
+  const commentStatus = commentsState?.loading
+    ? "댓글 불러오는 중..."
+    : commentsState?.error
+      ? "댓글을 불러오지 못했습니다."
+      : targetComment
+        ? `${targetComment.authorName} · ${formatCommentTime(targetComment.createdTime)}`
+        : "댓글 없음";
+  const commentsLoaded = Boolean(commentsState?.data) && !commentsState?.error;
 
   return (
-    <div className="relative rounded-lg border border-slate-200 bg-white p-3">
+    <div className="relative rounded-lg border border-slate-200 bg-white p-3 pl-8">
       <button
         aria-label={`${card.title ?? "카드"} 연결 해제`}
-        className="absolute left-2 top-2 inline-flex size-5 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+        className="absolute left-2 top-3 inline-flex size-5 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700"
         onClick={onRemove}
         type="button"
       >
         <X className="size-3.5" />
       </button>
 
-      <div className="grid grid-cols-1 gap-3 pl-5 md:grid-cols-[230px_minmax(0,1fr)]">
-        <div className="min-w-0 space-y-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-slate-900" title={card.title || card.notionPageId}>
             {card.title || card.notionPageId}
           </div>
           <div className="truncate text-xs text-slate-500" title={metaParts}>
             {metaParts}
           </div>
-          <div className="flex items-center gap-2">
-            <Input
-              aria-label="배분 시간"
-              className="h-8 w-20 text-right text-xs"
-              min={0}
-              onChange={(event) => onAllocationHoursChange(Number(event.target.value) || 0)}
-              placeholder={String(card.allocatedHours)}
-              step={0.25}
-              type="number"
-              value={card.allocationMode === "manual" ? card.allocatedHours : ""}
-            />
-            <span className="truncate text-xs text-slate-500" title={allocationStatusText}>
-              {allocationStatusText}
-            </span>
-          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Input
+            aria-label="배분 시간"
+            className="h-8 w-16 text-right text-xs"
+            min={0}
+            onChange={(event) => onAllocationHoursChange(Number(event.target.value) || 0)}
+            step={0.25}
+            type="number"
+            value={card.allocatedHours}
+          />
+          <span className="shrink-0 whitespace-nowrap text-xs text-slate-500" title={allocationStatusText}>
+            {allocationLabel}
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-3 space-y-1.5">
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span
+            className={`min-w-0 ${commentsState?.error ? "text-rose-600" : "text-slate-500"}`}
+            title={commentStatus}
+          >
+            {commentStatus}
+          </span>
+          {commentsState?.error ? (
+            <Button
+              className="h-6 shrink-0 px-1.5 text-[11px]"
+              onClick={() => void onLoadComments(card.notionPageId, true)}
+              type="button"
+              variant="ghost"
+            >
+              <RefreshCw className="mr-1 size-3" />
+              재시도
+            </Button>
+          ) : null}
         </div>
 
-        <div className="min-w-0 space-y-1.5">
-          <div className="flex items-center justify-between gap-2 whitespace-nowrap text-xs">
-            <span
-              className="min-w-0 truncate text-slate-500"
-              title={
-                targetComment
-                  ? `${targetComment.authorName} · ${formatCommentTime(targetComment.createdTime)}`
-                  : "댓글 없음"
-              }
-            >
-              {commentsState?.loading
-                ? "댓글 불러오는 중..."
-                : commentsState?.error
-                  ? "댓글 조회 실패"
-                  : targetComment
-                    ? `${targetComment.authorName} · ${formatCommentTime(targetComment.createdTime)}`
-                    : "댓글 없음"}
-            </span>
-            <div className="flex items-center gap-1">
-              {commentsState?.error ? (
-                <Button
-                  className="h-6 px-1.5 text-[11px]"
-                  onClick={() => void onLoadComments(card.notionPageId, true)}
-                  type="button"
-                  variant="ghost"
-                >
-                  <RefreshCw className="mr-1 size-3" />
-                  재시도
-                </Button>
-              ) : null}
-              <button
-                aria-label={`전체 댓글 이력 (${commentsState?.data?.comments.length ?? 0})`}
-                className="inline-flex h-6 items-center rounded px-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                onClick={() => setHistoryOpen(true)}
-                ref={historyTriggerRef}
-                type="button"
-              >
-                <History className="mr-1 size-3" />
-                이력 ({commentsState?.data?.comments.length ?? 0})
-              </button>
-              <Button
-                aria-label="되돌리기"
-                className="h-6 px-1.5 text-[11px]"
-                disabled={!editorState.isDirty || editorState.mutating}
-                onClick={handleReset}
-                type="button"
-                variant="ghost"
-              >
-                <RotateCcw className="size-3" />
-              </Button>
-              <Button
-                className="h-6 px-2 text-[11px]"
-                disabled={editorState.mutating || !editorState.draftText.trim()}
-                onClick={() => void handleCreate()}
-                type="button"
-                variant="secondary"
-              >
-                새로 추가
-              </Button>
-              <Button
-                className="h-6 px-2 text-[11px]"
-                disabled={editorState.mutating || !canUpdateTarget || !editorState.draftText.trim()}
-                onClick={() => void handleUpdate()}
-                title={canUpdateTarget ? "선택한 댓글 수정" : "aJam 연결이 작성한 댓글만 수정할 수 있습니다."}
-                type="button"
-                variant="primary"
-              >
-                업데이트
-              </Button>
-            </div>
-          </div>
+        <Textarea
+          aria-label="Notion 카드 댓글"
+          className="h-[72px] min-h-[72px] resize-y text-xs"
+          onChange={(event) =>
+            onUpdateEditorState(card.notionPageId, (prev) =>
+              updateCommentDraftText(prev, event.target.value)
+            )
+          }
+          placeholder="새 댓글을 입력하세요."
+          value={editorState.draftText}
+        />
+        {editorState.mutationError ? (
+          <p className="text-xs text-rose-600">{editorState.mutationError}</p>
+        ) : null}
 
-          <Textarea
-            aria-label="Notion 카드 댓글"
-            className="h-[72px] min-h-[72px] resize-y text-xs"
-            onChange={(event) =>
-              onUpdateEditorState(card.notionPageId, (prev) =>
-                updateCommentDraftText(prev, event.target.value)
-              )
-            }
-            placeholder={
-              commentsState?.error
-                ? "댓글 조회에 실패했지만 새 댓글을 작성할 수 있습니다."
-                : "Notion 카드에 남길 댓글을 입력하세요."
-            }
-            value={editorState.draftText}
-          />
-          {editorState.mutationError ? (
-            <p className="text-xs text-rose-600">{editorState.mutationError}</p>
+        <div className="flex items-center justify-end gap-1">
+          {commentsLoaded ? (
+            <button
+              aria-label={`전체 댓글 이력 (${commentsState?.data?.comments.length ?? 0})`}
+              className="inline-flex h-6 items-center rounded px-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+              onClick={() => setHistoryOpen(true)}
+              ref={historyTriggerRef}
+              type="button"
+            >
+              <History className="mr-1 size-3" />
+              이력 ({commentsState?.data?.comments.length ?? 0})
+            </button>
+          ) : null}
+          {editorState.isDirty ? (
+            <Button
+              aria-label="되돌리기"
+              className="h-6 px-1.5 text-[11px]"
+              disabled={editorState.mutating}
+              onClick={handleReset}
+              type="button"
+              variant="ghost"
+            >
+              <RotateCcw className="mr-1 size-3" />
+              되돌리기
+            </Button>
+          ) : null}
+          <Button
+            className="h-6 px-2 text-[11px]"
+            disabled={editorState.mutating || !editorState.draftText.trim()}
+            onClick={() => void handleCreate()}
+            type="button"
+            variant="secondary"
+          >
+            새로 추가
+          </Button>
+          {canUpdateTarget ? (
+            <Button
+              className="h-6 px-2 text-[11px]"
+              disabled={editorState.mutating || !editorState.draftText.trim()}
+              onClick={() => void handleUpdate()}
+              title="선택한 댓글 수정"
+              type="button"
+              variant="primary"
+            >
+              업데이트
+            </Button>
           ) : null}
         </div>
       </div>

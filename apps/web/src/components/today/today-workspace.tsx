@@ -554,7 +554,7 @@ export function TodayWorkspace({ initialDateKey, projects }: TodayWorkspaceProps
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,1fr)]">
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,1fr)]">
         {/* Left: Work Tabs & Editor */}
         <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div aria-label="업무 항목 탭" className="flex flex-wrap items-center gap-1.5 border-b border-slate-200 pb-2 dark:border-slate-800" role="tablist">
@@ -668,7 +668,7 @@ export function TodayWorkspace({ initialDateKey, projects }: TodayWorkspaceProps
               내용
             </label>
             <Textarea
-              className="h-[75px] min-h-[75px] resize-y text-sm"
+              className="h-36 min-h-36 resize-y text-sm"
               disabled={loading || !state.loaded || confirming}
               id="today-content"
               onChange={(event) => updateActiveEntry((e) => ({ ...e, content: event.target.value }))}
@@ -683,7 +683,7 @@ export function TodayWorkspace({ initialDateKey, projects }: TodayWorkspaceProps
                 연결된 Notion 카드 ({activeEntry.notionCards.length})
               </span>
               <div className="flex items-center gap-1.5">
-                {activeEntry.notionCards.length > 0 ? (
+                {activeEntry.notionCards.some((card) => card.allocationMode === "manual") ? (
                   <Button
                     disabled={loading || !state.loaded || confirming}
                     onClick={() =>
@@ -695,7 +695,7 @@ export function TodayWorkspace({ initialDateKey, projects }: TodayWorkspaceProps
                     type="button"
                     variant="ghost"
                   >
-                    자동 배분
+                    모두 자동으로
                   </Button>
                 ) : null}
                 <Button disabled={loading || !state.loaded || confirming} onClick={() => void handleOpenPicker()} type="button" variant="secondary">
