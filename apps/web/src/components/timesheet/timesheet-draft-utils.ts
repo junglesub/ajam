@@ -12,14 +12,49 @@ import {
 import { createClientId, withClientIds } from "@/lib/timesheet-drafts";
 import { effectiveEntryHours, entryHasNotionCardWarning, firstWorkEntry } from "./timesheet-entry-display";
 
+export type TodayWorkDraftSnapshot = {
+  confirmedBaselineUpdatedAt: string;
+  dateKey: string;
+  entries: TimesheetEntryDraft[];
+  revision: number;
+};
+
 export type TimesheetMonthData = {
   entries: TimesheetDayDraft[];
   holidayWarning?: string;
   holidays: Array<{ dateKey: string; name: string }>;
   projects: string[];
+  todayDrafts?: TodayWorkDraftSnapshot[];
   vacationColors: Record<string, VacationColor>;
   vacations: Array<{ dateKey: string; hours: number; name: string }>;
 };
+
+export function overlayTodayDrafts(
+  days: Record<string, TimesheetDayDraft>,
+  drafts: TodayWorkDraftSnapshot[],
+  skipDateKey = ""
+): Record<string, TimesheetDayDraft> {
+  const next = { ...days };
+
+  for (const draft of drafts) {
+    if (draft.dateKey === skipDateKey || draft.entries.length === 0) {
+      continue;
+    }
+
+    const saved = next[draft.dateKey] ?? createEmptyDraft(draft.dateKey);
+    const nonWork = saved.entries.filter((entry) => entry.kind !== "WORK");
+    next[draft.dateKey] = withClientIds({
+      ...saved,
+      dateKey: draft.dateKey,
+      entries: [
+        ...draft.entries.map((entry, index) => ({ ...entry, kind: "WORK" as const, sortOrder: index })),
+        ...nonWork
+      ]
+    });
+  }
+
+  return next;
+}
 
 export function buildDraftsFromMonthData(monthData: TimesheetMonthData): Record<string, TimesheetDayDraft> {
   const drafts: Record<string, TimesheetDayDraft> = {};
@@ -205,6 +240,7 @@ export function isAutoProjectOnlyDraft(draft: TimesheetDayDraft | undefined): bo
     entry.kind === "WORK" &&
     entry.hours === 8 &&
     Boolean(entry.project.trim()) &&
+    !entry.notionCardsTouched &&
     !entry.content.trim() &&
     !entry.aiTranslation.trim() &&
     !draft.shortVersion.trim()

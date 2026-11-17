@@ -25,6 +25,7 @@ export type TimesheetEntryDraft = {
   id: string;
   kind: WorkRecordKind;
   notionCards: TimesheetEntryNotionCardDraft[];
+  notionCardsTouched?: boolean;
   project: string;
   sortOrder: number;
   vacationDeductsAllowance?: boolean;

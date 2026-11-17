@@ -15,6 +15,7 @@ const {
   createManagedUser,
   ensureTodaySchema,
   getTodayDraft,
+  listActiveTodayDrafts,
   prisma,
   saveTimesheetDay,
   saveTodayDraft
@@ -59,6 +60,12 @@ test("today-store persists incomplete drafts, isolates users/dates, detects stal
   assert.equal(save1.status, "saved");
   if (save1.status !== "saved") throw new Error("Expected saved");
   assert.equal(save1.draft.revision, 1);
+  const listed = await listActiveTodayDrafts({
+    endDateKey: "2026-11-30",
+    startDateKey: "2026-11-01",
+    userId: userA.id
+  });
+  assert.deepEqual(listed.map((draft) => draft.dateKey), ["2026-11-17"]);
 
   // 2. Restore incomplete draft & verify user/date isolation
   const loadedA = await getTodayDraft({ dateKey: "2026-11-17", userId: userA.id });

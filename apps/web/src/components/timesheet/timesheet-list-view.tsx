@@ -40,8 +40,8 @@ function listSummaryText(row: TimesheetRow, showFullContent = false): string {
   return content || (row.kind === "WORK" ? "(내용 없음)" : "작성 예정");
 }
 
-function listDayMeta(row: TimesheetRow): string {
-  if (row.status === "MISSING") {
+function listDayMeta(row: TimesheetRow, pendingDraft = false): string {
+  if (row.status === "MISSING" && !pendingDraft) {
     return "0h";
   }
 
@@ -54,6 +54,7 @@ function listDayMeta(row: TimesheetRow): string {
 
 export function ListView({
   dateKeys,
+  pendingDraftDates,
   rows,
   savedRecords,
   selectedEntryId,
@@ -64,6 +65,7 @@ export function ListView({
   showFullContent
 }: {
   dateKeys: string[];
+  pendingDraftDates: ReadonlySet<string>;
   rows: Record<string, TimesheetRow>;
   savedRecords: Record<string, TimesheetDayDraft>;
   selectedEntryId: string;
@@ -98,14 +100,15 @@ export function ListView({
       <div className="divide-y divide-slate-100">
         {dateKeys.map((dateKey) => {
           const row = rows[dateKey]!;
+          const pendingDraft = pendingDraftDates.has(dateKey) && row.status === "MISSING";
           const emptyRowKey = listRowKey(dateKey, "");
-          const emptyStatusLabel = row.status === "MISSING" ? "입력안됨" : row.kind === "HOLIDAY" ? "공휴일" : row.kind === "VACATION" && row.vacationStatus === "TEMPORARY" ? "임시" : row.kind === "VACATION" ? "휴가" : "업무";
-          const emptyStatusTone: "blue" | "green" | "orange" | "white" = row.status === "MISSING" ? "white" : row.kind === "HOLIDAY" ? "orange" : row.kind === "VACATION" ? "blue" : "green";
+          const emptyStatusLabel = pendingDraft ? "임시저장" : row.status === "MISSING" ? "입력안됨" : row.kind === "HOLIDAY" ? "공휴일" : row.kind === "VACATION" && row.vacationStatus === "TEMPORARY" ? "임시" : row.kind === "VACATION" ? "휴가" : "업무";
+          const emptyStatusTone: "blue" | "gray" | "green" | "orange" | "white" = pendingDraft ? "gray" : row.status === "MISSING" ? "white" : row.kind === "HOLIDAY" ? "orange" : row.kind === "VACATION" ? "blue" : "green";
           const dayHeader = (
             <div className={cn("grid grid-cols-[112px_88px_minmax(120px,0.8fr)_minmax(200px,1.2fr)_minmax(200px,1.1fr)] gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2", selectedDateKey === dateKey && "bg-blue-50/70")}>
               <div className="col-span-2 flex min-w-0 items-center gap-2">
                 <span className="font-bold text-slate-950">{formatKoreanDate(dateKey)}</span>
-                <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-500">{listDayMeta(row)}</span>
+                <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-500">{listDayMeta(row, pendingDraft)}</span>
                 {hasTimeMismatch(row) ? <TimeMismatchIcon hours={row.hours} /> : null}
                 {row.hasNotionCardWarning ? <NotionCardWarningIcon /> : null}
               </div>
@@ -115,7 +118,7 @@ export function ListView({
             </div>
           );
 
-          if (row.status === "MISSING" || row.entries.length === 0) {
+          if (!pendingDraft && (row.status === "MISSING" || row.entries.length === 0)) {
             return (
               <div className="min-w-[980px]" key={dateKey}>
                 {dayHeader}
@@ -169,7 +172,7 @@ export function ListView({
                       }}
                       type="button"
                     >
-                      <span><span className="inline-flex items-center gap-1.5"><Badge tone={entryKindTone(entry)}>{entryKindLabel(entry)}</Badge>{hasEntryNotionWarning ? <NotionCardWarningIcon /> : null}</span></span>
+                      <span><span className="inline-flex items-center gap-1.5">{pendingDraft ? <Badge tone="gray"><span className="mr-1 size-1.5 rounded-full bg-current" />임시저장</Badge> : <Badge tone={entryKindTone(entry)}>{entryKindLabel(entry)}</Badge>}{hasEntryNotionWarning ? <NotionCardWarningIcon /> : null}</span></span>
                       <span className="font-semibold text-slate-700">{effectiveEntryHours(entry)}h</span>
                       <span className="truncate font-medium text-slate-700">{entryTitle(entry)}</span>
                       <span className={cn("min-w-0 break-words text-slate-600", showFullContent ? "whitespace-pre-wrap" : "line-clamp-2")}>{entryContent}</span>

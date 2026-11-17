@@ -3,6 +3,7 @@
 import { createOperationLog, logHolidayFallback } from "@timesheet/db/logging";
 
 import {
+  clearTodayDraft,
   createNotionLog,
   notionErrorMessage,
   addProject,
@@ -13,6 +14,7 @@ import {
   findLatestWorkProjectBefore,
   getLatestLinkedNotionWorkDateByPage,
   getLatestNotionSyncRun,
+  getTodayDraft,
   getUserGeminiApiKey,
   getUserNotionConnection,
   getManagedUser,
@@ -22,6 +24,7 @@ import {
   listHolidays,
   listProjects,
   listTimesheetAiRewriteRequests,
+  listActiveTodayDrafts,
   listTimesheetEntries,
   listVacationTypeColorPreferences,
   listVacations,
@@ -37,8 +40,10 @@ import {
   type UserAiSetting,
   type UserAiSettingUpdate,
   saveTimesheetDay,
+  saveTodayDraft,
   type ManagedUser,
   type StoredTimesheetDraft,
+  type TodayDraftSaveResult,
   type StoredTimesheetEntry,
   type TimesheetAiRewriteRequest,
   type UserRole
@@ -50,6 +55,7 @@ import {
   groupVacationRecordsByName,
   toBrowserDateKey,
   type TimesheetDayDraft,
+  type TimesheetEntryDraft,
   type TimesheetEntryNotionCardDraft,
   type VacationColor
 } from "@timesheet/domain";
@@ -71,6 +77,12 @@ export type TimesheetMonthData = {
   holidayWarning?: string;
   holidays: Array<{ dateKey: string; name: string }>;
   projects: string[];
+  todayDrafts: Array<{
+    confirmedBaselineUpdatedAt: string;
+    dateKey: string;
+    entries: TimesheetEntryDraft[];
+    revision: number;
+  }>;
   vacationColors: Record<string, VacationColor>;
   vacations: Array<{ dateKey: string; hours: number; name: string }>;
 };
@@ -291,7 +303,7 @@ async function fetchRestDeInfoWithKey(params: { serviceKey: string; solMonth: nu
 export async function loadTimesheetMonthAction(year: number, monthIndex: number): Promise<TimesheetMonthData> {
   const user = await requireSession();
   const range = getMonthRange(year, monthIndex);
-  const [entries, holidayResult, projects, vacationYearData] = await Promise.all([
+  const [entries, holidayResult, projects, vacationYearData, todayDrafts] = await Promise.all([
     listTimesheetEntries({ ...range, userId: user.id }),
     listHolidays(range)
       .then((holidays) => ({ holidayWarning: undefined, holidays }))
@@ -300,7 +312,8 @@ export async function loadTimesheetMonthAction(year: number, monthIndex: number)
         return { holidayWarning: error instanceof Error ? error.message : "공휴일 정보를 불러오지 못했습니다.", holidays: [] };
       }),
     listProjects({ userId: user.id }),
-    loadVacationYearColorData(user.id, year)
+    loadVacationYearColorData(user.id, year),
+    listActiveTodayDrafts({ ...range, userId: user.id })
   ]);
   const vacations = vacationYearData.vacations.filter((vacation) => vacation.dateKey >= range.startDateKey && vacation.dateKey <= range.endDateKey);
 
@@ -309,9 +322,46 @@ export async function loadTimesheetMonthAction(year: number, monthIndex: number)
     holidayWarning: holidayResult.holidayWarning,
     holidays: holidayResult.holidays,
     projects,
+    todayDrafts: todayDrafts.map((draft) => ({
+      confirmedBaselineUpdatedAt: draft.confirmedBaselineUpdatedAt,
+      dateKey: draft.dateKey,
+      entries: draft.entries,
+      revision: draft.revision
+    })),
     vacationColors: vacationYearData.colors,
     vacations
   };
+}
+
+export async function saveTimesheetEditorDraftAction(params: {
+  confirmedBaselineUpdatedAt?: string;
+  dateKey: string;
+  entries: TimesheetEntryDraft[];
+  expectedRevision?: number;
+}): Promise<TodayDraftSaveResult> {
+  const user = await requireSession();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(params.dateKey)) {
+    throw new Error("날짜 형식이 올바르지 않습니다.");
+  }
+  const loaded = params.expectedRevision === undefined || params.confirmedBaselineUpdatedAt === undefined
+    ? await getTodayDraft({ dateKey: params.dateKey, userId: user.id })
+    : null;
+
+  return saveTodayDraft({
+    confirmedBaselineUpdatedAt: params.confirmedBaselineUpdatedAt ?? loaded?.confirmedUpdatedAt ?? "",
+    dateKey: params.dateKey,
+    entries: params.entries.filter((entry) => entry.kind === "WORK"),
+    expectedRevision: params.expectedRevision ?? loaded?.draftRevision ?? 0,
+    userId: user.id
+  });
+}
+
+export async function clearTimesheetEditorDraftAction(dateKey: string): Promise<void> {
+  const user = await requireSession();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    throw new Error("날짜 형식이 올바르지 않습니다.");
+  }
+  await clearTodayDraft({ dateKey, userId: user.id });
 }
 
 export async function loadTimesheetVacationColorsAction(year: number): Promise<Record<string, VacationColor>> {
@@ -830,10 +880,11 @@ export async function resetAllHolidayCacheAction(year: number, monthIndex: numbe
   await resetHolidayCache();
 
   const range = getMonthRange(year, monthIndex);
-  const [entries, projects, vacationYearData] = await Promise.all([
+  const [entries, projects, vacationYearData, todayDrafts] = await Promise.all([
     listTimesheetEntries({ ...range, userId: user.id }),
     listProjects({ userId: user.id }),
-    loadVacationYearColorData(user.id, year)
+    loadVacationYearColorData(user.id, year),
+    listActiveTodayDrafts({ ...range, userId: user.id })
   ]);
   const vacations = vacationYearData.vacations.filter((vacation) => vacation.dateKey >= range.startDateKey && vacation.dateKey <= range.endDateKey);
 
@@ -842,6 +893,12 @@ export async function resetAllHolidayCacheAction(year: number, monthIndex: numbe
     holidayWarning: undefined,
     holidays: [],
     projects,
+    todayDrafts: todayDrafts.map((draft) => ({
+      confirmedBaselineUpdatedAt: draft.confirmedBaselineUpdatedAt,
+      dateKey: draft.dateKey,
+      entries: draft.entries,
+      revision: draft.revision
+    })),
     vacationColors: vacationYearData.colors,
     vacations
   };

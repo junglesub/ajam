@@ -169,6 +169,24 @@ async function readTodayDraftRow(userId: string, dateKey: string): Promise<RawTo
   return rows[0] ?? null;
 }
 
+export async function listActiveTodayDrafts(params: {
+  endDateKey: string;
+  startDateKey: string;
+  userId: string;
+}): Promise<TodayWorkDraftRecord[]> {
+  await ensureTodaySchema();
+  const rows = await prisma.$queryRawUnsafe<RawTodayWorkDraftRow[]>(
+    `SELECT "id", "userId", "dateKey", "payloadJson", "revision", "isCleared", "confirmedBaselineUpdatedAt", "updatedAt"
+     FROM "TodayWorkDraft"
+     WHERE "userId" = ? AND "dateKey" >= ? AND "dateKey" <= ? AND "isCleared" = 0
+     ORDER BY "dateKey" ASC`,
+    params.userId,
+    params.startDateKey,
+    params.endDateKey
+  );
+  return rows.map(mapRawDraftRow);
+}
+
 export async function getTodayDraft(params: {
   dateKey: string;
   userId: string;
