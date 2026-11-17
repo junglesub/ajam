@@ -25,7 +25,7 @@ export class NotionApiError extends Error {
 }
 
 export async function requestNotionApi(params: {
-  method: "GET" | "POST" | "PATCH";
+  method: "GET" | "POST" | "PATCH" | "DELETE";
   path: string;
   token: string;
   body?: unknown;

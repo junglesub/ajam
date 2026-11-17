@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, CalendarDays, ClipboardList, FolderKanban, Palmtree, Rows3 } from "lucide-react";
+import { Bot, CalendarDays, ClipboardList, FolderKanban, Palmtree, Rows3, Sun } from "lucide-react";
 
 import { cn } from "@timesheet/ui";
 
 const navItems = [
+  { href: "/today", icon: Sun, label: "오늘" },
   { href: "/timesheet", icon: CalendarDays, label: "업무 기록" },
   { href: "/vacations", icon: Palmtree, label: "휴가" },
   { href: "/notion-cards", icon: Rows3, label: "Notion 카드" },

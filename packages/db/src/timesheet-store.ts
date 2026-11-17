@@ -231,7 +231,7 @@ function normalizeNotionCards(links: TimesheetEntryNotionCardDraft[] | undefined
     .filter((link) => link.notionPageId);
 }
 
-function normalizeDay(day: StoredTimesheetDay): StoredTimesheetDay {
+export function normalizeDay(day: StoredTimesheetDay): StoredTimesheetDay {
   const hasWork = day.entries.some((entry) => entry.kind === "WORK");
 
   return {
@@ -1005,7 +1005,7 @@ export async function applyTimesheetAiSummaryPatches(params: {
   }, { daysRequested: params.patches.length });
 }
 
-async function listTimesheetDaysInTransaction(params: {
+export async function listTimesheetDaysInTransaction(params: {
   dateKeys: string[];
   transaction: TimesheetTransaction;
   userId: string;
@@ -1089,7 +1089,7 @@ function getAiSummaryEntryId(entry: Pick<StoredTimesheetEntry, "clientId" | "id"
   return entry.id || entry.clientId;
 }
 
-async function saveTimesheetDayInTransaction(params: {
+export async function saveTimesheetDayInTransaction(params: {
   day: StoredTimesheetDay;
   transaction: TimesheetTransaction;
   userId: string;
