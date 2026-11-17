@@ -9,7 +9,7 @@ import {
   type TimesheetEntryNotionCardDraft
 } from "@timesheet/domain";
 import { Button, Input, Textarea } from "@timesheet/ui";
-import { AlertCircle, CheckCircle2, Loader2, Plus, RefreshCw } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, Plus, RefreshCw, Sun } from "lucide-react";
 import {
   confirmTodayDraftAction,
   discardTodayDraftAction,
@@ -453,16 +453,24 @@ export function TodayWorkspace({ initialDateKey, projects }: TodayWorkspaceProps
   );
 
   return (
-    <div className="mx-auto max-w-7xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">오늘의 업무 · {dateKey}</h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            작성 중인 내용은 자동 임시 저장되며, 확정 시 캘린더에 반영됩니다.
-          </p>
+    <div className="mx-auto grid max-w-[1600px] gap-4 px-4 pb-8 pt-4">
+      <header className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-slate-950 text-white">
+            <Sun aria-hidden="true" className="size-5" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h2 className="text-xl font-bold text-slate-950">오늘의 업무</h2>
+              <p className="text-sm font-medium text-slate-500">{dateKey}</p>
+            </div>
+            <p className="mt-1 text-sm font-medium text-slate-500">
+              작성 중은 자동으로 임시 저장되고, 확정하면 캘린더에 반영됩니다.
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {saveState === "saving" ? (
             <span className="inline-flex items-center gap-1 text-xs text-slate-500">
               <Loader2 className="size-3.5 animate-spin" />
@@ -536,7 +544,7 @@ export function TodayWorkspace({ initialDateKey, projects }: TodayWorkspaceProps
             {confirming ? "확정 중..." : "업무 기록 확정"}
           </Button>
         </div>
-      </div>
+      </header>
 
       {confirmError ? (
         <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
