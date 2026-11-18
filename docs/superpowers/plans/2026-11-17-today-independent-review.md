@@ -1,6 +1,6 @@
 # Today workspace independent review
 
-Current verdict after `e155ef7` on 2026-11-18 is **NO-GO**. Rounds 14–17 below supersede the Round 13 acceptance for the expanded implementation. Generic server cleanup is removed; returned version handling, local draft preservation and complete client dirty-state handling remain unresolved. Coordinator review changes documentation only.
+Current verdict after `a0a9444` on 2026-11-18 is **NO-GO**. Rounds 14–18 below supersede the Round 13 acceptance for the expanded implementation. Returned version metadata is partially wired; a pending-discard input-loss regression was independently reproduced, and client dirty-state handling remains unresolved. Coordinator review changes documentation only.
 
 ## Round 1
 
@@ -208,3 +208,11 @@ The worker reports completed `today-store.test.ts` (1/1 pass), DB and web typech
 Codex directly read run `r_881662586f9f` and reviewed `e155ef7` against `97a9f03`. Generic saved-day application no longer issues server clear requests. Vacation range/connected saves forward a known draft's guard, and explicit discard compares entry signatures before resetting entries. The two Today/comment DB files are now included in the normal DB test script. Worker evidence is 2/2 targeted DB cases, web/DB typechecks, targeted lint and diff check, all completed with exit 0; Codex read the evidence/source and did not rerun these checks.
 
 **Decision remains NO-GO.** The task did not implement returning/consuming the atomic confirmation metadata, add the requested store regressions, or update workflow documentation. `TimesheetSaveResult` still drops the returned fingerprint/revision. `applySavedDays` still forgets local draft metadata for AI-applied days even though the server draft now survives, allowing later work to lose its known guard. Explicit discard's entry-only signature does not protect `shortVersion` or other day metadata edited while awaiting deletion. Previously recorded autosave closure/navigation/repeated-save issues remain. Next bounded pass must finish version metadata and local bookkeeping with actual tests; then complete the client dirty-state pass.
+
+## Round 18 — Returned versions added; discard protection still fails (2026-11-18)
+
+Codex read run `r_65d088b9d4d2` directly and reviewed `a0a9444`. The action now returns guarded confirmation metadata; main save/autosave consult a tombstone ref, and generic saved-day application no longer removes local draft metadata. Worker reports two existing DB/comment cases, web typecheck, targeted lint and diff check completed successfully. Codex did not rerun those checks. The promised new tests and workflow update were again absent.
+
+**NO-GO remains.** `discardSelectedTodayDraft` reads both `beforeDay` and `afterDay` from the same immutable render-closure `records` across its await, so signatures always match within that invocation even when current input changed. The new full-day signature replaced the earlier latest-entry comparison and can now erase newer WORK input as well as summary input. Codex independently extracted/transpiled the actual handler and invoked it with a deferred clear and injected state/ref setters: while pending, input changed from A/old summary to B/new summary; on success, visible values reverted to A/old and dirty became false. This was a new targeted function probe, not a rerun of worker tests or a browser check.
+
+Remaining integration gaps: range/connected saves still do not consume returned tombstone metadata; `applySavedDays` still overwrites edited records when AI results arrive; autosave uses stale day closures and day-wide dirty state, allowing skipped warnings and repeated identical saves. Next task is one intentionally small correction: use the latest complete-day snapshot for discard and add the failing/passing production-path regression. Remaining autosave/navigation/version/test coverage follows afterward.
