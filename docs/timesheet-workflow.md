@@ -1,5 +1,11 @@
 # Timesheet Workflow
 
+## Final review status (2026-11-18)
+
+- The expanded Today/timesheet draft implementation at `a0bbc09` is **NO-GO**, superseding the 2026-11-17 code acceptance for the earlier scope. Five reproduced issues remain: mixed-day vacation loss on draft-date selection/save, stalled autosave after editing during a request, stale draft confirmation overwriting newer confirmed work, stale discard clearing a newer draft, and work-only autosave marking unsaved day metadata clean.
+- All six workspace typechecks, changed-file ESLint and 213 existing test cases passed. Independent probes of the actual production functions and isolated SQLite persistence reproduced the findings; current tests do not cover these integration paths. Details, commands, minimal correction directions and evidence are in Round 14 of `docs/superpowers/plans/2026-11-17-today-independent-review.md`.
+- This review changes documentation only. Product build, browser automation and live Notion checks were not run; browser/visual acceptance remains user-owned.
+
 ## Today Workspace Lifecycle (2026-11-17)
 
 - `/today` (`today-workspace.tsx` + `TodayDraftLifecycle`) manages per-user, per-date incomplete work drafts in `TodayWorkDraft` with monotonic `revision` and SHA-256 `confirmedBaselineUpdatedAt` fingerprinting.
