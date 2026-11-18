@@ -48,7 +48,8 @@ import {
   shouldScheduleWorkDraftAutosave,
   workEntriesSignature
 } from "./timesheet-draft-autosave";
-import { executeDiscardTimesheetDraft } from "./timesheet-draft-discard";
+import { applyExternalSavedDays, consumeGuardedSaveResult } from "./timesheet-draft-confirm";
+import { daySignature, executeDiscardTimesheetDraft } from "./timesheet-draft-discard";
 import { buildDraftsFromMonthData, buildInitialDrafts, buildSelectedEntryIds, createDraftForDate, createEntryForDate, findPreviousProject, hasHolidayMarker, hasWorkContent, isAutoProjectOnlyDraft, isDefaultFutureVacationDraft, overlayTodayDrafts, rebalanceDefaultWorkHours, rowFromDraft, sanitizeDayForSave, type TimesheetMonthData, type TodayWorkDraftSnapshot } from "./timesheet-draft-utils";
 import { allocateDefaultNotionCards, mergeNotionCardSnapshot, type NotionWeeklyDefaultCard } from "./timesheet-notion-recommendation";
 import { findConnectedVacationDates, updateVacationEntryForConnectedSave } from "./timesheet-vacation-utils";
@@ -260,6 +261,9 @@ export function TimesheetWorkspace({
   const latestDayRef = useRef<TimesheetDayDraft | undefined>(undefined);
   const latestSavedRecordsRef = useRef(savedRecords);
   latestSavedRecordsRef.current = savedRecords;
+  const latestSelectedDateKeyRef = useRef(selectedDateKey);
+  latestSelectedDateKeyRef.current = selectedDateKey;
+  const latestIsDirtyRef = useRef(false);
   const lastSavedWorkSignatureRef = useRef<Record<string, string>>({});
   const draftSaveChainRef = useRef(Promise.resolve());
   todayDraftsRef.current = todayDrafts;
@@ -568,6 +572,7 @@ export function TimesheetWorkspace({
   const selectedEntry = selectedDay.entries.find((entry) => entry.clientId === selectedEntryIdCandidate) ?? selectedDay.entries[0];
   latestEditorRef.current = { dateKey: selectedDateKey, entries: selectedDay.entries };
   latestDayRef.current = selectedDay;
+  latestIsDirtyRef.current = isDirty;
   useEffect(() => {
     const shouldSchedule = shouldScheduleWorkDraftAutosave({
       currentWorkSignature: workEntriesSignature(selectedDay.entries),
@@ -779,6 +784,51 @@ export function TimesheetWorkspace({
     finishInitialSync();
   }
 
+  function recordConfirmedDraftResult(
+    dateKey: string,
+    result: TimesheetSaveResult,
+    submittedDaySignature: string,
+    expectedDraftRevision?: number
+  ) {
+    const prevKnown = todayDraftsRef.current[dateKey] ?? draftTombstonesRef.current[dateKey];
+    consumeGuardedSaveResult({
+      dateKey,
+      expectedDraftRevision,
+      getLatestSnapshot: () => ({
+        dateKey: latestEditorRef.current.dateKey,
+        day: latestDayRef.current
+      }),
+      onClearPendingDraft: (key, expectedRev) => {
+        const currentDraft = todayDraftsRef.current[key];
+        if (currentDraft && (expectedRev === undefined || currentDraft.revision === expectedRev)) {
+          const nextRef = { ...todayDraftsRef.current };
+          delete nextRef[key];
+          todayDraftsRef.current = nextRef;
+          forgetTodayDrafts([key]);
+        }
+      },
+      onClearWorkSignature: (key) => {
+        delete lastSavedWorkSignatureRef.current[key];
+      },
+      onSetTombstone: (key, tombstone) => {
+        draftTombstonesRef.current[key] = tombstone;
+      },
+      onUpdateConfirmedDay: (key, canonicalDay, adoptIntoRecords) => {
+        setSavedRecords((current) => ({ ...current, [key]: canonicalDay }));
+        setSavedEntryDateKeys((current) => new Set([...current, key]));
+        if (adoptIntoRecords) {
+          setRecords((current) => ({ ...current, [key]: canonicalDay }));
+          if (key === latestSelectedDateKeyRef.current) {
+            setIsDirty(false);
+          }
+        }
+      },
+      prevKnown,
+      result,
+      submittedDaySignature
+    });
+  }
+
   async function saveEntryAndNotify(entry: TimesheetDayDraft): Promise<TimesheetSaveResult> {
     const affectsVacationColors = entry.entries.some((dayEntry) => dayEntry.kind === "VACATION") || savedRecords[entry.dateKey]?.entries.some((dayEntry) => dayEntry.kind === "VACATION");
     await draftSaveChainRef.current;
@@ -789,14 +839,9 @@ export function TimesheetWorkspace({
           expectedDraftRevision: known.revision
         }
       : undefined;
+    const submittedSig = daySignature(entry);
     const result = await saveEntryAction(entry, draftGuard);
-    if (result.draftRevision !== undefined || result.confirmedUpdatedAt !== undefined) {
-      draftTombstonesRef.current[entry.dateKey] = {
-        confirmedBaselineUpdatedAt: result.confirmedUpdatedAt ?? known?.confirmedBaselineUpdatedAt ?? "",
-        revision: result.draftRevision ?? known?.revision ?? 0
-      };
-      forgetTodayDrafts([entry.dateKey]);
-    }
+    recordConfirmedDraftResult(entry.dateKey, result, submittedSig, known?.revision);
     if (affectsVacationColors) {
       await refreshVacationColors([entry.dateKey]);
     }
@@ -2308,32 +2353,20 @@ export function TimesheetWorkspace({
   }
 
   function applySavedDays(days: TimesheetDayDraft[]) {
-    if (!days.length) {
-      return;
-    }
-    const preservedDates = new Set(
-      days
-        .map((day) => day.dateKey)
-        .filter((dateKey) => (dateKey === selectedDateKey && isDirty) || Boolean(todayDraftsRef.current[dateKey]))
-    );
-    setSavedRecords((current) => {
-      const next = { ...current };
-      for (const day of days) {
-        next[day.dateKey] = day;
-      }
-      return next;
+    applyExternalSavedDays({
+      days,
+      getIsDirty: () => latestIsDirtyRef.current,
+      getSelectedDateKey: () => latestSelectedDateKeyRef.current,
+      getTodayDrafts: () => todayDraftsRef.current,
+      onClearWorkSignature: (key) => {
+        delete lastSavedWorkSignatureRef.current[key];
+      },
+      onUpdateRecords: setRecords,
+      onUpdateSavedDateKeys: (keys) => {
+        setSavedEntryDateKeys((current) => new Set([...current, ...keys]));
+      },
+      onUpdateSavedRecords: setSavedRecords
     });
-    setRecords((current) => {
-      const next = { ...current };
-      for (const day of days) {
-        if (!preservedDates.has(day.dateKey)) {
-          next[day.dateKey] = day;
-          delete lastSavedWorkSignatureRef.current[day.dateKey];
-        }
-      }
-      return next;
-    });
-    setSavedEntryDateKeys((current) => new Set([...current, ...days.map((day) => day.dateKey)]));
   }
 
   function mergeSavedDays(days: TimesheetDayDraft[]) {
