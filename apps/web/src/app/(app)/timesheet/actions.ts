@@ -4,6 +4,7 @@ import { createOperationLog, logHolidayFallback } from "@timesheet/db/logging";
 
 import {
   clearTodayDraft,
+  confirmTimesheetFullDay,
   createNotionLog,
   notionErrorMessage,
   addProject,
@@ -372,7 +373,13 @@ export async function loadTimesheetVacationColorsAction(year: number): Promise<R
   return (await loadVacationYearColorData(user.id, year)).colors;
 }
 
-export async function saveTimesheetEntryAction(day: TimesheetDayDraft): Promise<TimesheetSaveResult> {
+export async function saveTimesheetEntryAction(
+  day: TimesheetDayDraft,
+  draftGuard?: {
+    confirmedBaselineUpdatedAt?: string;
+    expectedDraftRevision?: number;
+  }
+): Promise<TimesheetSaveResult> {
   const user = await requireSession();
   return createOperationLog("timesheet", "save_action", { userId: user.id, dateKey: day.dateKey, source: "timesheet_save" }).run(async () => {
 
@@ -395,7 +402,26 @@ export async function saveTimesheetEntryAction(day: TimesheetDayDraft): Promise<
       afterDay: normalizedDay,
       beforeDays: previousDay
     });
-    const savedDay = await saveTimesheetDay({ day: normalizedDay, userId: user.id });
+    let savedDay: StoredTimesheetDraft;
+    if (draftGuard) {
+      const confirmed = await confirmTimesheetFullDay({
+        confirmedBaselineUpdatedAt: draftGuard.confirmedBaselineUpdatedAt,
+        dateKey: normalizedDay.dateKey,
+        day: normalizedDay,
+        expectedDraftRevision: draftGuard.expectedDraftRevision,
+        userId: user.id
+      });
+      if (confirmed.status === "conflict") {
+        throw new Error(
+          confirmed.reason === "confirmed_changed"
+            ? "다른 화면에서 이 날짜의 확정 기록이 변경되었습니다. 새로고침 후 다시 확인해 주세요."
+            : "다른 화면에서 수정된 최신 초안이 있습니다. 새로고침 후 다시 확인해 주세요."
+        );
+      }
+      savedDay = confirmed.day;
+    } else {
+      savedDay = await saveTimesheetDay({ day: normalizedDay, userId: user.id });
+    }
 
     const notionSyncError = await syncNotionWorkHoursAfterTimesheetSave({ notionPageIds: affectedNotionPageIds, userId: user.id });
     const [freshSavedDay] = await listTimesheetEntries({ endDateKey: normalizedDay.dateKey, startDateKey: normalizedDay.dateKey, userId: user.id });

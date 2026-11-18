@@ -137,7 +137,13 @@ type TimesheetWorkspaceProps = {
     entries: TimesheetEntryDraft[];
     expectedRevision?: number;
   }) => Promise<{ draft: { confirmedBaselineUpdatedAt: string; entries: TimesheetEntryDraft[]; revision: number }; status: "saved" } | { status: "conflict" }>;
-  saveEntryAction: (entry: TimesheetDayDraft) => Promise<TimesheetSaveResult>;
+  saveEntryAction: (
+    entry: TimesheetDayDraft,
+    draftGuard?: {
+      confirmedBaselineUpdatedAt?: string;
+      expectedDraftRevision?: number;
+    }
+  ) => Promise<TimesheetSaveResult>;
   saveHolidayApiKeyAction: (serviceKey: string) => Promise<void>;
   testGeminiApiKeyAction: (params: { apiKey?: string; model: string }) => Promise<GeminiApiKeyTestResult>;
   testHolidayApiKeyAction: (serviceKey: string, year: number, monthIndex: number) => Promise<HolidayApiKeyTestResult>;
@@ -751,7 +757,15 @@ export function TimesheetWorkspace({
 
   async function saveEntryAndNotify(entry: TimesheetDayDraft): Promise<TimesheetSaveResult> {
     const affectsVacationColors = entry.entries.some((dayEntry) => dayEntry.kind === "VACATION") || savedRecords[entry.dateKey]?.entries.some((dayEntry) => dayEntry.kind === "VACATION");
-    const result = await saveEntryAction(entry);
+    await draftSaveChainRef.current;
+    const known = todayDraftsRef.current[entry.dateKey];
+    const draftGuard = known
+      ? {
+          confirmedBaselineUpdatedAt: known.confirmedBaselineUpdatedAt,
+          expectedDraftRevision: known.revision
+        }
+      : undefined;
+    const result = await saveEntryAction(entry, draftGuard);
     if (affectsVacationColors) {
       await refreshVacationColors([entry.dateKey]);
     }
