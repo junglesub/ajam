@@ -3,6 +3,7 @@ import test from "node:test";
 import { createEmptyDraft, createEmptyEntryDraft, type TimesheetDayDraft } from "@timesheet/domain";
 import { applyExternalSavedDays, consumeGuardedSaveResult } from "./timesheet-draft-confirm";
 import { daySignature } from "./timesheet-draft-discard";
+import { sanitizeDayForSave } from "./timesheet-draft-utils";
 
 test("applyExternalSavedDays reads latest refs and preserves dirty input typed while AI request was in flight", () => {
   let records: Record<string, TimesheetDayDraft> = {
@@ -101,4 +102,30 @@ test("consumeGuardedSaveResult adopts canonical IDs when unchanged and preserves
   });
 
   assert.equal(adoptedAfterEdit, false);
+});
+
+test("consumeGuardedSaveResult adopts canonical IDs when original raw day has hoursTouched=false and sanitizeDayForSave strips it", () => {
+  const rawDay: TimesheetDayDraft = {
+    ...createEmptyDraft("2026-11-18"),
+    entries: [{ ...createEmptyEntryDraft(0), content: "Work A", hoursTouched: false, project: "P1" }]
+  };
+  const sanitized = sanitizeDayForSave(rawDay);
+  assert.notEqual(daySignature(rawDay), daySignature(sanitized));
+
+  let adopted = false;
+  consumeGuardedSaveResult({
+    dateKey: "2026-11-18",
+    expectedDraftRevision: 0,
+    getLatestSnapshot: () => ({ dateKey: "2026-11-18", day: rawDay }),
+    onClearPendingDraft: () => {},
+    onClearWorkSignature: () => {},
+    onSetTombstone: () => {},
+    onUpdateConfirmedDay: (_d, _c, adopt) => {
+      adopted = adopt;
+    },
+    result: { confirmedUpdatedAt: "fp-2", day: sanitized, draftRevision: 1 },
+    submittedDaySignature: daySignature(rawDay)
+  });
+
+  assert.equal(adopted, true);
 });

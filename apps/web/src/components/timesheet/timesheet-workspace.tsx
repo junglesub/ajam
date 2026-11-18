@@ -835,7 +835,10 @@ export function TimesheetWorkspace({
     });
   }
 
-  async function saveEntryAndNotify(entry: TimesheetDayDraft): Promise<TimesheetSaveResult> {
+  async function saveEntryAndNotify(
+    entry: TimesheetDayDraft,
+    originalSourceSignature?: string
+  ): Promise<TimesheetSaveResult> {
     const affectsVacationColors = entry.entries.some((dayEntry) => dayEntry.kind === "VACATION") || savedRecords[entry.dateKey]?.entries.some((dayEntry) => dayEntry.kind === "VACATION");
     await draftSaveChainRef.current;
     const known = todayDraftsRef.current[entry.dateKey] ?? draftTombstonesRef.current[entry.dateKey];
@@ -845,9 +848,10 @@ export function TimesheetWorkspace({
           expectedDraftRevision: known.revision
         }
       : undefined;
-    const submittedSig = daySignature(entry);
+    const submittedSig = originalSourceSignature ?? daySignature(entry);
     const result = await saveEntryAction(entry, draftGuard);
-    recordConfirmedDraftResult(entry.dateKey, result, submittedSig, known?.revision);
+    const normalizedDay = withClientIds(result.day);
+    recordConfirmedDraftResult(entry.dateKey, { ...result, day: normalizedDay }, submittedSig, known?.revision);
     if (affectsVacationColors) {
       await refreshVacationColors([entry.dateKey]);
     }
@@ -1471,14 +1475,16 @@ export function TimesheetWorkspace({
     try {
       for (const dateKey of dateKeys) {
         const known = todayDraftsRef.current[dateKey] ?? draftTombstonesRef.current[dateKey];
+        const originalSnapSig = daySignature(
+          dateKey === latestSelectedDateKeyRef.current ? latestDayRef.current : records[dateKey]
+        );
         const vacDay = sanitizeDayForSave(createVacationDay(dateKey, vacationName, hours, vacationStatus, vacationDeductsAllowance));
-        const submittedSig = daySignature(vacDay);
         const saveResult = await saveEntryAction(
           vacDay,
           known ? { confirmedBaselineUpdatedAt: known.confirmedBaselineUpdatedAt, expectedDraftRevision: known.revision } : undefined
         );
         const savedDay = withClientIds(saveResult.day);
-        recordConfirmedDraftResult(dateKey, { ...saveResult, day: savedDay }, submittedSig, known?.revision);
+        recordConfirmedDraftResult(dateKey, { ...saveResult, day: savedDay }, originalSnapSig, known?.revision);
 
         showNotionSyncError(saveResult.notionSyncError);
         savedDays.push(savedDay);
@@ -1512,14 +1518,16 @@ export function TimesheetWorkspace({
         }
 
         const known = todayDraftsRef.current[dateKey] ?? draftTombstonesRef.current[dateKey];
+        const originalSnapSig = daySignature(
+          dateKey === latestSelectedDateKeyRef.current ? latestDayRef.current : sourceDay
+        );
         const vacDay = sanitizeDayForSave(updateVacationEntryForConnectedSave(sourceDay, vacationName, matchVacationName, matchVacationStatus, vacationStatus));
-        const submittedSig = daySignature(vacDay);
         const saveResult = await saveEntryAction(
           vacDay,
           known ? { confirmedBaselineUpdatedAt: known.confirmedBaselineUpdatedAt, expectedDraftRevision: known.revision } : undefined
         );
         const savedDay = withClientIds(saveResult.day);
-        recordConfirmedDraftResult(dateKey, { ...saveResult, day: savedDay }, submittedSig, known?.revision);
+        recordConfirmedDraftResult(dateKey, { ...saveResult, day: savedDay }, originalSnapSig, known?.revision);
 
         showNotionSyncError(saveResult.notionSyncError);
         savedDays.push(savedDay);
@@ -2497,7 +2505,8 @@ export function TimesheetWorkspace({
     setDeleteError("");
 
     try {
-      const saveResult = await saveEntryAndNotify(entry);
+      const originalSourceSig = daySignature(dayToSave);
+      const saveResult = await saveEntryAndNotify(entry, originalSourceSig);
       const savedEntry = withClientIds(saveResult.day);
 
       updateAiRewriteRequestsFromDays([savedEntry]);
