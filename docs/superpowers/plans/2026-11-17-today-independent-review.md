@@ -1,6 +1,6 @@
 # Today workspace independent review
 
-Current verdict for `a0bbc09` on 2026-11-18 is **NO-GO**. Round 14 below supersedes the Round 13 acceptance for the expanded implementation. Five reproduced findings remain open. This review changes documentation only.
+Current verdict after `47683d7` on 2026-11-18 is **NO-GO**. Rounds 14–15 below supersede the Round 13 acceptance for the expanded implementation. The first correction pass is partial; atomic confirmation, cleanup and complete client dirty-state handling remain unresolved. Coordinator review changes documentation only.
 
 ## Round 1
 
@@ -182,3 +182,15 @@ Reviewed `178b9ed..a0bbc09`, including the original Today implementation, layout
 - Total existing automated cases run successfully: 213. Their passing results do not cover the five failing integration cases above.
 - Independent non-browser probes parsed the actual TypeScript declarations with the workspace TypeScript compiler, transpiled those declarations and invoked them in VM closures with injected refs/state setters or authenticated server boundaries. Production domain helpers and DB read/write functions were used. These are targeted function/persistence probes, not a mounted React, DOM, effect scheduler or browser test. Deferred-save and field-payload probes did not use a DB; persistence probes set `DATABASE_URL` to newly created OS-temporary SQLite files before importing the DB package, used synthetic accounts, disconnected and removed those temporary directories afterward. Existing dev/user DB data and real external credentials were not used.
 - `git diff --check` passed before and after the review documentation changes. Authenticated visual acceptance, browser navigation and live Notion credential/permission behavior remain unverified and user-owned.
+
+## Round 15 — Partial corrections, NO-GO (2026-11-18)
+
+Codex read the structured result of run `r_7993958cadd4` directly, then inspected the actual `fe8161f..HEAD` diff and connected save/discard/navigation/store paths. The worker committed `2e90b67`; `47683d7` subsequently narrows the optional current day for typechecking. No dedicated regressions were added. Its result reports `git diff --check` passed but describes typecheck and ESLint as launched, not completed; these are not accepted as passing evidence. The coordinator did not rerun those checks or the previous tests.
+
+- The saved-day base now survives draft-date restoration, addressing the identified saved vacation/day metadata loss in that branch. Saving-state recovery for newer work edits and revision-checked explicit discard are useful partial improvements.
+- Round 14 finding 3 is unchanged: timesheet confirmation still calls the unchecked `saveTimesheetEntryAction(day)` and does not transmit the observed confirmed baseline/draft revision. An old draft can still overwrite a newer confirmed day.
+- Finding 4 remains incomplete: `forgetTodayDrafts` removes local state first and fire-and-forgets the server clear, ignoring rejection/conflict. Adding a revision argument prevents one stale deletion case but does not make day confirmation and matching cleanup atomic. `applySavedDays`, including AI and range callers, still invokes this destructive generic cleanup.
+- Finding 5 remains incomplete: the new guard reads `records`/`savedRecords` captured when `flushEditorDraft` was created, rather than the current day after its await. A summary/non-work change made during the request can still be marked clean. Even when it keeps dirty state, `saveCurrentWorkDraft` compares only WORK entries and returns true, so `requestNavigation` bypasses the unsaved-data modal. With persistent summary-only dirty state, the effect also continually resaves identical work after each saving/saved transition. Separate pending work persistence from day-wide unsaved fields or persist the intended full payload, and use latest snapshots across awaits.
+- Explicit discard now awaits its revision-checked request, but input remains editable while it waits; successful cleanup must not erase later local edits. This needs a pending-operation guard or generation check and a production-used regression.
+
+**Decision remains NO-GO.** Next worker task is deliberately limited to atomic, version-checked full-day timesheet confirmation and matching draft cleanup with integration tests and completed check evidence. Client autosave/navigation/unsaved-field regressions follow as a separate bounded pass. The user authorized incremental commits and continued correction until Codex GO; no product build, browser automation or live external writes are authorized by that instruction.
