@@ -801,10 +801,16 @@ export function TimesheetWorkspace({
       onClearPendingDraft: (key, expectedRev) => {
         const currentDraft = todayDraftsRef.current[key];
         if (currentDraft && (expectedRev === undefined || currentDraft.revision === expectedRev)) {
+          draftEpochRef.current += 1;
           const nextRef = { ...todayDraftsRef.current };
           delete nextRef[key];
           todayDraftsRef.current = nextRef;
-          forgetTodayDrafts([key]);
+          setTodayDrafts((current) => {
+            if (!current[key]) return current;
+            const next = { ...current };
+            delete next[key];
+            return next;
+          });
         }
       },
       onClearWorkSignature: (key) => {
@@ -1465,17 +1471,19 @@ export function TimesheetWorkspace({
     try {
       for (const dateKey of dateKeys) {
         const known = todayDraftsRef.current[dateKey] ?? draftTombstonesRef.current[dateKey];
+        const vacDay = sanitizeDayForSave(createVacationDay(dateKey, vacationName, hours, vacationStatus, vacationDeductsAllowance));
+        const submittedSig = daySignature(vacDay);
         const saveResult = await saveEntryAction(
-          sanitizeDayForSave(createVacationDay(dateKey, vacationName, hours, vacationStatus, vacationDeductsAllowance)),
+          vacDay,
           known ? { confirmedBaselineUpdatedAt: known.confirmedBaselineUpdatedAt, expectedDraftRevision: known.revision } : undefined
         );
         const savedDay = withClientIds(saveResult.day);
+        recordConfirmedDraftResult(dateKey, { ...saveResult, day: savedDay }, submittedSig, known?.revision);
 
         showNotionSyncError(saveResult.notionSyncError);
         savedDays.push(savedDay);
         onProgress?.(savedDays.length, total);
 
-        applySavedDays([savedDay]);
         setSelectedEntryIdByDate((current) => ({
           ...current,
           [savedDay.dateKey]: savedDay.entries[0]?.clientId ?? ""
@@ -1504,17 +1512,19 @@ export function TimesheetWorkspace({
         }
 
         const known = todayDraftsRef.current[dateKey] ?? draftTombstonesRef.current[dateKey];
+        const vacDay = sanitizeDayForSave(updateVacationEntryForConnectedSave(sourceDay, vacationName, matchVacationName, matchVacationStatus, vacationStatus));
+        const submittedSig = daySignature(vacDay);
         const saveResult = await saveEntryAction(
-          sanitizeDayForSave(updateVacationEntryForConnectedSave(sourceDay, vacationName, matchVacationName, matchVacationStatus, vacationStatus)),
+          vacDay,
           known ? { confirmedBaselineUpdatedAt: known.confirmedBaselineUpdatedAt, expectedDraftRevision: known.revision } : undefined
         );
         const savedDay = withClientIds(saveResult.day);
+        recordConfirmedDraftResult(dateKey, { ...saveResult, day: savedDay }, submittedSig, known?.revision);
 
         showNotionSyncError(saveResult.notionSyncError);
         savedDays.push(savedDay);
         onProgress?.(savedDays.length, total);
 
-        applySavedDays([savedDay]);
         setSelectedEntryIdByDate((current) => ({
           ...current,
           [savedDay.dateKey]: savedDay.entries.find((entry) => entry.kind === "VACATION")?.clientId ?? savedDay.entries[0]?.clientId ?? ""
@@ -2493,7 +2503,6 @@ export function TimesheetWorkspace({
       updateAiRewriteRequestsFromDays([savedEntry]);
       notionCandidates.updateCandidatesFromDay(savedEntry);
       showNotionSyncError(saveResult.notionSyncError);
-      applySavedDays([savedEntry]);
       setSelectedEntryIdByDate((current) => ({
         ...current,
         [savedEntry.dateKey]: savedEntry.entries[Math.max(selectedIndexBeforeSave, 0)]?.clientId ?? savedEntry.entries[0]?.clientId ?? ""
@@ -2501,7 +2510,6 @@ export function TimesheetWorkspace({
       if (isNewSavedDate) {
         setCelebratingDateKey(savedEntry.dateKey);
       }
-      setIsDirty(false);
       setSaveState("saved");
       if (
         options.forceImmediateAiAfterSave ||
