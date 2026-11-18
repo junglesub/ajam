@@ -1,6 +1,6 @@
 # Today workspace independent review
 
-Current verdict after `47683d7` on 2026-11-18 is **NO-GO**. Rounds 14–15 below supersede the Round 13 acceptance for the expanded implementation. The first correction pass is partial; atomic confirmation, cleanup and complete client dirty-state handling remain unresolved. Coordinator review changes documentation only.
+Current verdict after `a581ff7` on 2026-11-18 is **NO-GO**. Rounds 14–16 below supersede the Round 13 acceptance for the expanded implementation. Guarded full-day confirmation now exists; generic cleanup, uncovered callers and complete client dirty-state handling remain unresolved. Coordinator review changes documentation only.
 
 ## Round 1
 
@@ -194,3 +194,11 @@ Codex read the structured result of run `r_7993958cadd4` directly, then inspecte
 - Explicit discard now awaits its revision-checked request, but input remains editable while it waits; successful cleanup must not erase later local edits. This needs a pending-operation guard or generation check and a production-used regression.
 
 **Decision remains NO-GO.** Next worker task is deliberately limited to atomic, version-checked full-day timesheet confirmation and matching draft cleanup with integration tests and completed check evidence. Client autosave/navigation/unsaved-field regressions follow as a separate bounded pass. The user authorized incremental commits and continued correction until Codex GO; no product build, browser automation or live external writes are authorized by that instruction.
+
+## Round 16 — Atomic full-day primitive added, cleanup incomplete (2026-11-18)
+
+Codex read run `r_d9b41263174b` directly and independently reviewed commits `6221042` and `a581ff7`, their actual callers and tests. `confirmTimesheetFullDay` correctly checks supplied baseline/revision and normalizes/saves/clears/reloads the full day inside a transaction. It preserves intentional full-day metadata rather than using Today's work-only merge. The main client save now waits for the queued autosave and forwards its known stored-draft expectations. These changes address the original stale loaded-draft main-save path when the guard is supplied.
+
+The worker reports completed `today-store.test.ts` (1/1 pass), DB and web typechecks, targeted ESLint and diff check, all exit 0. Codex inspected this evidence and test source without rerunning the tests. The added assertions exercise a stale fingerprint and full-day summary/AI/entry-count preservation, but do not yet test stale draft revision, post-success tombstone version, late cleanup, rollback or actual changed-confirmed A/B readback. The default DB test script still excludes this file.
+
+**NO-GO remains.** `applySavedDays` still calls `forgetTodayDrafts`, removing local draft state and issuing a second fire-and-forget clear after the new atomic clear; its response/conflicts are ignored. AI-applied days use that same destructive path. Vacation range/connected save callers still invoke `saveEntryAction` without their known draft guard. The server does not return the atomic confirm's fingerprint/revision to the client. These omissions need correction before the persistence pass can be accepted; client autosave/unsaved-summary/navigation findings from Round 15 also remain open. Follow-up task is limited to completing cleanup/caller integration and missing store regressions, then a separate client-state pass.
