@@ -1,6 +1,6 @@
 # Today workspace independent review
 
-Current verdict after `fa8ec29` on 2026-11-18 is **NO-GO**. Rounds 14–19 below supersede the Round 13 acceptance for the expanded implementation. Pending-discard work/summary preservation is corrected and tested; client autosave/dirty-state handling and remaining version/bookkeeping coverage remain unresolved. Coordinator review changes documentation only.
+Current verdict after `ba873aa` on 2026-11-18 is **NO-GO**. Rounds 14–20 below supersede the Round 13 acceptance for the expanded implementation. Autosave/partial-day navigation now use production helpers and current snapshots; AI/range bookkeeping and remaining integration regression coverage still require completion. Coordinator review changes documentation only.
 
 ## Round 1
 
@@ -222,3 +222,11 @@ Remaining integration gaps: range/connected saves still do not consume returned 
 Codex directly read run `r_00adbcf44b98` and independently inspected `fa8ec29`, new `timesheet-draft-discard.ts`/tests and the actual workspace callback wiring. The production handler now calls `executeDiscardTimesheetDraft` with `latestDayRef` and current selected date. Its post-await decision reads the latest full-day snapshot instead of the immutable old records closure. The two new tests cover deferred clear with newer work+summary (preserved, dirty remains true, returned tombstone retained) and unchanged successful clear (restores confirmed data). This resolves the specific input-loss case independently reproduced in Round 18.
 
 Worker reports the two new tests, web typecheck, targeted lint and diff check completed with exit 0. Codex read source/tests and did not rerun them. This is acceptance of that bounded correction only; full feature remains **NO-GO**. Next task addresses production-used work autosave sequencing and partial day dirty/navigation state with deferred-response regressions. Other remaining items are AI application preserving edited records, range/connected version bookkeeping, missing full-day store edge-case tests and workflow evidence updates.
+
+## Round 20 — Autosave/current snapshots and navigation corrected, integration pending (2026-11-18)
+
+Codex directly read run `r_99f8cc100bbb` and independently reviewed `ba873aa`, its new production helper/tests and actual workspace effects/callbacks. `executeFlushEditorDraft` reads latest complete-day and saved-day snapshots after await, keeps non-WORK/summary/AI metadata dirty, updates known revision and leaves newer work schedulable. `shouldScheduleWorkDraftAutosave` suppresses saving/error states and identical successfully submitted work. `executeSaveCurrentWorkDraft` now refuses silent navigation with unsaved day fields. The workspace calls these helpers and maintains latest refs; these are substantive corrections to Round 14 findings 2/5.
+
+Worker reports autosave/discard tests 5/5, web typecheck, targeted lint and diff check completed with exit 0. Codex read them without rerunning. Coverage is narrower than test titles: the deferred A/B test only submits A and checks it settles idle with revision 1; it does not actually submit B or assert revision 2, and its mocked A response contains the later B entries rather than submitted A. The summary/vacation test does not introduce a vacation or await a deferred request; it verifies summary-only behavior. Follow-up must exercise both actual phases and non-WORK changes.
+
+**NO-GO remains** for already-recorded AI-result overwrite of edited records, range/connected saves not consuming guarded-result tombstone metadata, incomplete full-day persistence edge-case tests and absent workflow updates. Autosave signature bookkeeping also needs reset/initialization when drafts are loaded, confirmed or discarded, so a previously saved signature cannot suppress a new unsaved edit after restoration. Next task completes this remaining integration and concrete tests before another independent review.
