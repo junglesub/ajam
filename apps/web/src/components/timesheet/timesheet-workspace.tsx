@@ -105,7 +105,10 @@ type VacationSaveAction = {
 type TimesheetWorkspaceProps = {
   addProjectAction: (name: string) => Promise<string>;
   createUserAction: (params: { email?: string; password: string; role: UserRole; username: string }) => Promise<ManagedUser>;
-  clearEditorDraftAction: (dateKey: string) => Promise<void>;
+  clearEditorDraftAction: (
+    dateKey: string,
+    expectedRevision?: number
+  ) => Promise<{ status: "cleared" | "conflict" }>;
   currentUser: ManagedUser;
   deleteEntryAction: (dateKey: string) => Promise<TimesheetDeleteResult>;
   findPreviousNotionCardsAction: (dateKey: string) => Promise<TimesheetEntryNotionCardDraft[]>;
@@ -980,7 +983,9 @@ export function TimesheetWorkspace({
     const existingTouched = existing?.entries.some((entry) => entry.notionCardsTouched);
 
     if (persisted?.entries.length && !existingTouched) {
-      const restored = overlayTodayDrafts({}, [persisted])[dateKey];
+      const baseDay = savedRecords[dateKey] ?? existing;
+      const baseDrafts = baseDay ? { [dateKey]: baseDay } : {};
+      const restored = overlayTodayDrafts(baseDrafts, [persisted])[dateKey];
       if (restored) {
         setRecords((current) => {
           if (current[dateKey]?.entries.some((entry) => entry.notionCardsTouched)) {
@@ -1133,6 +1138,7 @@ export function TimesheetWorkspace({
           expectedRevision: known?.revision
         });
         if (epoch !== draftEpochRef.current) {
+          setDraftSaveState("idle");
           return false;
         }
         if (result.status !== "saved") {
@@ -1150,10 +1156,21 @@ export function TimesheetWorkspace({
         setTodayDrafts((current) => ({ ...current, [dateKey]: snapshot }));
         const after = latestEditorRef.current;
         if (after.dateKey === dateKey && JSON.stringify(workEntriesOf(after.entries)) === JSON.stringify(entries)) {
+          const savedDay = savedRecords[dateKey];
+          const currentDay = records[dateKey];
+          const hasNonWorkChanges =
+            Boolean(currentDay) &&
+            (currentDay.shortVersion !== (savedDay?.shortVersion ?? "") ||
+              JSON.stringify(currentDay.entries.filter((e) => e.kind !== "WORK")) !==
+                JSON.stringify((savedDay?.entries ?? []).filter((e) => e.kind !== "WORK")));
+          if (!hasNonWorkChanges) {
+            setIsDirty(false);
+          }
           const now = new Date();
-          setIsDirty(false);
           setDraftSavedAt(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`);
           setDraftSaveState("saved");
+        } else {
+          setDraftSaveState("idle");
         }
         return true;
       } catch {
@@ -2223,16 +2240,35 @@ export function TimesheetWorkspace({
       return next;
     });
     for (const dateKey of active) {
-      void clearEditorDraftAction(dateKey);
+      const expectedRevision = todayDraftsRef.current[dateKey]?.revision;
+      void clearEditorDraftAction(dateKey, expectedRevision);
     }
   }
 
-  function discardSelectedTodayDraft() {
+  async function discardSelectedTodayDraft() {
     const dateKey = selectedDateKey;
-    if (!todayDraftsRef.current[dateKey]) {
+    const known = todayDraftsRef.current[dateKey];
+    if (!known) {
       return;
     }
-    forgetTodayDrafts([dateKey]);
+    try {
+      const result = await clearEditorDraftAction(dateKey, known.revision);
+      if (result.status !== "cleared") {
+        setDraftSaveState("error");
+        setDraftSaveError("임시본을 삭제하지 못했습니다. 다른 화면에서 수정된 최신 초안이 있습니다.");
+        return;
+      }
+    } catch {
+      setDraftSaveState("error");
+      setDraftSaveError("임시본을 삭제하지 못했습니다.");
+      return;
+    }
+    draftEpochRef.current += 1;
+    setTodayDrafts((current) => {
+      const next = { ...current };
+      delete next[dateKey];
+      return next;
+    });
     setDraftSaveState("idle");
     setDraftSaveError("");
     setDraftSavedAt("");

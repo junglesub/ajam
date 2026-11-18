@@ -356,12 +356,15 @@ export async function saveTimesheetEditorDraftAction(params: {
   });
 }
 
-export async function clearTimesheetEditorDraftAction(dateKey: string): Promise<void> {
+export async function clearTimesheetEditorDraftAction(
+  dateKey: string,
+  expectedRevision?: number
+) {
   const user = await requireSession();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
     throw new Error("날짜 형식이 올바르지 않습니다.");
   }
-  await clearTodayDraft({ dateKey, userId: user.id });
+  return clearTodayDraft({ dateKey, expectedRevision, userId: user.id });
 }
 
 export async function loadTimesheetVacationColorsAction(year: number): Promise<Record<string, VacationColor>> {
