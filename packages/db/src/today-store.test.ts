@@ -11,6 +11,7 @@ process.env.DATABASE_URL = `file:${dbPath}`;
 
 const {
   clearTodayDraft,
+  confirmTimesheetFullDay,
   confirmTodayDraft,
   createManagedUser,
   ensureTodaySchema,
@@ -197,6 +198,47 @@ test("today-store persists incomplete drafts, isolates users/dates, detects stal
     userId: userA.id
   });
   assert.equal(postConfirmSave.status, "saved");
+
+  // 10. confirmTimesheetFullDay rejects stale baseline/revision and preserves full-day edits on success
+  const staleFullConfirm = await confirmTimesheetFullDay({
+    confirmedBaselineUpdatedAt: "stale-fp",
+    dateKey: "2026-11-17",
+    day: {
+      aiRewriteRequested: true,
+      dateKey: "2026-11-17",
+      entries: [
+        { ...entry1, content: "Full day work", hours: 4 },
+        { ...createEmptyEntryDraft(1), hours: 4, kind: "VACATION", vacationName: "반차", vacationStatus: "CONFIRMED" }
+      ],
+      holidayName: "",
+      shortVersion: "Full summary"
+    },
+    expectedDraftRevision: postConfirmSave.draft.revision,
+    userId: userA.id
+  });
+  assert.equal(staleFullConfirm.status, "conflict");
+
+  const validFullConfirm = await confirmTimesheetFullDay({
+    confirmedBaselineUpdatedAt: postConfirmLoad.confirmedUpdatedAt,
+    dateKey: "2026-11-17",
+    day: {
+      aiRewriteRequested: true,
+      dateKey: "2026-11-17",
+      entries: [
+        { ...entry1, content: "Full day work", hours: 4 },
+        { ...createEmptyEntryDraft(1), hours: 4, kind: "VACATION", vacationName: "반차", vacationStatus: "CONFIRMED" }
+      ],
+      holidayName: "",
+      shortVersion: "Full summary"
+    },
+    expectedDraftRevision: postConfirmSave.draft.revision,
+    userId: userA.id
+  });
+  assert.equal(validFullConfirm.status, "confirmed");
+  if (validFullConfirm.status !== "confirmed") throw new Error("Expected confirmed");
+  assert.equal(validFullConfirm.day.shortVersion, "Full summary");
+  assert.equal(validFullConfirm.day.aiRewriteRequested, true);
+  assert.equal(validFullConfirm.day.entries.length, 2);
 
   await clearTodayDraft({ dateKey: "2026-11-17", userId: userA.id });
 });

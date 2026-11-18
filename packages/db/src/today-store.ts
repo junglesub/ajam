@@ -505,3 +505,99 @@ export async function confirmTodayDraft(params: {
     };
   });
 }
+
+export async function confirmTimesheetFullDay(params: {
+  confirmedBaselineUpdatedAt?: string;
+  dateKey: string;
+  day: StoredTimesheetDraft;
+  expectedDraftRevision?: number;
+  userId: string;
+}): Promise<TodayDraftConfirmResult> {
+  await ensureTodaySchema();
+
+  if (params.dateKey !== params.day.dateKey) {
+    throw new Error("요청 날짜와 업무 기록 날짜가 일치하지 않습니다.");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const existingDays = await listTimesheetDaysInTransaction({
+      dateKeys: [params.dateKey],
+      transaction: tx,
+      userId: params.userId
+    });
+    const existingDay = existingDays[0] ?? null;
+    const currentConfirmedUpdatedAt = computeConfirmedDayFingerprint(existingDay);
+
+    const existingRows = await tx.$queryRawUnsafe<RawTodayWorkDraftRow[]>(
+      `SELECT "id", "userId", "dateKey", "payloadJson", "revision", "isCleared", "confirmedBaselineUpdatedAt", "updatedAt"
+       FROM "TodayWorkDraft"
+       WHERE "userId" = ? AND "dateKey" = ?
+       LIMIT 1`,
+      params.userId,
+      params.dateKey
+    );
+    const rawDraft = existingRows[0] ?? null;
+    const currentRevision = rawDraft ? Number(rawDraft.revision) : 0;
+
+    if (
+      params.confirmedBaselineUpdatedAt !== undefined &&
+      currentConfirmedUpdatedAt !== params.confirmedBaselineUpdatedAt
+    ) {
+      return {
+        currentConfirmedUpdatedAt,
+        currentRevision,
+        reason: "confirmed_changed",
+        status: "conflict"
+      };
+    }
+
+    if (
+      params.expectedDraftRevision !== undefined &&
+      params.expectedDraftRevision !== currentRevision
+    ) {
+      return {
+        currentConfirmedUpdatedAt,
+        currentRevision,
+        reason: "stale_revision",
+        status: "conflict"
+      };
+    }
+
+    const normalizedDay = normalizeDay(params.day);
+
+    await saveTimesheetDayInTransaction({
+      day: normalizedDay,
+      transaction: tx,
+      userId: params.userId
+    });
+
+    let nextDraftRevision = currentRevision;
+    if (rawDraft) {
+      nextDraftRevision = currentRevision + 1;
+      await tx.$executeRawUnsafe(
+        `UPDATE "TodayWorkDraft"
+         SET "isCleared" = 1, "payloadJson" = '[]', "revision" = ?, "updatedAt" = ?
+         WHERE "id" = ? AND "revision" = ?`,
+        nextDraftRevision,
+        new Date().toISOString(),
+        rawDraft.id,
+        currentRevision
+      );
+    }
+
+    const freshDays = await listTimesheetDaysInTransaction({
+      dateKeys: [params.dateKey],
+      transaction: tx,
+      userId: params.userId
+    });
+    const finalDay = freshDays[0] ?? normalizedDay;
+    const nextConfirmedUpdatedAt = computeConfirmedDayFingerprint(finalDay);
+
+    return {
+      confirmedUpdatedAt: nextConfirmedUpdatedAt,
+      day: finalDay,
+      draftRevision: nextDraftRevision,
+      status: "confirmed"
+    };
+  });
+}

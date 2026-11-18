@@ -150,6 +150,7 @@ export {
 export type { NotionCardComment, NotionPageCommentsResult } from "./notion-comments";
 export {
   clearTodayDraft,
+  confirmTimesheetFullDay,
   confirmTodayDraft,
   ensureTodaySchema,
   getTodayDraft,
