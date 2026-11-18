@@ -19,52 +19,74 @@ test("executeFlushEditorDraft serializes deferred A -> B with sequential revisio
   };
   let draftSaveState: "error" | "idle" | "saved" | "saving" = "idle";
   let isDirty = true;
-  const sentRevisions: Array<number | undefined> = [];
+  const sentCalls: Array<{ content: string; expectedRevision: number | undefined }> = [];
   let resolveA!: (value: {
     draft: { confirmedBaselineUpdatedAt: string; entries: typeof latestDay.entries; revision: number };
     status: "saved";
   }) => void;
 
-  const flushA = executeFlushEditorDraft({
-    dateKey: "2026-11-17",
-    getEpoch: () => 0,
-    getKnownDraft: () => known,
-    getLatestSnapshot: () => ({ dateKey: "2026-11-17", day: latestDay }),
-    getSavedDay: () => undefined,
-    onDraftSaved: (snap) => {
-      known = { confirmedBaselineUpdatedAt: snap.confirmedBaselineUpdatedAt, revision: snap.revision };
-    },
-    onError: () => {},
-    onSettledUpToDate: (clearDirty) => {
-      if (clearDirty) isDirty = false;
-    },
-    onStateChange: (s) => {
-      draftSaveState = s;
-    },
-    saveEditorDraftAction: (input) => {
-      sentRevisions.push(input.expectedRevision);
-      return new Promise((resolve) => {
-        resolveA = resolve;
-      });
-    }
-  });
+  const runFlush = () =>
+    executeFlushEditorDraft({
+      dateKey: "2026-11-17",
+      getEpoch: () => 0,
+      getKnownDraft: () => known,
+      getLatestSnapshot: () => ({ dateKey: "2026-11-17", day: latestDay }),
+      getSavedDay: () => undefined,
+      onDraftSaved: (snap) => {
+        known = { confirmedBaselineUpdatedAt: snap.confirmedBaselineUpdatedAt, revision: snap.revision };
+      },
+      onError: () => {},
+      onSettledUpToDate: (clearDirty) => {
+        if (clearDirty) isDirty = false;
+      },
+      onStateChange: (s) => {
+        draftSaveState = s;
+      },
+      saveEditorDraftAction: (input) => {
+        sentCalls.push({
+          content: input.entries[0]?.content ?? "",
+          expectedRevision: input.expectedRevision
+        });
+        if (sentCalls.length === 1) {
+          return new Promise((resolve) => {
+            resolveA = resolve;
+          });
+        }
+        return Promise.resolve({
+          draft: { confirmedBaselineUpdatedAt: "fp-1", entries: input.entries, revision: 2 },
+          status: "saved" as const
+        });
+      }
+    });
+
+  const flushA = runFlush();
 
   // User types Work B while A is in flight
+  const entriesA = [...latestDay.entries];
   latestDay = {
     ...latestDay,
     entries: [{ ...createEmptyEntryDraft(0), content: "Work B", project: "P1" }]
   };
 
   resolveA({
-    draft: { confirmedBaselineUpdatedAt: "fp-1", entries: latestDay.entries, revision: 1 },
+    draft: { confirmedBaselineUpdatedAt: "fp-1", entries: entriesA, revision: 1 },
     status: "saved"
   });
   await flushA;
 
   assert.equal(draftSaveState, "idle");
   assert.equal(isDirty, true);
-  assert.deepEqual(sentRevisions, [0]);
   assert.equal(known?.revision, 1);
+
+  // Follow-up autosave submits B with expectedRevision 1 and settles saved/clean
+  await runFlush();
+  assert.deepEqual(sentCalls, [
+    { content: "Work A", expectedRevision: 0 },
+    { content: "Work B", expectedRevision: 1 }
+  ]);
+  assert.equal(known?.revision, 2);
+  assert.equal(draftSaveState, "saved");
+  assert.equal(isDirty, false);
 });
 
 test("summary/vacation edit during pending WORK save remains dirty and blocks silent navigation", async () => {
@@ -151,4 +173,18 @@ test("error/conflict stops automatic retry loops and work-only fully saved navig
     getSavedDay: () => createEmptyDraft("2026-11-17")
   });
   assert.equal(canNavigate, true);
+
+  // Discarding clears lastSavedWorkSignature, so re-typing A schedules autosave again
+  assert.equal(
+    shouldScheduleWorkDraftAutosave({
+      currentWorkSignature: workEntriesSignature(day.entries),
+      draftSaveState: "idle",
+      isDirty: true,
+      isWeekend: false,
+      lastSavedWorkSignature: "",
+      saveState: "idle",
+      selectedKind: "WORK"
+    }),
+    true
+  );
 });

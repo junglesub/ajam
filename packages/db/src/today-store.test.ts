@@ -242,3 +242,120 @@ test("today-store persists incomplete drafts, isolates users/dates, detects stal
 
   await clearTodayDraft({ dateKey: "2026-11-17", userId: userA.id });
 });
+
+test("confirmTimesheetFullDay enforces confirmed A -> draft(A) -> confirmed B rejection, newer draft revision rejection, and full-day preservation", async () => {
+  await ensureTodaySchema();
+  const user = await createManagedUser({
+    email: "full-confirm@example.com",
+    password: "password123",
+    role: "USER",
+    username: "full-confirm"
+  });
+
+  // 1. Confirmed A
+  await saveTimesheetDay({
+    day: {
+      aiRewriteRequested: false,
+      dateKey: "2026-11-18",
+      entries: [
+        { ...createEmptyEntryDraft(0), content: "Confirmed A", hours: 4, kind: "WORK", project: "P1" },
+        { ...createEmptyEntryDraft(1), hours: 4, kind: "VACATION", vacationDeductsAllowance: true, vacationName: "반차", vacationStatus: "CONFIRMED" }
+      ],
+      holidayName: "",
+      shortVersion: "Summary A"
+    },
+    userId: user.id
+  });
+
+  const loadA = await getTodayDraft({ dateKey: "2026-11-18", userId: user.id });
+  const fpA = loadA.confirmedUpdatedAt;
+
+  // 2. Draft(A)
+  const draftA = await saveTodayDraft({
+    confirmedBaselineUpdatedAt: fpA,
+    dateKey: "2026-11-18",
+    entries: [{ ...createEmptyEntryDraft(0), content: "Draft A", hours: 4, kind: "WORK", project: "P1" }],
+    expectedRevision: loadA.draftRevision,
+    userId: user.id
+  });
+  assert.equal(draftA.status, "saved");
+  if (draftA.status !== "saved") throw new Error("Expected saved");
+
+  // 3. Confirmed B by another writer
+  await saveTimesheetDay({
+    day: {
+      aiRewriteRequested: false,
+      dateKey: "2026-11-18",
+      entries: [{ ...createEmptyEntryDraft(0), content: "Confirmed B", hours: 8, kind: "WORK", project: "P2" }],
+      holidayName: "",
+      shortVersion: "Summary B"
+    },
+    userId: user.id
+  });
+
+  // 4. Stale full save using fpA rejects and B remains
+  const staleBaselineConfirm = await confirmTimesheetFullDay({
+    confirmedBaselineUpdatedAt: fpA,
+    dateKey: "2026-11-18",
+    day: {
+      aiRewriteRequested: true,
+      dateKey: "2026-11-18",
+      entries: [{ ...createEmptyEntryDraft(0), content: "Draft A", hours: 4, kind: "WORK", project: "P1" }],
+      holidayName: "",
+      shortVersion: "Summary Draft A"
+    },
+    expectedDraftRevision: draftA.draft.revision,
+    userId: user.id
+  });
+  assert.equal(staleBaselineConfirm.status, "conflict");
+  if (staleBaselineConfirm.status !== "conflict") throw new Error("Expected conflict");
+  assert.equal(staleBaselineConfirm.reason, "confirmed_changed");
+
+  const loadB = await getTodayDraft({ dateKey: "2026-11-18", userId: user.id });
+  assert.equal(loadB.confirmedDay?.shortVersion, "Summary B");
+
+  // 5. Stale draft revision rejects and newer draft remains
+  const staleRevConfirm = await confirmTimesheetFullDay({
+    confirmedBaselineUpdatedAt: loadB.confirmedUpdatedAt,
+    dateKey: "2026-11-18",
+    day: {
+      aiRewriteRequested: true,
+      dateKey: "2026-11-18",
+      entries: [{ ...createEmptyEntryDraft(0), content: "Stale rev", hours: 4, kind: "WORK", project: "P1" }],
+      holidayName: "",
+      shortVersion: "Stale"
+    },
+    expectedDraftRevision: 0,
+    userId: user.id
+  });
+  assert.equal(staleRevConfirm.status, "conflict");
+  if (staleRevConfirm.status !== "conflict") throw new Error("Expected conflict");
+  assert.equal(staleRevConfirm.reason, "stale_revision");
+  assert.equal(loadB.draft?.entries[0]?.content, "Draft A");
+
+  // 6. Successful full-day save preserves summary/non-WORK/AI, returns new fingerprint/revision, and clears draft
+  const successConfirm = await confirmTimesheetFullDay({
+    confirmedBaselineUpdatedAt: loadB.confirmedUpdatedAt,
+    dateKey: "2026-11-18",
+    day: {
+      aiRewriteRequested: true,
+      dateKey: "2026-11-18",
+      entries: [
+        { ...createEmptyEntryDraft(0), content: "Final Work", hours: 4, kind: "WORK", project: "P1" },
+        { ...createEmptyEntryDraft(1), hours: 4, kind: "VACATION", vacationDeductsAllowance: false, vacationName: "공가", vacationStatus: "CONFIRMED" }
+      ],
+      holidayName: "",
+      shortVersion: "Final Summary"
+    },
+    expectedDraftRevision: draftA.draft.revision,
+    userId: user.id
+  });
+  assert.equal(successConfirm.status, "confirmed");
+  if (successConfirm.status !== "confirmed") throw new Error("Expected confirmed");
+  assert.equal(successConfirm.day.shortVersion, "Final Summary");
+  assert.equal(successConfirm.day.aiRewriteRequested, true);
+  assert.equal(successConfirm.day.entries[1]?.vacationDeductsAllowance, false);
+  const afterSuccess = await getTodayDraft({ dateKey: "2026-11-18", userId: user.id });
+  assert.equal(afterSuccess.draft, null);
+  assert.equal(afterSuccess.draftRevision, successConfirm.draftRevision);
+});

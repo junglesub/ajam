@@ -2274,6 +2274,7 @@ export function TimesheetWorkspace({
       known,
       onClearedLocal: (restoreConfirmed) => {
         draftEpochRef.current += 1;
+        delete lastSavedWorkSignatureRef.current[dateKey];
         setTodayDrafts((current) => {
           const next = { ...current };
           delete next[dateKey];
@@ -2310,9 +2311,28 @@ export function TimesheetWorkspace({
     if (!days.length) {
       return;
     }
-    const byDate = Object.fromEntries(days.map((day) => [day.dateKey, day]));
-    setRecords((current) => ({ ...current, ...byDate }));
-    setSavedRecords((current) => ({ ...current, ...byDate }));
+    const preservedDates = new Set(
+      days
+        .map((day) => day.dateKey)
+        .filter((dateKey) => (dateKey === selectedDateKey && isDirty) || Boolean(todayDraftsRef.current[dateKey]))
+    );
+    setSavedRecords((current) => {
+      const next = { ...current };
+      for (const day of days) {
+        next[day.dateKey] = day;
+      }
+      return next;
+    });
+    setRecords((current) => {
+      const next = { ...current };
+      for (const day of days) {
+        if (!preservedDates.has(day.dateKey)) {
+          next[day.dateKey] = day;
+          delete lastSavedWorkSignatureRef.current[day.dateKey];
+        }
+      }
+      return next;
+    });
     setSavedEntryDateKeys((current) => new Set([...current, ...days.map((day) => day.dateKey)]));
   }
 
