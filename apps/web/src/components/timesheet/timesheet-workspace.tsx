@@ -73,7 +73,9 @@ type TimesheetDeleteResult = {
 };
 
 type TimesheetSaveResult = {
+  confirmedUpdatedAt?: string;
   day: TimesheetDayDraft;
+  draftRevision?: number;
   notionSyncError: string;
 };
 
@@ -245,6 +247,7 @@ export function TimesheetWorkspace({
   const [savedRecords, setSavedRecords] = useState<Record<string, TimesheetDayDraft>>(() => buildDraftsFromMonthData(initialMonthData));
   const [todayDrafts, setTodayDrafts] = useState<Record<string, TodayWorkDraftSnapshot>>(() => Object.fromEntries((initialMonthData.todayDrafts ?? []).map((draft) => [draft.dateKey, draft])));
   const todayDraftsRef = useRef(todayDrafts);
+  const draftTombstonesRef = useRef<Record<string, { confirmedBaselineUpdatedAt: string; revision: number }>>({});
   const draftEpochRef = useRef(0);
   const latestEditorRef = useRef({ dateKey: "", entries: [] as TimesheetEntryDraft[] });
   const draftSaveChainRef = useRef(Promise.resolve());
@@ -758,7 +761,7 @@ export function TimesheetWorkspace({
   async function saveEntryAndNotify(entry: TimesheetDayDraft): Promise<TimesheetSaveResult> {
     const affectsVacationColors = entry.entries.some((dayEntry) => dayEntry.kind === "VACATION") || savedRecords[entry.dateKey]?.entries.some((dayEntry) => dayEntry.kind === "VACATION");
     await draftSaveChainRef.current;
-    const known = todayDraftsRef.current[entry.dateKey];
+    const known = todayDraftsRef.current[entry.dateKey] ?? draftTombstonesRef.current[entry.dateKey];
     const draftGuard = known
       ? {
           confirmedBaselineUpdatedAt: known.confirmedBaselineUpdatedAt,
@@ -766,6 +769,13 @@ export function TimesheetWorkspace({
         }
       : undefined;
     const result = await saveEntryAction(entry, draftGuard);
+    if (result.draftRevision !== undefined || result.confirmedUpdatedAt !== undefined) {
+      draftTombstonesRef.current[entry.dateKey] = {
+        confirmedBaselineUpdatedAt: result.confirmedUpdatedAt ?? known?.confirmedBaselineUpdatedAt ?? "",
+        revision: result.draftRevision ?? known?.revision ?? 0
+      };
+      forgetTodayDrafts([entry.dateKey]);
+    }
     if (affectsVacationColors) {
       await refreshVacationColors([entry.dateKey]);
     }
@@ -1143,7 +1153,7 @@ export function TimesheetWorkspace({
       setDraftSaveState("saving");
       setDraftSaveError("");
       try {
-        const known = todayDraftsRef.current[dateKey];
+        const known = todayDraftsRef.current[dateKey] ?? draftTombstonesRef.current[dateKey];
         const epoch = draftEpochRef.current;
         const result = await saveEditorDraftAction({
           confirmedBaselineUpdatedAt: known?.confirmedBaselineUpdatedAt,
@@ -1424,7 +1434,7 @@ export function TimesheetWorkspace({
 
     try {
       for (const dateKey of dateKeys) {
-        const known = todayDraftsRef.current[dateKey];
+        const known = todayDraftsRef.current[dateKey] ?? draftTombstonesRef.current[dateKey];
         const saveResult = await saveEntryAction(
           sanitizeDayForSave(createVacationDay(dateKey, vacationName, hours, vacationStatus, vacationDeductsAllowance)),
           known ? { confirmedBaselineUpdatedAt: known.confirmedBaselineUpdatedAt, expectedDraftRevision: known.revision } : undefined
@@ -1463,7 +1473,7 @@ export function TimesheetWorkspace({
           continue;
         }
 
-        const known = todayDraftsRef.current[dateKey];
+        const known = todayDraftsRef.current[dateKey] ?? draftTombstonesRef.current[dateKey];
         const saveResult = await saveEntryAction(
           sanitizeDayForSave(updateVacationEntryForConnectedSave(sourceDay, vacationName, matchVacationName, matchVacationStatus, vacationStatus)),
           known ? { confirmedBaselineUpdatedAt: known.confirmedBaselineUpdatedAt, expectedDraftRevision: known.revision } : undefined
@@ -2269,13 +2279,27 @@ export function TimesheetWorkspace({
     if (!known) {
       return;
     }
-    const beforeSignature = JSON.stringify(latestEditorRef.current.entries);
+    const beforeDay = records[dateKey];
+    const beforeDaySignature = JSON.stringify({
+      aiRewriteRequested: Boolean(beforeDay?.aiRewriteRequested),
+      entries: beforeDay?.entries ?? [],
+      shortVersion: beforeDay?.shortVersion ?? ""
+    });
     try {
       const result = await clearEditorDraftAction(dateKey, known.revision);
       if (result.status !== "cleared") {
         setDraftSaveState("error");
         setDraftSaveError("임시본을 삭제하지 못했습니다. 다른 화면에서 수정된 최신 초안이 있습니다.");
         return;
+      }
+      if ("draftRevision" in result && typeof result.draftRevision === "number") {
+        draftTombstonesRef.current[dateKey] = {
+          confirmedBaselineUpdatedAt:
+            ("confirmedUpdatedAt" in result && typeof result.confirmedUpdatedAt === "string"
+              ? result.confirmedUpdatedAt
+              : undefined) ?? known.confirmedBaselineUpdatedAt,
+          revision: result.draftRevision
+        };
       }
     } catch {
       setDraftSaveState("error");
@@ -2291,9 +2315,15 @@ export function TimesheetWorkspace({
     setDraftSaveState("idle");
     setDraftSaveError("");
     setDraftSavedAt("");
+    const afterDay = records[dateKey];
+    const afterDaySignature = JSON.stringify({
+      aiRewriteRequested: Boolean(afterDay?.aiRewriteRequested),
+      entries: afterDay?.entries ?? [],
+      shortVersion: afterDay?.shortVersion ?? ""
+    });
     if (
       latestEditorRef.current.dateKey === dateKey &&
-      JSON.stringify(latestEditorRef.current.entries) === beforeSignature
+      afterDaySignature === beforeDaySignature
     ) {
       setIsDirty(false);
       setRecords((current) => {
@@ -2313,7 +2343,6 @@ export function TimesheetWorkspace({
     if (!days.length) {
       return;
     }
-    forgetTodayDrafts(days.map((day) => day.dateKey));
     const byDate = Object.fromEntries(days.map((day) => [day.dateKey, day]));
     setRecords((current) => ({ ...current, ...byDate }));
     setSavedRecords((current) => ({ ...current, ...byDate }));

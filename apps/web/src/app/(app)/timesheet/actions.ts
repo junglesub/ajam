@@ -98,7 +98,9 @@ export type TimesheetDeleteResult = {
 };
 
 export type TimesheetSaveResult = {
+  confirmedUpdatedAt?: string;
   day: StoredTimesheetDraft;
+  draftRevision?: number;
   notionSyncError: string;
 };
 
@@ -403,6 +405,8 @@ export async function saveTimesheetEntryAction(
       beforeDays: previousDay
     });
     let savedDay: StoredTimesheetDraft;
+    let confirmedUpdatedAt: string | undefined;
+    let draftRevision: number | undefined;
     if (draftGuard) {
       const confirmed = await confirmTimesheetFullDay({
         confirmedBaselineUpdatedAt: draftGuard.confirmedBaselineUpdatedAt,
@@ -419,6 +423,8 @@ export async function saveTimesheetEntryAction(
         );
       }
       savedDay = confirmed.day;
+      confirmedUpdatedAt = confirmed.confirmedUpdatedAt;
+      draftRevision = confirmed.draftRevision;
     } else {
       savedDay = await saveTimesheetDay({ day: normalizedDay, userId: user.id });
     }
@@ -430,7 +436,9 @@ export async function saveTimesheetEntryAction(
     revalidatePath("/timesheet");
 
     return {
+      confirmedUpdatedAt,
       day: freshSavedDay ?? savedDay,
+      draftRevision,
       notionSyncError
     };
   }, { entriesRequested: day.entries.length }, (result) => ({ notionFailed: Boolean(result.notionSyncError) }));
