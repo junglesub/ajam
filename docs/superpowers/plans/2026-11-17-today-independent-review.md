@@ -1,6 +1,6 @@
 # Today workspace independent review
 
-Current verdict after `a0a9444` on 2026-11-18 is **NO-GO**. Rounds 14–18 below supersede the Round 13 acceptance for the expanded implementation. Returned version metadata is partially wired; a pending-discard input-loss regression was independently reproduced, and client dirty-state handling remains unresolved. Coordinator review changes documentation only.
+Current verdict after `fa8ec29` on 2026-11-18 is **NO-GO**. Rounds 14–19 below supersede the Round 13 acceptance for the expanded implementation. Pending-discard work/summary preservation is corrected and tested; client autosave/dirty-state handling and remaining version/bookkeeping coverage remain unresolved. Coordinator review changes documentation only.
 
 ## Round 1
 
@@ -216,3 +216,9 @@ Codex read run `r_65d088b9d4d2` directly and reviewed `a0a9444`. The action now 
 **NO-GO remains.** `discardSelectedTodayDraft` reads both `beforeDay` and `afterDay` from the same immutable render-closure `records` across its await, so signatures always match within that invocation even when current input changed. The new full-day signature replaced the earlier latest-entry comparison and can now erase newer WORK input as well as summary input. Codex independently extracted/transpiled the actual handler and invoked it with a deferred clear and injected state/ref setters: while pending, input changed from A/old summary to B/new summary; on success, visible values reverted to A/old and dirty became false. This was a new targeted function probe, not a rerun of worker tests or a browser check.
 
 Remaining integration gaps: range/connected saves still do not consume returned tombstone metadata; `applySavedDays` still overwrites edited records when AI results arrive; autosave uses stale day closures and day-wide dirty state, allowing skipped warnings and repeated identical saves. Next task is one intentionally small correction: use the latest complete-day snapshot for discard and add the failing/passing production-path regression. Remaining autosave/navigation/version/test coverage follows afterward.
+
+## Round 19 — Discard snapshot race corrected (2026-11-18)
+
+Codex directly read run `r_00adbcf44b98` and independently inspected `fa8ec29`, new `timesheet-draft-discard.ts`/tests and the actual workspace callback wiring. The production handler now calls `executeDiscardTimesheetDraft` with `latestDayRef` and current selected date. Its post-await decision reads the latest full-day snapshot instead of the immutable old records closure. The two new tests cover deferred clear with newer work+summary (preserved, dirty remains true, returned tombstone retained) and unchanged successful clear (restores confirmed data). This resolves the specific input-loss case independently reproduced in Round 18.
+
+Worker reports the two new tests, web typecheck, targeted lint and diff check completed with exit 0. Codex read source/tests and did not rerun them. This is acceptance of that bounded correction only; full feature remains **NO-GO**. Next task addresses production-used work autosave sequencing and partial day dirty/navigation state with deferred-response regressions. Other remaining items are AI application preserving edited records, range/connected version bookkeeping, missing full-day store edge-case tests and workflow evidence updates.
