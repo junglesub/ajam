@@ -1,6 +1,6 @@
 # Today workspace independent review
 
-Current verdict after `a581ff7` on 2026-11-18 is **NO-GO**. Rounds 14–16 below supersede the Round 13 acceptance for the expanded implementation. Guarded full-day confirmation now exists; generic cleanup, uncovered callers and complete client dirty-state handling remain unresolved. Coordinator review changes documentation only.
+Current verdict after `e155ef7` on 2026-11-18 is **NO-GO**. Rounds 14–17 below supersede the Round 13 acceptance for the expanded implementation. Generic server cleanup is removed; returned version handling, local draft preservation and complete client dirty-state handling remain unresolved. Coordinator review changes documentation only.
 
 ## Round 1
 
@@ -202,3 +202,9 @@ Codex read run `r_d9b41263174b` directly and independently reviewed commits `622
 The worker reports completed `today-store.test.ts` (1/1 pass), DB and web typechecks, targeted ESLint and diff check, all exit 0. Codex inspected this evidence and test source without rerunning the tests. The added assertions exercise a stale fingerprint and full-day summary/AI/entry-count preservation, but do not yet test stale draft revision, post-success tombstone version, late cleanup, rollback or actual changed-confirmed A/B readback. The default DB test script still excludes this file.
 
 **NO-GO remains.** `applySavedDays` still calls `forgetTodayDrafts`, removing local draft state and issuing a second fire-and-forget clear after the new atomic clear; its response/conflicts are ignored. AI-applied days use that same destructive path. Vacation range/connected save callers still invoke `saveEntryAction` without their known draft guard. The server does not return the atomic confirm's fingerprint/revision to the client. These omissions need correction before the persistence pass can be accepted; client autosave/unsaved-summary/navigation findings from Round 15 also remain open. Follow-up task is limited to completing cleanup/caller integration and missing store regressions, then a separate client-state pass.
+
+## Round 17 — Server cleanup removed, version bookkeeping pending (2026-11-18)
+
+Codex directly read run `r_881662586f9f` and reviewed `e155ef7` against `97a9f03`. Generic saved-day application no longer issues server clear requests. Vacation range/connected saves forward a known draft's guard, and explicit discard compares entry signatures before resetting entries. The two Today/comment DB files are now included in the normal DB test script. Worker evidence is 2/2 targeted DB cases, web/DB typechecks, targeted lint and diff check, all completed with exit 0; Codex read the evidence/source and did not rerun these checks.
+
+**Decision remains NO-GO.** The task did not implement returning/consuming the atomic confirmation metadata, add the requested store regressions, or update workflow documentation. `TimesheetSaveResult` still drops the returned fingerprint/revision. `applySavedDays` still forgets local draft metadata for AI-applied days even though the server draft now survives, allowing later work to lose its known guard. Explicit discard's entry-only signature does not protect `shortVersion` or other day metadata edited while awaiting deletion. Previously recorded autosave closure/navigation/repeated-save issues remain. Next bounded pass must finish version metadata and local bookkeeping with actual tests; then complete the client dirty-state pass.
