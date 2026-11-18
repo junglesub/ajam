@@ -1424,7 +1424,11 @@ export function TimesheetWorkspace({
 
     try {
       for (const dateKey of dateKeys) {
-        const saveResult = await saveEntryAction(sanitizeDayForSave(createVacationDay(dateKey, vacationName, hours, vacationStatus, vacationDeductsAllowance)));
+        const known = todayDraftsRef.current[dateKey];
+        const saveResult = await saveEntryAction(
+          sanitizeDayForSave(createVacationDay(dateKey, vacationName, hours, vacationStatus, vacationDeductsAllowance)),
+          known ? { confirmedBaselineUpdatedAt: known.confirmedBaselineUpdatedAt, expectedDraftRevision: known.revision } : undefined
+        );
         const savedDay = withClientIds(saveResult.day);
 
         showNotionSyncError(saveResult.notionSyncError);
@@ -1459,7 +1463,11 @@ export function TimesheetWorkspace({
           continue;
         }
 
-        const saveResult = await saveEntryAction(sanitizeDayForSave(updateVacationEntryForConnectedSave(sourceDay, vacationName, matchVacationName, matchVacationStatus, vacationStatus)));
+        const known = todayDraftsRef.current[dateKey];
+        const saveResult = await saveEntryAction(
+          sanitizeDayForSave(updateVacationEntryForConnectedSave(sourceDay, vacationName, matchVacationName, matchVacationStatus, vacationStatus)),
+          known ? { confirmedBaselineUpdatedAt: known.confirmedBaselineUpdatedAt, expectedDraftRevision: known.revision } : undefined
+        );
         const savedDay = withClientIds(saveResult.day);
 
         showNotionSyncError(saveResult.notionSyncError);
@@ -2253,10 +2261,6 @@ export function TimesheetWorkspace({
       }
       return next;
     });
-    for (const dateKey of active) {
-      const expectedRevision = todayDraftsRef.current[dateKey]?.revision;
-      void clearEditorDraftAction(dateKey, expectedRevision);
-    }
   }
 
   async function discardSelectedTodayDraft() {
@@ -2265,6 +2269,7 @@ export function TimesheetWorkspace({
     if (!known) {
       return;
     }
+    const beforeSignature = JSON.stringify(latestEditorRef.current.entries);
     try {
       const result = await clearEditorDraftAction(dateKey, known.revision);
       if (result.status !== "cleared") {
@@ -2286,17 +2291,22 @@ export function TimesheetWorkspace({
     setDraftSaveState("idle");
     setDraftSaveError("");
     setDraftSavedAt("");
-    setIsDirty(false);
-    setRecords((current) => {
-      const next = { ...current };
-      const saved = savedRecords[dateKey];
-      if (saved) {
-        next[dateKey] = { ...saved };
-      } else {
-        delete next[dateKey];
-      }
-      return next;
-    });
+    if (
+      latestEditorRef.current.dateKey === dateKey &&
+      JSON.stringify(latestEditorRef.current.entries) === beforeSignature
+    ) {
+      setIsDirty(false);
+      setRecords((current) => {
+        const next = { ...current };
+        const saved = savedRecords[dateKey];
+        if (saved) {
+          next[dateKey] = { ...saved };
+        } else {
+          delete next[dateKey];
+        }
+        return next;
+      });
+    }
   }
 
   function applySavedDays(days: TimesheetDayDraft[]) {
