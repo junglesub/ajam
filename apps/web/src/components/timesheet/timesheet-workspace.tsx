@@ -1158,11 +1158,11 @@ export function TimesheetWorkspace({
         if (after.dateKey === dateKey && JSON.stringify(workEntriesOf(after.entries)) === JSON.stringify(entries)) {
           const savedDay = savedRecords[dateKey];
           const currentDay = records[dateKey];
-          const hasNonWorkChanges =
-            Boolean(currentDay) &&
-            (currentDay.shortVersion !== (savedDay?.shortVersion ?? "") ||
+          const hasNonWorkChanges = currentDay
+            ? currentDay.shortVersion !== (savedDay?.shortVersion ?? "") ||
               JSON.stringify(currentDay.entries.filter((e) => e.kind !== "WORK")) !==
-                JSON.stringify((savedDay?.entries ?? []).filter((e) => e.kind !== "WORK")));
+                JSON.stringify((savedDay?.entries ?? []).filter((e) => e.kind !== "WORK"))
+            : false;
           if (!hasNonWorkChanges) {
             setIsDirty(false);
           }
