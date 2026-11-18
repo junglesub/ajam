@@ -42,6 +42,7 @@ import {
 import { AppLoadingOverlay, AppLoadingScreen } from "@/components/app-loading-screen";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
 import { addBusinessDays, addDays, getBusinessDateKeysInRange, getDateKeyMonthCursor, getDefaultSelectedDateForMonth, getInclusiveDateSpan } from "./timesheet-date-utils";
+import { executeDiscardTimesheetDraft } from "./timesheet-draft-discard";
 import { buildDraftsFromMonthData, buildInitialDrafts, buildSelectedEntryIds, createDraftForDate, createEntryForDate, findPreviousProject, hasHolidayMarker, hasWorkContent, isAutoProjectOnlyDraft, isDefaultFutureVacationDraft, overlayTodayDrafts, rebalanceDefaultWorkHours, rowFromDraft, sanitizeDayForSave, type TimesheetMonthData, type TodayWorkDraftSnapshot } from "./timesheet-draft-utils";
 import { allocateDefaultNotionCards, mergeNotionCardSnapshot, type NotionWeeklyDefaultCard } from "./timesheet-notion-recommendation";
 import { findConnectedVacationDates, updateVacationEntryForConnectedSave } from "./timesheet-vacation-utils";
@@ -250,6 +251,7 @@ export function TimesheetWorkspace({
   const draftTombstonesRef = useRef<Record<string, { confirmedBaselineUpdatedAt: string; revision: number }>>({});
   const draftEpochRef = useRef(0);
   const latestEditorRef = useRef({ dateKey: "", entries: [] as TimesheetEntryDraft[] });
+  const latestDayRef = useRef<TimesheetDayDraft | undefined>(undefined);
   const draftSaveChainRef = useRef(Promise.resolve());
   todayDraftsRef.current = todayDrafts;
   const [savedEntryDateKeys, setSavedEntryDateKeys] = useState(() => new Set(initialMonthData.entries.map((entry) => entry.dateKey)));
@@ -556,6 +558,7 @@ export function TimesheetWorkspace({
   const selectedEntryIdCandidate = selectedEntryIdByDate[selectedDateKey] ?? selectedDay.entries[0]?.clientId ?? "";
   const selectedEntry = selectedDay.entries.find((entry) => entry.clientId === selectedEntryIdCandidate) ?? selectedDay.entries[0];
   latestEditorRef.current = { dateKey: selectedDateKey, entries: selectedDay.entries };
+  latestDayRef.current = selectedDay;
   useEffect(() => {
     if (!isDirty || saveState === "saving" || draftSaveState === "saving" || isWeekendDateKey(selectedDateKey) || selectedEntry?.kind !== "WORK") {
       return;
@@ -2279,64 +2282,46 @@ export function TimesheetWorkspace({
     if (!known) {
       return;
     }
-    const beforeDay = records[dateKey];
-    const beforeDaySignature = JSON.stringify({
-      aiRewriteRequested: Boolean(beforeDay?.aiRewriteRequested),
-      entries: beforeDay?.entries ?? [],
-      shortVersion: beforeDay?.shortVersion ?? ""
-    });
-    try {
-      const result = await clearEditorDraftAction(dateKey, known.revision);
-      if (result.status !== "cleared") {
-        setDraftSaveState("error");
-        setDraftSaveError("임시본을 삭제하지 못했습니다. 다른 화면에서 수정된 최신 초안이 있습니다.");
-        return;
-      }
-      if ("draftRevision" in result && typeof result.draftRevision === "number") {
-        draftTombstonesRef.current[dateKey] = {
-          confirmedBaselineUpdatedAt:
-            ("confirmedUpdatedAt" in result && typeof result.confirmedUpdatedAt === "string"
-              ? result.confirmedUpdatedAt
-              : undefined) ?? known.confirmedBaselineUpdatedAt,
-          revision: result.draftRevision
-        };
-      }
-    } catch {
-      setDraftSaveState("error");
-      setDraftSaveError("임시본을 삭제하지 못했습니다.");
-      return;
-    }
-    draftEpochRef.current += 1;
-    setTodayDrafts((current) => {
-      const next = { ...current };
-      delete next[dateKey];
-      return next;
-    });
-    setDraftSaveState("idle");
-    setDraftSaveError("");
-    setDraftSavedAt("");
-    const afterDay = records[dateKey];
-    const afterDaySignature = JSON.stringify({
-      aiRewriteRequested: Boolean(afterDay?.aiRewriteRequested),
-      entries: afterDay?.entries ?? [],
-      shortVersion: afterDay?.shortVersion ?? ""
-    });
-    if (
-      latestEditorRef.current.dateKey === dateKey &&
-      afterDaySignature === beforeDaySignature
-    ) {
-      setIsDirty(false);
-      setRecords((current) => {
-        const next = { ...current };
-        const saved = savedRecords[dateKey];
-        if (saved) {
-          next[dateKey] = { ...saved };
-        } else {
+    await executeDiscardTimesheetDraft({
+      clearEditorDraftAction,
+      dateKey,
+      getLatestSnapshot: () => ({
+        dateKey: latestEditorRef.current.dateKey,
+        day: latestDayRef.current
+      }),
+      known,
+      onClearedLocal: (restoreConfirmed) => {
+        draftEpochRef.current += 1;
+        setTodayDrafts((current) => {
+          const next = { ...current };
           delete next[dateKey];
+          return next;
+        });
+        setDraftSaveState("idle");
+        setDraftSaveError("");
+        setDraftSavedAt("");
+        if (restoreConfirmed) {
+          setIsDirty(false);
+          setRecords((current) => {
+            const next = { ...current };
+            const saved = savedRecords[dateKey];
+            if (saved) {
+              next[dateKey] = { ...saved };
+            } else {
+              delete next[dateKey];
+            }
+            return next;
+          });
         }
-        return next;
-      });
-    }
+      },
+      onError: (message) => {
+        setDraftSaveState("error");
+        setDraftSaveError(message);
+      },
+      onTombstone: (tombstone) => {
+        draftTombstonesRef.current[dateKey] = tombstone;
+      }
+    });
   }
 
   function applySavedDays(days: TimesheetDayDraft[]) {
