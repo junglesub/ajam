@@ -10,7 +10,55 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-11-today-planning-design.md`
 
-**Execution status (2026-11-17):** Antigravity implemented the feature and corrections. Codex independently reviewed the actual code and recorded GO for code verification in `2026-11-17-today-independent-review.md` Round 13. Authenticated visual acceptance and real Notion credentials are unverified. The checklists below retain the original implementation plan. Final evidence and limitations are maintained in the review record and workflow document.
+**Execution status (2026-11-18):** The expanded Today/timesheet draft integration is **NO-GO**. Round 13 accepted an earlier implementation; Rounds 14–23 record the later corrections and outstanding issues. Latest source is `b89c12e`, which arrived while this remaining-work summary was prepared. Codex inspected its diff for this summary, but its completed verification report and final connected-path acceptance remain pending. The current checklist below supersedes the historical unchecked implementation tasks later in this document.
+
+## 남은 수정·검증 체크리스트 (2026-11-18)
+
+기준은 `d22664e`까지의 독립 검수와 `b89c12e`의 추가 변경 확인이다. 실제 개발은 Antigravity, 기획·문서와 독립 판정은 Codex가 담당한다. 사용자 요청에 따라 수정 단위별 커밋을 유지한다.
+
+### 1. 휴가 저장 완료 처리에서 새 입력 보호 유지 — 코드 수정 필요
+
+- [ ] `timesheet-workspace.tsx`의 `applyVacationRange`와 `saveConnectedVacationPrompt` 성공 처리에 남은 무조건적인 `setIsDirty(false)`를 제거하거나, 실제 확정 결과의 원본 비교 판정에 따르도록 바꾼다.
+- [ ] 하위 `recordConfirmedDraftResult`가 저장 중 입력을 보존한 경우 상위 함수가 그 결정을 뒤집지 않게 한다. 확정한 원본 그대로라면 canonical 항목·ID를 반영하고 저장 완료로 처리하며, 이후 입력이 있으면 화면과 미저장 경고를 유지한다.
+- [ ] 기간·연결 휴가의 일부 날짜만 성공했을 때 성공 날짜와 나머지 초안·오류 상태를 구분해 보존한다.
+
+완료 기준은 휴가 저장 대기 중 업무 내용·요약문을 수정한 뒤 성공 응답이 와도 새 입력과 dirty 상태가 남고, 변경이 없으면 정상적으로 저장 완료가 되는 것이다.
+
+### 2. 저장 전 원본과 요청용 변경값의 비교 분리 — 일부 반영, 보완 필요
+
+- [x] `b89c12e`에서 일반 업무 저장은 정규화된 payload 대신 원본 signature를 별도 전달하고, 반환된 main canonical day에 `withClientIds`를 적용했다. `hoursTouched=false`가 정규화 과정에서 빠지는 경우의 회귀 assertion도 추가됐다. 최종 판정은 아직 하지 않았다.
+- [ ] main `saveSelectedDraft`는 현재 `dayToSave`의 signature를 전달한다. `dayToSave`에는 `options.vacationStatus`가 이미 반영될 수 있으므로, 실제 화면 원본 `selectedDay`를 요청 전용 상태 변경·정규화·비동기 대기 전에 캡처해 비교한다. 요청으로 바꾸려는 휴가 상태와 사용자가 대기 중 추가로 고친 입력을 구분한다.
+- [ ] 기간·연결 휴가에서 비교한 원본과 실제 payload를 만든 원본이 동일한 시점의 같은 day인지 확인한다. 특히 이전 `sourceDay`로 요청을 만들면서 최신 ref로 signature만 캡처해 새 입력을 덮어쓰지 않도록 한다.
+- [ ] `saveEntryAndNotify`의 원본 signature 누락 시 sanitized entry로 되돌아가는 기본값이 잘못 사용될 호출 경로가 없는지 확인하고, 필요하면 원본 인자를 필수로 만든다.
+
+완료 기준은 `hoursTouched`의 true/false, 요청에만 반영한 휴가 상태·AI 옵션, 새로 생성한 휴가 항목 ID 때문에 변경 없는 저장을 새 입력으로 오인하지 않으며, 실제 대기 중 입력은 보존하는 것이다.
+
+### 3. 공통 함수와 실제 화면 호출을 잇는 회귀 검증 — 검증 필요
+
+- [ ] 일반 업무 저장에서 원본과 payload가 실제로 다름을 확인한 뒤, 추가 입력이 없으면 canonical ID 반영·dirty 해제·pending badge 제거·초안 재생성 방지까지 검증한다.
+- [ ] 요청 전용 휴가 상태 변경 및 기간·연결 휴가에서 생성된 새 항목 ID가 있어도, 변경 없는 원본은 정상 반영되는지 검증한다.
+- [ ] 실제 저장 대기 중 새 업무 내용·요약문·휴가 수정이 생긴 경우, 하위 helper와 상위 성공 처리 전체를 지난 뒤에도 입력과 dirty가 유지되는지 검증한다. helper callback을 모두 mock해 실제 workspace 연결 오류를 가리지 않는다.
+- [ ] 확정 후 pending draft의 ref와 React 상태가 함께 없어지고, 반환된 tombstone revision/fingerprint로 다음 편집·자동 저장이 이어지는지 main/range/connected 경로를 확인한다.
+- [ ] 새 수정에 맞는 테스트, 영향받은 패키지의 `tsc --noEmit`, 변경 파일 ESLint, `git diff --check`의 완료 결과를 남긴다. 시작만 한 검사는 통과로 기록하지 않는다. Codex는 worker의 동일 검사를 반복 실행하지 않고 결과·실제 diff·관련 호출 경로를 독립 검토한다.
+
+### 4. 최종 인수와 문서 마감 — 판정 대기
+
+- [ ] 최신 worker 완료 결과를 my-orch에 정상 등록하고, 최신 커밋 전체를 Codex가 독립 검수한다. 남은 차단 결함이 없어야 GO로 바꾼다.
+- [ ] 검수 문서, 이 계획, `docs/timesheet-workflow.md`, `docs/roadmap.md`의 상태와 검증 근거를 최종 커밋 기준으로 맞추고 커밋한다. 이전 라운드는 이력으로 보존한다.
+- [ ] 로그인 후 시각·브라우저 상호작용과 실제 Notion 계정의 권한/댓글 동작은 사용자 확인 항목으로 남긴다. 이 확인을 수행한 것처럼 기록하지 않는다.
+
+제품 build, 배포, push는 이번 인수 작업으로 실행하지 않는다. 브라우저 자동화는 사용자 담당 정책을 유지하고, DB 검증은 임시 SQLite·합성 계정, 외부 댓글 쓰기는 mock으로 진행한다.
+
+### 이미 반영된 주요 수정
+
+- 저장된 업무 초안 복원 시 기존 휴가·공휴일·하루 메타데이터 보존.
+- 확정본 fingerprint와 draft revision을 확인하는 원자적 full-day 저장 및 matching draft clear.
+- 버전 확인 없는 일반 서버 초안 삭제 제거, 확정/삭제 반환 버전 보관과 실제 호출 연결.
+- 삭제 대기 중 최신 전체 day를 다시 읽어 업무·요약문 입력 보존.
+- 순차 자동 저장, 일부 필드 미저장 상태 유지, 동일 업무의 반복 자동 저장 방지, 미저장 day 필드가 남으면 이동 확인.
+- AI 결과 반영 시 최신 선택 날짜·dirty·draft 참조 사용.
+
+이 목록은 반영된 수정의 요약이며, 전체 GO 판정을 뜻하지 않는다. 상세 근거는 [독립 검수 기록](2026-11-17-today-independent-review.md)의 Round 14 이후를 따른다.
 
 ## Global Constraints
 

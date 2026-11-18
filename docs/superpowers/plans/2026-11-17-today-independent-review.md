@@ -1,6 +1,6 @@
 # Today workspace independent review
 
-Current verdict after `d22664e` on 2026-11-18 is **NO-GO**. Rounds 14–23 below supersede the Round 13 acceptance for the expanded implementation. Caller wiring and pending-state cleanup are corrected; original-vs-sanitized confirmation signatures still misclassify an unchanged normal save. Coordinator review changes documentation only.
+Current verdict is **NO-GO** as of the 2026-11-18 remaining-work checkpoint. `b89c12e` arrived after Round 23 and was inspected for the checklist, but its final connected-path acceptance is pending. See the current correction checklist in `2026-11-17-today-workspace.md`; Rounds 14–23 below retain the finding history. Coordinator review changes documentation only.
 
 ## Round 1
 
@@ -254,3 +254,9 @@ Codex read run `r_610d8da6bcfc` directly and inspected `d22664e`. Actual range/c
 **NO-GO remains for a normal-save regression.** Main `submittedSig` is computed from sanitized `entry`, while `consumeGuardedSaveResult` compares against the latest unsanitized screen day. `sanitizeDayForSave` removes `hoursTouched`, so `false`/`true` in screen entries differs from absent in the submitted payload even without any user edits. Codex invoked the actual sanitizer/signature/consume helper: unchanged work with `hoursTouched=false` produced `canonicalAdopted=false`. With the unconditional clean removed, this leaves a successful unchanged save dirty and can autosave a new draft of the just-confirmed day. Scheduled AI flag overrides and constructed vacation days similarly differ from the source snapshot without representing a new user edit.
 
 Capture the original editable source-day signature before sanitization, request-only overrides and awaits, and compare latest input to that source signature. Main/range/connected handlers all need this source/payload distinction. Canonical main records should use the same `withClientIds` normalization as existing/range saved-day application. Audit/remove the remaining unconditional success dirty resets in the outer range/connected save handlers so a newer-input decision is not undone. Add a regression using the real sanitizer and normal hoursTouched fields, plus actual later-edit preservation; do not only mock equal signatures.
+
+## Remaining-work checkpoint requested by user (2026-11-18)
+
+The user requested that outstanding corrections be summarized and committed. During read-only preparation, HEAD advanced to `b89c12e` with a clean worktree. Codex inspected its diff for accurate task status, without rerunning tests or treating it as final acceptance. It passes an original main signature separately, normalizes main canonical results with `withClientIds`, captures range/connected raw signatures and adds one real-sanitizer assertion for `hoursTouched=false`.
+
+The remaining actionable source items are the unconditional dirty resets in `applyVacationRange`/`saveConnectedVacationPrompt` and main signature capture from `dayToSave` after `options.vacationStatus` can already alter the raw source. Source/payload consistency in connected saves and whole-caller regressions remain to verify. The full prioritized checklist, completion criteria, already-applied corrections and user-owned acceptance boundaries are now in `2026-11-17-today-workspace.md`; workflow/roadmap pointers are synchronized. This is a documentation checkpoint, not a source edit or GO decision. The existing Antigravity correction assignment is not cancelled or paused by this documentation request.

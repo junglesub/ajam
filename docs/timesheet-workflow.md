@@ -2,9 +2,10 @@
 
 ## Final review status (2026-11-18)
 
-- The expanded Today/timesheet draft implementation at `a0bbc09` is **NO-GO**, superseding the 2026-11-17 code acceptance for the earlier scope. Five reproduced issues remain: mixed-day vacation loss on draft-date selection/save, stalled autosave after editing during a request, stale draft confirmation overwriting newer confirmed work, stale discard clearing a newer draft, and work-only autosave marking unsaved day metadata clean.
-- All six workspace typechecks, changed-file ESLint and 213 existing test cases passed. Independent probes of the actual production functions and isolated SQLite persistence reproduced the findings; current tests do not cover these integration paths. Details, commands, minimal correction directions and evidence are in Round 14 of `docs/superpowers/plans/2026-11-17-today-independent-review.md`.
-- This review changes documentation only. Product build, browser automation and live Notion checks were not run; browser/visual acceptance remains user-owned.
+- Current expanded Today/timesheet status is **NO-GO**. Earlier issues have received incremental corrections through `d22664e`; `b89c12e` additionally separates raw/sanitized main signatures and normalizes canonical main results, but its final connected-path acceptance is pending. The previous Round 13 GO applies only to the earlier scope.
+- Remaining work is to preserve the confirmation adoption decision through outer vacation-success handlers, compare against the original day before request-only vacation status changes, and verify source/payload consistency plus real caller integration. The actionable checklist and acceptance criteria are maintained in `docs/superpowers/plans/2026-11-17-today-workspace.md` under `남은 수정·검증 체크리스트`.
+- Historical verification: the initial final review ran 213 existing cases and all six typechecks/lint successfully; later worker reports cover new store/autosave/discard/confirmation regressions and affected checks. Passing historical counts are not a claim that the newest commit is fully accepted. Rounds 14–23 of `docs/superpowers/plans/2026-11-17-today-independent-review.md` retain each finding and its evidence.
+- This remaining-work checkpoint edits documentation only and does not rerun tests. Product build, browser automation and live Notion checks were not run; browser/visual acceptance remains user-owned.
 
 ## Today Workspace Lifecycle (2026-11-17)
 
