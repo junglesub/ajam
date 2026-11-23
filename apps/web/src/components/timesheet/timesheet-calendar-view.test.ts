@@ -11,7 +11,7 @@ function render(vacations: ReturnType<typeof createVacationDay>["entries"]) {
   const day = { ...createVacationDay(dateKey, "휴가", 8), entries: vacations };
   const row = rowFromDraft(dateKey, dateKey, day, true);
   return renderToStaticMarkup(createElement(CalendarView, {
-    celebratingDateKey: "", rows: { [dateKey]: row }, selectedDateKey: dateKey,
+    celebratingDateKey: "", pendingDraftDates: new Set<string>(), rows: { [dateKey]: row }, selectedDateKey: dateKey,
     setSelectedDateKey: () => {}, todayKey: dateKey, vacationColors: {},
     weeks: [[{ dateKey, day: 28, weekday: 3 }]]
   }));

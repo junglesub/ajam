@@ -1,5 +1,30 @@
 # Timesheet Workflow
 
+**2026-11-24 code acceptance is GO.** Linked vacation saves validate the confirmed source as well as any known draft baseline and revision. They preserve work drafts on other dates, retain stale-draft conflicts, and avoid replacing more recent editor input. See the [independent verification record](superpowers/plans/2026-11-17-today-independent-review.md) for evidence and the remaining browser and live Notion checks. The checkpoint below is historical.
+
+## Final review status (2026-11-18)
+
+- Current expanded Today/timesheet status is **NO-GO**. Earlier issues have received incremental corrections through `d22664e`; `b89c12e` additionally separates raw/sanitized main signatures and normalizes canonical main results, but its final connected-path acceptance is pending. The previous Round 13 GO applies only to the earlier scope.
+- Remaining work is to preserve the confirmation adoption decision through outer vacation-success handlers, compare against the original day before request-only vacation status changes, and verify source/payload consistency plus real caller integration. The actionable checklist and acceptance criteria are maintained in `docs/superpowers/plans/2026-11-17-today-workspace.md` under `남은 수정·검증 체크리스트`.
+- Historical verification: the initial final review ran 213 existing cases and all six typechecks/lint successfully; later worker reports cover new store/autosave/discard/confirmation regressions and affected checks. Passing historical counts are not a claim that the newest commit is fully accepted. Rounds 14–23 of `docs/superpowers/plans/2026-11-17-today-independent-review.md` retain each finding and its evidence.
+- This remaining-work checkpoint edits documentation only and does not rerun tests. Product build, browser automation and live Notion checks were not run; browser/visual acceptance remains user-owned.
+
+## Today Workspace Lifecycle (2026-11-17)
+
+- `/today` (`today-workspace.tsx` + `TodayDraftLifecycle`) manages per-user, per-date incomplete work drafts in `TodayWorkDraft` with monotonic `revision` and SHA-256 `confirmedBaselineUpdatedAt` fingerprinting.
+- Autosave requests are serialized per date: edits during an in-flight save queue a follow-up save using the returned `revision`.
+- Day confirmation cancels pending autosave timers, flushes any dirty/in-flight draft first, validates `expectedDraftRevision` and `confirmedBaselineUpdatedAt` atomically inside `prisma.$transaction` via `saveTimesheetDayInTransaction` + `listTimesheetDaysInTransaction`, preserves non-`WORK` entries and day metadata, soft-clears the draft, and runs `syncNotionWorkHoursForPages` (surfacing any `notionSyncError` warning).
+- Unsaved edits are protected on `beforeunload` and in-app link navigation; browser-local midnight transitions flush the previous date before switching.
+- New work tabs reuse previous-project and weekday/previous-work card defaults. Fixed weekday hours and source metadata are retained. Shared domain allocation splits the remaining time. To return a manually edited card to automatic allocation, click `자동` next to its time input.
+- Linked cards use a distinct elevated surface inside the work panel and keep the title and allocation on one line. A comment load error sits above the editor with retry. History count appears after a successful read, reset appears only while the draft is dirty, and update appears only when the loaded comment can be edited. The latest comment supports `댓글 추가` or `업데이트`, while the native `<dialog>` history modal uses responsive dark-mode-aware padding/scrolling, genuine backdrop-click dismissal (ignoring inside clicks and drag-outs), Escape, and focus restoration. Per-card dirty text, original comment targets and history composer text survive tab changes and asynchronous refresh. Successful mutations update shared canonical data immediately, including clean editor selection when a follow-up read fails.
+- In `오늘 전체 요약`, each project row is a keyboard-accessible button that selects its corresponding work tab by index (supporting duplicate project names), shows active state, and scrolls the selected editor into view on mobile while preserving input.
+- The Today summary highlights the total and shows `하루 합계가 8시간을 초과했습니다.` when the combined hours across all work tabs exceed eight, matching the timesheet editor. The warning updates as hours change.
+- The `×` on the right of each Today work tab and the left of each summary row opens the shared in-app deletion modal with that entry’s name. Deleting the active tab selects an adjacent tab, and deleting the last tab leaves one blank tab. Deletion updates the summary and autosaves with other draft edits. Existing confirmed records change when the revised draft is confirmed.
+- The Today header shows one autosave indicator at a time. Saving, error, and conflict messages take priority over `마지막 임시 저장`. The timestamp comes from acknowledged saves or restored drafts and resets on date change, confirmation, or discard. During the debounce interval, the timestamp is muted and the saved checkmark is hidden.
+- Revision-checked conflict recovery can discard the stale draft and reload confirmed work. A rejected discard or failed copy keeps current input and displays feedback.
+- Independent code review is GO on 2026-11-17. Antigravity reports `today-store.test.ts` and `notion-comments.test.ts` (2 total), `today-draft-lifecycle.test.ts` and `today-comment-store.test.ts` (4 total) passed. Codex independently completed six workspace no-emit typechecks and changed-file ESLint with exit 0, inspected the final source, and verified deferred-save/duplicate-confirm behavior through the production lifecycle. Final affected web typecheck, lint and diff check are recorded passed by Antigravity. Details are in `docs/superpowers/plans/2026-11-17-today-independent-review.md` Round 13.
+- Authenticated browser/visual acceptance and real Notion credentials remain unverified. No product build was run.
+
 ## Implementation ownership (2026-10-28)
 
 - `timesheet-workspace.tsx` coordinates selected dates, drafts, save/delete and cross-view state. Calendar, list and daily editor rendering live in `timesheet-calendar-view.tsx`, `timesheet-list-view.tsx` and `timesheet-daily-editor.tsx`; modal UI is grouped by feature.
@@ -35,12 +60,17 @@ The timesheet page supports multiple daily records. A day can contain work, vaca
 
 ## Daily Entries
 
+- The root URL opens `/today`, carrying that destination through sign-in if needed.
 - A day can have multiple entries.
 - Work entries store project, hours, content, and English translation.
 - Vacation entries store vacation type and hours.
 - Holiday entries store holiday name and use `0h` by default.
 - The day-level short version is separate from entries and is used for calendar summary fallback and the list view's date summary band.
 - Save replaces the selected date with the full current day draft.
+- Linked Notion cards expose the work-day count as a JavaScript number so the calendar editor can serialize loaded work when checking for draft changes.
+- Today and the calendar editor display draft times as `HH:mm` for the first 24 hours and `N일 전` afterward. Hover shows the exact local timestamp (`yyyy/mm/dd HH:mm:ss`). The calendar editor also shows `클릭하여 삭제`, and clicking the timestamp discards the draft. Draft controls are hidden while the day-level save is in progress.
+- Work drafts save automatically. The manual `임시 저장` button appears alongside the error only when saving a work draft fails, and retries that save.
+- The calendar editor allows work drafts for today and dates with no saved record. On another date with a saved record, new edits require explicit `저장`, and leaving or closing the dirty editor opens the existing confirmation popup. Any draft already stored for that date can still be saved as final or discarded.
 - Delete removes the saved date, then recreates the default editor draft for the selected date.
 
 ## Default Drafts

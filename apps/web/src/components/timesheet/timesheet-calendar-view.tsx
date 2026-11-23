@@ -152,22 +152,23 @@ function vacationBadgeLabel(status: TimesheetStatus, vacationStatus: VacationSta
   return statusLabel[status];
 }
 
-function StatusBadge({ status, vacationStatus = "CONFIRMED", publicLeave = false }: { status: TimesheetStatus; vacationStatus?: VacationStatus; publicLeave?: boolean }) {
+function StatusBadge({ pendingDraft = false, publicLeave = false, status, vacationStatus = "CONFIRMED" }: { pendingDraft?: boolean; publicLeave?: boolean; status: TimesheetStatus; vacationStatus?: VacationStatus }) {
   if (status === "FUTURE") {
     return null;
   }
 
   const usesOutlineDot = status === "VACATION" && vacationStatus === "TEMPORARY";
+  const draftLabel = pendingDraft && status === "MISSING";
 
   return (
-    <Badge className={usesOutlineDot ? "vacation-temporary-badge" : undefined} tone={badgeToneByStatus[status]}>
+    <Badge className={usesOutlineDot ? "vacation-temporary-badge" : undefined} tone={draftLabel ? "gray" : badgeToneByStatus[status]}>
       <span className={cn("mr-1 size-1.5 rounded-full", usesOutlineDot ? "border border-current bg-transparent" : "bg-current")} />
-      {vacationBadgeLabel(status, vacationStatus, publicLeave)}
+      {draftLabel ? "임시저장" : vacationBadgeLabel(status, vacationStatus, publicLeave)}
     </Badge>
   );
 }
 
-function CalendarStatusBadges({ row }: { row: TimesheetRow }) {
+function CalendarStatusBadges({ pendingDraft = false, row }: { pendingDraft?: boolean; row: TimesheetRow }) {
   const vacations = row.entries.filter((entry) => entry.kind === "VACATION");
   const deducting = vacations.filter((entry) => entry.vacationDeductsAllowance !== false);
   const nonDeducting = vacations.filter((entry) => entry.vacationDeductsAllowance === false);
@@ -179,7 +180,7 @@ function CalendarStatusBadges({ row }: { row: TimesheetRow }) {
         : <Badge className={deducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "vacation-temporary-badge" : undefined} tone="blue"><span className={cn("size-1.5 rounded-full", deducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "border border-current bg-transparent" : "bg-current")} /></Badge>
         : null}
       {nonDeducting.length > 0 ? <StatusBadge publicLeave status="VACATION" vacationStatus={nonDeducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "TEMPORARY" : "CONFIRMED"} /> : null}
-      {row.status !== "VACATION" ? <StatusBadge status={row.status} /> : null}
+      {row.status !== "VACATION" ? <StatusBadge pendingDraft={pendingDraft} status={row.status} /> : null}
     </div>
   );
 }
@@ -195,6 +196,7 @@ function getTimesheetVacationColorStyle(color: VacationColor): CSSProperties | u
 
 export function CalendarView({
   celebratingDateKey,
+  pendingDraftDates,
   rows,
   selectedDateKey,
   setSelectedDateKey,
@@ -203,6 +205,7 @@ export function CalendarView({
   weeks
 }: {
   celebratingDateKey: string;
+  pendingDraftDates: ReadonlySet<string>;
   rows: Record<string, TimesheetRow>;
   selectedDateKey: string;
   setSelectedDateKey: (dateKey: string) => void;
@@ -278,9 +281,12 @@ export function CalendarView({
               const publicLeaveLabel = nonDeducting.length > 0
                 ? vacationBadgeLabel("VACATION", nonDeducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "TEMPORARY" : "CONFIRMED", true)
                 : "";
-              const primaryLabel = row && (row.status !== "VACATION" || deducting.length > 0)
-                ? vacationBadgeLabel(row.status, deducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "TEMPORARY" : "CONFIRMED")
-                : "";
+              const pendingDraft = pendingDraftDates.has(cell.dateKey) && row?.status === "MISSING";
+              const primaryLabel = pendingDraft
+                ? "임시저장"
+                : row && (row.status !== "VACATION" || deducting.length > 0)
+                  ? vacationBadgeLabel(row.status, deducting.some((entry) => entry.vacationStatus === "TEMPORARY") ? "TEMPORARY" : "CONFIRMED")
+                  : "";
               const vacationMixOverlayStyle = getVacationMixOverlayStyle(row);
               const partialVacationOnlyOverlayStyle = getPartialVacationOnlyOverlayStyle(row);
               const isPartialVacationOnly = isPartialVacationOnlyCell(row);
@@ -333,7 +339,7 @@ export function CalendarView({
                       {row && hasTimeMismatch(row) ? <TimeMismatchIcon hours={row.hours} /> : null}
                       {row?.hasNotionCardWarning ? <NotionCardWarningIcon /> : null}
                     </span>
-                    {row ? <div className="hidden sm:block"><CalendarStatusBadges row={row} /></div> : null}
+                    {row ? <div className="hidden sm:block"><CalendarStatusBadges pendingDraft={pendingDraft} row={row} /></div> : null}
                   </div>
                   <p className="relative z-10 truncate text-center text-[10px] font-semibold text-slate-500 sm:hidden">
                     {[primaryLabel, publicLeaveLabel].filter(Boolean).join(" · ")}

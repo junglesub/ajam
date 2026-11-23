@@ -96,10 +96,17 @@ type DailyEditorProps = {
   };
   persistence: {
     canDelete: boolean;
+    canDiscardDraft: boolean;
+    canRetryDraftSave: boolean;
     deleteError: string;
     deleteState: "deleting" | "error" | "idle";
     isSaveDisabled: boolean;
+    draftSaveError: string;
+    draftSavedAt: { label: string; timestamp: string } | null;
+    draftSaveState: "error" | "idle" | "saved" | "saving";
+    onDiscardDraft: () => void;
     onSave: (event: MouseEvent<HTMLButtonElement>) => void;
+    onSaveDraft: () => void;
     onSaveWithVacationAction: (action: DailyEditorSaveAction) => void;
     onRequestDelete: () => void;
     primaryVacationSaveAction: DailyEditorSaveAction | undefined;
@@ -377,9 +384,35 @@ export function DailyEditor({
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="text-right">
-                      <p className={cn("text-sm font-medium", persistence.saveState === "error" || persistence.deleteState === "error" ? "text-red-600" : "text-slate-500")}>
-                        {persistence.deleteState === "error" ? persistence.deleteError : persistence.saveState === "saved" ? "저장됨" : persistence.saveState === "saving" ? "저장 중" : persistence.saveError}
-                      </p>
+                      {persistence.saveState !== "saving" && persistence.draftSaveState === "saving" ? (
+                        <p className="text-xs font-normal text-slate-400">
+                          임시 저장 중
+                        </p>
+                      ) : persistence.saveState !== "saving" && persistence.canDiscardDraft ? (
+                        <button
+                          aria-label={`임시 저장 삭제 ${persistence.draftSavedAt?.timestamp ?? ""}`.trim()}
+                          className="cursor-pointer rounded text-xs text-slate-500 transition-colors hover:text-red-700 hover:underline focus-visible:text-red-700 focus-visible:underline"
+                          onClick={persistence.onDiscardDraft}
+                          title={persistence.draftSavedAt ? `${persistence.draftSavedAt.timestamp}\n클릭하여 삭제` : "클릭하여 삭제"}
+                          type="button"
+                        >
+                          {persistence.draftSavedAt ? `임시 저장 ${persistence.draftSavedAt.label}` : "임시 저장됨"}
+                        </button>
+                      ) : null}
+                      {persistence.saveState !== "saving" && persistence.draftSaveState === "error" ? (
+                        <p className="text-sm font-medium text-red-600" role="alert">{persistence.draftSaveError}</p>
+                      ) : null}
+                      {persistence.deleteState === "error" || persistence.saveState !== "idle" ? (
+                        <p className={cn("text-sm font-medium", persistence.saveState === "error" || persistence.deleteState === "error" ? "text-red-600" : "text-slate-500")}>
+                          {persistence.deleteState === "error"
+                            ? persistence.deleteError
+                            : persistence.saveState === "error"
+                              ? persistence.saveError
+                              : persistence.saveState === "saving"
+                                ? "저장 중"
+                                : "저장됨"}
+                        </p>
+                      ) : null}
                     </div>
                     {day.selectedEntry?.kind === "VACATION" ? (
                       <>
@@ -403,10 +436,17 @@ export function DailyEditor({
                         ) : null}
                       </>
                     ) : (
-                      <Button className="h-10 px-4" disabled={persistence.isSaveDisabled} onClick={persistence.onSave}>
-                        {persistence.saveState === "saving" ? "저장 중" : "저장"}
-                        <ShortcutHint keys={[persistence.shortcutModifierKey, "↵"]} />
-                      </Button>
+                      <>
+                        {day.selectedEntry?.kind === "WORK" && persistence.canRetryDraftSave && persistence.saveState !== "saving" ? (
+                          <Button className="h-10 px-4" disabled={persistence.isSaveDisabled} onClick={persistence.onSaveDraft} type="button" variant="secondary">
+                            임시 저장
+                          </Button>
+                        ) : null}
+                        <Button className="h-10 px-4" disabled={persistence.isSaveDisabled} onClick={persistence.onSave}>
+                          {persistence.saveState === "saving" ? "저장 중" : "저장"}
+                          <ShortcutHint keys={[persistence.shortcutModifierKey, "↵"]} />
+                        </Button>
+                      </>
                     )}
                   </div>
                 </div>

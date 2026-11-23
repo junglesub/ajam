@@ -1,9 +1,11 @@
 "use client";
 
 import { createClientId, createFutureDraftForDate, extractVacationRangeInitialState, withClientIds } from "@/lib/timesheet-drafts";
+import { useDraftSavedTime } from "@/lib/use-draft-saved-time";
 
 import type { DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 
 import {
@@ -42,7 +44,15 @@ import {
 import { AppLoadingOverlay, AppLoadingScreen } from "@/components/app-loading-screen";
 import { NotionCardPickerModal } from "./notion-card-picker-modal";
 import { addBusinessDays, addDays, getBusinessDateKeysInRange, getDateKeyMonthCursor, getDefaultSelectedDateForMonth, getInclusiveDateSpan } from "./timesheet-date-utils";
-import { buildDraftsFromMonthData, buildInitialDrafts, buildSelectedEntryIds, createDraftForDate, createEntryForDate, findPreviousProject, hasHolidayMarker, hasWorkContent, isAutoProjectOnlyDraft, isDefaultFutureVacationDraft, rebalanceDefaultWorkHours, rowFromDraft, sanitizeDayForSave, type TimesheetMonthData } from "./timesheet-draft-utils";
+import {
+  executeFlushEditorDraft,
+  executeSaveCurrentWorkDraft,
+  shouldScheduleWorkDraftAutosave,
+  workEntriesSignature
+} from "./timesheet-draft-autosave";
+import { applyExternalSavedDays, applyPreservedDraftVacationResult, consumeGuardedSaveResult } from "./timesheet-draft-confirm";
+import { daySignature, executeDiscardTimesheetDraft } from "./timesheet-draft-discard";
+import { buildDraftsFromMonthData, buildInitialDrafts, buildSelectedEntryIds, createDraftForDate, createEntryForDate, findPreviousProject, hasHolidayMarker, hasWorkContent, isAutoProjectOnlyDraft, isDefaultFutureVacationDraft, overlayTodayDrafts, rebalanceDefaultWorkHours, rowFromDraft, sanitizeDayForSave, type TimesheetMonthData, type TodayWorkDraftSnapshot } from "./timesheet-draft-utils";
 import { allocateDefaultNotionCards, mergeNotionCardSnapshot, type NotionWeeklyDefaultCard } from "./timesheet-notion-recommendation";
 import { findConnectedVacationDates, updateVacationEntryForConnectedSave } from "./timesheet-vacation-utils";
 import { useTimesheetAi, shouldPromptForRewrite, isScheduledOverwrite, isScheduledCleanupPending, type TimesheetAiCleanupResult, type TimesheetAiRewriteRequest, type AiCleanupOptions } from "./use-timesheet-ai";
@@ -73,7 +83,9 @@ type TimesheetDeleteResult = {
 };
 
 type TimesheetSaveResult = {
+  confirmedUpdatedAt?: string;
   day: TimesheetDayDraft;
+  draftRevision?: number;
   notionSyncError: string;
 };
 
@@ -84,6 +96,7 @@ type VacationRangeSaveState = "idle" | "saving" | "error";
 type PendingNavigation =
   | { kind: "closeEditor" }
   | { kind: "date"; dateKey: string; entryClientId?: string }
+  | { kind: "link"; href: string }
   | { delta: number; kind: "month" }
   | { kind: "today" };
 
@@ -105,6 +118,10 @@ type VacationSaveAction = {
 type TimesheetWorkspaceProps = {
   addProjectAction: (name: string) => Promise<string>;
   createUserAction: (params: { email?: string; password: string; role: UserRole; username: string }) => Promise<ManagedUser>;
+  clearEditorDraftAction: (
+    dateKey: string,
+    expectedRevision?: number
+  ) => Promise<{ status: "cleared" | "conflict" }>;
   currentUser: ManagedUser;
   deleteEntryAction: (dateKey: string) => Promise<TimesheetDeleteResult>;
   findPreviousNotionCardsAction: (dateKey: string) => Promise<TimesheetEntryNotionCardDraft[]>;
@@ -127,7 +144,21 @@ type TimesheetWorkspaceProps = {
   resetAllHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   resetHolidayCacheAction: (year: number, monthIndex: number) => Promise<TimesheetMonthData>;
   runAiCleanupAction: (dateKey: string, options?: AiCleanupOptions) => Promise<TimesheetAiCleanupResult>;
-  saveEntryAction: (entry: TimesheetDayDraft) => Promise<TimesheetSaveResult>;
+  saveEditorDraftAction: (params: {
+    confirmedBaselineUpdatedAt?: string;
+    dateKey: string;
+    entries: TimesheetEntryDraft[];
+    expectedRevision?: number;
+  }) => Promise<{ draft: Omit<TodayWorkDraftSnapshot, "dateKey">; status: "saved" } | { status: "conflict" }>;
+  saveEntryAction: (
+    entry: TimesheetDayDraft,
+    draftGuard?: {
+      confirmedBaselineUpdatedAt?: string;
+      expectedConfirmedDay?: TimesheetDayDraft;
+      expectedDraftRevision?: number;
+      preserveActiveWorkDraft?: boolean;
+    }
+  ) => Promise<TimesheetSaveResult>;
   saveHolidayApiKeyAction: (serviceKey: string) => Promise<void>;
   testGeminiApiKeyAction: (params: { apiKey?: string; model: string }) => Promise<GeminiApiKeyTestResult>;
   testHolidayApiKeyAction: (serviceKey: string, year: number, monthIndex: number) => Promise<HolidayApiKeyTestResult>;
@@ -182,6 +213,7 @@ function mergeProjects(current: string[], projects: string[]): string[] {
 
 export function TimesheetWorkspace({
   addProjectAction,
+  clearEditorDraftAction,
   createUserAction,
   currentUser: initialCurrentUser,
   deleteEntryAction,
@@ -205,6 +237,7 @@ export function TimesheetWorkspace({
   resetAllHolidayCacheAction,
   resetHolidayCacheAction,
   runAiCleanupAction,
+  saveEditorDraftAction,
   saveEntryAction,
   saveHolidayApiKeyAction,
   testGeminiApiKeyAction,
@@ -223,9 +256,25 @@ export function TimesheetWorkspace({
   const [isCompactViewport, setIsCompactViewport] = useState(false);
   const [showFullListContent, setShowFullListContent] = useState(false);
   const [currentUser, setCurrentUser] = useState(initialCurrentUser);
-  const [records, setRecords] = useState<Record<string, TimesheetDayDraft>>(() => buildInitialDrafts(initialMonthData, todayKey));
+  const [records, setRecords] = useState<Record<string, TimesheetDayDraft>>(() => overlayTodayDrafts(buildInitialDrafts(initialMonthData, todayKey), initialMonthData.todayDrafts ?? []));
   const [savedRecords, setSavedRecords] = useState<Record<string, TimesheetDayDraft>>(() => buildDraftsFromMonthData(initialMonthData));
+  const [todayDrafts, setTodayDrafts] = useState<Record<string, TodayWorkDraftSnapshot>>(() => Object.fromEntries((initialMonthData.todayDrafts ?? []).map((draft) => [draft.dateKey, draft])));
+  const todayDraftsRef = useRef(todayDrafts);
+  const draftTombstonesRef = useRef<Record<string, { confirmedBaselineUpdatedAt: string; revision: number }>>({});
+  const draftEpochRef = useRef(0);
+  const latestEditorRef = useRef({ dateKey: "", entries: [] as TimesheetEntryDraft[] });
+  const latestDayRef = useRef<TimesheetDayDraft | undefined>(undefined);
+  const latestSavedRecordsRef = useRef(savedRecords);
+  latestSavedRecordsRef.current = savedRecords;
+  const latestSelectedDateKeyRef = useRef(selectedDateKey);
+  latestSelectedDateKeyRef.current = selectedDateKey;
+  const latestIsDirtyRef = useRef(false);
+  const lastSavedWorkSignatureRef = useRef<Record<string, string>>({});
+  const draftSaveChainRef = useRef(Promise.resolve());
+  todayDraftsRef.current = todayDrafts;
   const [savedEntryDateKeys, setSavedEntryDateKeys] = useState(() => new Set(initialMonthData.entries.map((entry) => entry.dateKey)));
+  const canUseWorkDraft = selectedDateKey === todayKey || !savedEntryDateKeys.has(selectedDateKey);
+  const router = useRouter();
   const [celebratingDateKey, setCelebratingDateKey] = useState("");
   const [selectedEntryIdByDate, setSelectedEntryIdByDate] = useState<Record<string, string>>(() => buildSelectedEntryIds(records));
   const workspaceViewRef = useRef<HTMLElement>(null);
@@ -245,6 +294,9 @@ export function TimesheetWorkspace({
   const [deleteError, setDeleteError] = useState("");
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+  const [draftSaveState, setDraftSaveState] = useState<"error" | "idle" | "saved" | "saving">("idle");
+  const [draftSaveError, setDraftSaveError] = useState<{ action: "save" | "discard"; message: string } | null>(null);
+  const draftSavedAt = useDraftSavedTime(todayDrafts[selectedDateKey]?.updatedAt);
   const [newProjectName, setNewProjectName] = useState("");
   const [projectAddState, setProjectAddState] = useState<ProjectAddState>("idle");
   const [projectAddError, setProjectAddError] = useState("");
@@ -401,11 +453,13 @@ export function TimesheetWorkspace({
         rememberVacationColors(monthCursor.year, monthData);
         const monthDrafts = buildDraftsFromMonthData(monthData);
         const selectedDirtyDateKey = isDirty ? selectedDateKey : "";
+        const monthTodayDrafts = monthData.todayDrafts ?? [];
+        rememberMonthDrafts(monthKey, monthTodayDrafts);
 
-        setRecords((current) => ({
+        setRecords((current) => overlayTodayDrafts({
           ...current,
           ...Object.fromEntries(Object.entries(monthDrafts).filter(([dateKey]) => dateKey !== selectedDirtyDateKey))
-        }));
+        }, monthTodayDrafts, selectedDirtyDateKey));
         setSavedRecords((current) => ({
           ...current,
           ...monthDrafts
@@ -518,11 +572,42 @@ export function TimesheetWorkspace({
 
     return entries;
   }, [calendarWeeks, listDateKeys, records, savedEntryDateKeys, savedRecords, selectedDateKey, todayKey]);
+  const pendingDraftDates = useMemo(() => new Set(Object.keys(todayDrafts)), [todayDrafts]);
   const isFutureDate = selectedDateKey > todayKey;
   const selectedDay = records[selectedDateKey] ?? (isFutureDate ? createFutureDraftForDate(selectedDateKey) : createDraftForDate(selectedDateKey, records));
   const selectedEntryIdCandidate = selectedEntryIdByDate[selectedDateKey] ?? selectedDay.entries[0]?.clientId ?? "";
   const selectedEntry = selectedDay.entries.find((entry) => entry.clientId === selectedEntryIdCandidate) ?? selectedDay.entries[0];
+  latestEditorRef.current = { dateKey: selectedDateKey, entries: selectedDay.entries };
+  latestDayRef.current = selectedDay;
+  latestIsDirtyRef.current = isDirty;
+  useEffect(() => {
+    if (!canUseWorkDraft) return;
+
+    const shouldSchedule = shouldScheduleWorkDraftAutosave({
+      currentWorkSignature: workEntriesSignature(selectedDay.entries),
+      draftSaveState,
+      isDirty,
+      isWeekend: isWeekendDateKey(selectedDateKey),
+      lastSavedWorkSignature: lastSavedWorkSignatureRef.current[selectedDateKey] ?? "",
+      saveState,
+      selectedKind: selectedEntry?.kind
+    });
+    if (!shouldSchedule) {
+      return;
+    }
+
+    const dateKey = selectedDateKey;
+    const timer = window.setTimeout(() => {
+      void flushEditorDraft(dateKey);
+    }, 800);
+
+    return () => window.clearTimeout(timer);
+  }, [canUseWorkDraft, draftSaveState, isDirty, saveState, selectedDateKey, selectedDay, selectedEntry]);
   const selectedEntryId = selectedEntry?.clientId ?? "";
+  useEffect(() => {
+    setDraftSaveState("idle");
+    setDraftSaveError(null);
+  }, [selectedDateKey]);
   const listNavigationTargets = useMemo(() => listDateKeys.flatMap((dateKey) => {
     const row = rows[dateKey]!;
 
@@ -656,6 +741,8 @@ export function TimesheetWorkspace({
     const monthKey = getMonthCacheKey(monthCursor.year, monthCursor.monthIndex);
     const monthDrafts = buildDraftsFromMonthData(monthData);
     const selectedDirtyDateKey = isDirty ? selectedDateKey : "";
+    const monthTodayDrafts = monthData.todayDrafts ?? [];
+    rememberMonthDrafts(monthKey, monthTodayDrafts);
 
     setVacationColorsByYear({ [monthCursor.year]: monthData.vacationColors });
     setHolidayWarning(monthData.holidayWarning ?? "");
@@ -677,10 +764,10 @@ export function TimesheetWorkspace({
         next[selectedDirtyDateKey] = current[selectedDirtyDateKey];
       }
 
-      return {
+      return overlayTodayDrafts({
         ...next,
         ...Object.fromEntries(Object.entries(monthDrafts).filter(([dateKey]) => dateKey !== selectedDirtyDateKey))
-      };
+      }, monthTodayDrafts, selectedDirtyDateKey);
     });
     setSavedRecords((current) => ({
       ...Object.fromEntries(Object.entries(current).filter(([dateKey]) => !dateKey.startsWith(monthKey))),
@@ -705,9 +792,75 @@ export function TimesheetWorkspace({
     finishInitialSync();
   }
 
-  async function saveEntryAndNotify(entry: TimesheetDayDraft): Promise<TimesheetSaveResult> {
+  function recordConfirmedDraftResult(
+    dateKey: string,
+    result: TimesheetSaveResult,
+    submittedDaySignature: string,
+    expectedDraftRevision?: number
+  ) {
+    const prevKnown = todayDraftsRef.current[dateKey] ?? draftTombstonesRef.current[dateKey];
+    consumeGuardedSaveResult({
+      dateKey,
+      expectedDraftRevision,
+      getLatestSnapshot: () => ({
+        dateKey: latestEditorRef.current.dateKey,
+        day: latestDayRef.current
+      }),
+      onClearPendingDraft: (key, expectedRev) => {
+        const currentDraft = todayDraftsRef.current[key];
+        if (currentDraft && (expectedRev === undefined || currentDraft.revision === expectedRev)) {
+          draftEpochRef.current += 1;
+          const nextRef = { ...todayDraftsRef.current };
+          delete nextRef[key];
+          todayDraftsRef.current = nextRef;
+          setTodayDrafts((current) => {
+            if (!current[key]) return current;
+            const next = { ...current };
+            delete next[key];
+            return next;
+          });
+        }
+      },
+      onClearWorkSignature: (key) => {
+        delete lastSavedWorkSignatureRef.current[key];
+      },
+      onSetTombstone: (key, tombstone) => {
+        draftTombstonesRef.current[key] = tombstone;
+      },
+      onUpdateConfirmedDay: (key, canonicalDay, adoptIntoRecords) => {
+        setSavedRecords((current) => ({ ...current, [key]: canonicalDay }));
+        setSavedEntryDateKeys((current) => new Set([...current, key]));
+        if (adoptIntoRecords) {
+          setRecords((current) => ({ ...current, [key]: canonicalDay }));
+          if (key === latestSelectedDateKeyRef.current) {
+            setIsDirty(false);
+            setDraftSaveState("idle");
+            setDraftSaveError(null);
+          }
+        }
+      },
+      prevKnown,
+      result,
+      submittedDaySignature
+    });
+  }
+
+  async function saveEntryAndNotify(
+    entry: TimesheetDayDraft,
+    originalSourceSignature: string
+  ): Promise<TimesheetSaveResult> {
     const affectsVacationColors = entry.entries.some((dayEntry) => dayEntry.kind === "VACATION") || savedRecords[entry.dateKey]?.entries.some((dayEntry) => dayEntry.kind === "VACATION");
-    const result = await saveEntryAction(entry);
+    await draftSaveChainRef.current;
+    const known = todayDraftsRef.current[entry.dateKey] ?? draftTombstonesRef.current[entry.dateKey];
+    const draftGuard = known
+      ? {
+          confirmedBaselineUpdatedAt: known.confirmedBaselineUpdatedAt,
+          expectedDraftRevision: known.revision
+        }
+      : undefined;
+    const result = await saveEntryAction(entry, draftGuard);
+    const normalizedDay = withClientIds(result.day);
+    recordConfirmedDraftResult(entry.dateKey, { ...result, day: normalizedDay }, originalSourceSignature, known?.revision);
     if (affectsVacationColors) {
       await refreshVacationColors([entry.dateKey]);
     }
@@ -735,6 +888,8 @@ export function TimesheetWorkspace({
   function applyLoadedVisibleMonthData({ monthData, monthKey, year }: VisibleMonthLoadResult) {
     rememberVacationColors(year, monthData);
     const monthDrafts = buildDraftsFromMonthData(monthData);
+    const monthTodayDrafts = monthData.todayDrafts ?? [];
+    rememberMonthDrafts(monthKey, monthTodayDrafts);
 
     setHolidayWarning(monthData.holidayWarning ?? "");
     setHolidayWarningMonthKeys((current) => {
@@ -748,10 +903,10 @@ export function TimesheetWorkspace({
 
       return next;
     });
-    setRecords((current) => ({
+    setRecords((current) => overlayTodayDrafts({
       ...current,
       ...monthDrafts
-    }));
+    }, monthTodayDrafts));
     setSavedRecords((current) => ({
       ...current,
       ...monthDrafts
@@ -786,6 +941,23 @@ export function TimesheetWorkspace({
 
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [isDirty]);
+
+  useEffect(() => {
+    if (!isDirty || canUseWorkDraft) return;
+
+    function confirmBeforeFollowingLink(event: MouseEvent) {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[href]") : null;
+      if (!link || (link.target && link.target !== "_self") || link.hasAttribute("download") || link.origin !== window.location.origin) return;
+      if (link.pathname === window.location.pathname && link.search === window.location.search) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setPendingNavigation({ kind: "link", href: link.href });
+    }
+
+    document.addEventListener("click", confirmBeforeFollowingLink, true);
+    return () => document.removeEventListener("click", confirmBeforeFollowingLink, true);
+  }, [canUseWorkDraft, isDirty]);
 
   function applyProjectRecommendation({ clientId, dateKey, project }: ProjectRecommendationApplication) {
     setProjects((current) => mergeProjects(current, [project]));
@@ -855,7 +1027,7 @@ export function TimesheetWorkspace({
       }
 
       const entries = day.entries.map((entry) => {
-        if (entry.clientId !== clientId || entry.kind !== "WORK" || entry.notionCards.some((card) => card.source !== "weekday_default")) {
+        if (entry.clientId !== clientId || entry.kind !== "WORK" || entry.notionCardsTouched || entry.notionCards.some((card) => card.source !== "weekday_default")) {
           return entry;
         }
 
@@ -890,7 +1062,7 @@ export function TimesheetWorkspace({
       }
 
       const entries = currentDay.entries.map((currentEntry) => {
-        if (currentEntry.clientId !== clientId || currentEntry.kind !== "WORK" || currentEntry.notionCards.length > 0) {
+        if (currentEntry.clientId !== clientId || currentEntry.kind !== "WORK" || currentEntry.notionCardsTouched || currentEntry.notionCards.length > 0) {
           return currentEntry;
         }
 
@@ -933,6 +1105,27 @@ export function TimesheetWorkspace({
     }
 
     const existing = records[dateKey];
+    const persisted = todayDraftsRef.current[dateKey];
+    const existingTouched = existing?.entries.some((entry) => entry.notionCardsTouched);
+
+    if (persisted?.entries.length && !existingTouched) {
+      const baseDay = savedRecords[dateKey] ?? existing;
+      const baseDrafts = baseDay ? { [dateKey]: baseDay } : {};
+      const restored = overlayTodayDrafts(baseDrafts, [persisted])[dateKey];
+      if (restored) {
+        setRecords((current) => {
+          if (current[dateKey]?.entries.some((entry) => entry.notionCardsTouched)) {
+            return current;
+          }
+          return { ...current, [dateKey]: restored };
+        });
+        setSelectedEntryIdByDate((selected) => ({
+          ...selected,
+          [dateKey]: restored.entries[0]?.clientId ?? ""
+        }));
+        return;
+      }
+    }
 
     if (existing?.entries.length) {
       recommendPreviousProjectForDraft(dateKey, existing);
@@ -989,6 +1182,11 @@ export function TimesheetWorkspace({
   }
 
   function runNavigation(navigation: PendingNavigation) {
+    if (navigation.kind === "link") {
+      router.push(navigation.href);
+      return;
+    }
+
     if (navigation.kind === "closeEditor") {
       setIsDailyEditorRequested(false);
       requestAnimationFrame(() => (
@@ -1048,13 +1246,73 @@ export function TimesheetWorkspace({
     resetEntryFeedback();
   }
 
+  async function flushEditorDraft(dateKey: string): Promise<boolean> {
+    const run = draftSaveChainRef.current.then(() =>
+      executeFlushEditorDraft({
+        dateKey,
+        getEpoch: () => draftEpochRef.current,
+        getKnownDraft: (key) => todayDraftsRef.current[key] ?? draftTombstonesRef.current[key],
+        getLatestSnapshot: () => ({
+          dateKey: latestEditorRef.current.dateKey,
+          day: latestDayRef.current
+        }),
+        getSavedDay: (key) => latestSavedRecordsRef.current[key],
+        onDraftSaved: (snapshot, workSig) => {
+          lastSavedWorkSignatureRef.current[dateKey] = workSig;
+          todayDraftsRef.current = { ...todayDraftsRef.current, [dateKey]: snapshot };
+          setTodayDrafts((current) => ({ ...current, [dateKey]: snapshot }));
+        },
+        onError: (message) => setDraftSaveError({ action: "save", message }),
+        onSettledUpToDate: (clearDirty) => {
+          if (clearDirty) {
+            setIsDirty(false);
+          }
+        },
+        onStateChange: (state) => {
+          setDraftSaveState(state);
+          if (state === "saving") {
+            setDraftSaveError(null);
+          }
+        },
+        saveEditorDraftAction
+      })
+    );
+    draftSaveChainRef.current = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  async function saveCurrentWorkDraft(dateKey: string): Promise<boolean> {
+    if (!canUseWorkDraft) return false;
+
+    return executeSaveCurrentWorkDraft({
+      dateKey,
+      flushEditorDraft,
+      getLatestSnapshot: () => ({
+        dateKey: latestEditorRef.current.dateKey,
+        day: latestDayRef.current
+      }),
+      getSavedDay: (key) => latestSavedRecordsRef.current[key]
+    });
+  }
+
   function requestNavigation(navigation: PendingNavigation) {
-    if (isDirty) {
-      setPendingNavigation(navigation);
+    if (!isDirty) {
+      runNavigation(navigation);
       return;
     }
 
-    runNavigation(navigation);
+    if (canUseWorkDraft && selectedEntry?.kind === "WORK" && !isSelectedWeekend) {
+      void saveCurrentWorkDraft(selectedDateKey).then((saved) => {
+        if (saved) {
+          runNavigation(navigation);
+          return;
+        }
+        setPendingNavigation(navigation);
+      });
+      return;
+    }
+
+    setPendingNavigation(navigation);
   }
 
   function confirmPendingNavigation() {
@@ -1133,24 +1391,35 @@ export function TimesheetWorkspace({
       const targetYear = year ?? monthCursor.year;
       const monthData = await loadMonthAction(targetYear, (month ?? 1) - 1);
       const monthDrafts = buildDraftsFromMonthData(monthData);
+      const monthTodayDrafts = monthData.todayDrafts ?? [];
 
       rememberVacationColors(targetYear, monthData);
+      rememberMonthDrafts(monthKey, monthTodayDrafts);
       loadedDrafts = {
         ...loadedDrafts,
         ...monthDrafts
       };
 
-      setRecords((current) => ({
+      const currentSelected = latestSelectedDateKeyRef.current;
+      const preserveSelected = latestIsDirtyRef.current;
+      const filteredMonthDrafts = preserveSelected
+        ? Object.fromEntries(Object.entries(monthDrafts).filter(([key]) => key !== currentSelected))
+        : monthDrafts;
+      const filteredMonthTodayDrafts = preserveSelected
+        ? monthTodayDrafts.filter((draft) => draft.dateKey !== currentSelected)
+        : monthTodayDrafts;
+
+      setRecords((current) => overlayTodayDrafts({
         ...current,
-        ...monthDrafts
-      }));
+        ...filteredMonthDrafts
+      }, filteredMonthTodayDrafts));
       setSavedRecords((current) => ({
         ...current,
         ...monthDrafts
       }));
       setSelectedEntryIdByDate((current) => ({
         ...current,
-        ...Object.fromEntries(Object.values(monthDrafts).flatMap((day) => day.entries[0] ? [[day.dateKey, day.entries[0].clientId]] : []))
+        ...Object.fromEntries(Object.values(filteredMonthDrafts).flatMap((day) => day.entries[0] ? [[day.dateKey, day.entries[0].clientId]] : []))
       }));
       setHolidayWarning(monthData.holidayWarning ?? "");
       setHolidayWarningMonthKeys((current) => {
@@ -1233,8 +1502,14 @@ export function TimesheetWorkspace({
 
   function hasReplaceableRecord(dateKey: string, loadedDrafts: Record<string, TimesheetDayDraft> = {}): boolean {
     const draft = getSavedDraftForVacationDate(dateKey, loadedDrafts);
+    const activeWorkDraft = todayDraftsRef.current[dateKey];
 
-    return Boolean(savedEntryDateKeys.has(dateKey) || draft?.entries.length || draft?.shortVersion.trim());
+    return Boolean(
+      savedEntryDateKeys.has(dateKey) ||
+        draft?.entries.length ||
+        draft?.shortVersion.trim() ||
+        activeWorkDraft?.entries.length
+    );
   }
 
   async function saveVacationDays(dateKeys: string[], vacationName: string, hours: number, vacationStatus: VacationStatus = "CONFIRMED", vacationDeductsAllowance = true, onProgress?: (completed: number, total: number) => void): Promise<TimesheetDayDraft[]> {
@@ -1243,14 +1518,22 @@ export function TimesheetWorkspace({
 
     try {
       for (const dateKey of dateKeys) {
-        const saveResult = await saveEntryAction(sanitizeDayForSave(createVacationDay(dateKey, vacationName, hours, vacationStatus, vacationDeductsAllowance)));
+        const known = todayDraftsRef.current[dateKey] ?? draftTombstonesRef.current[dateKey];
+        const originalSnapSig = daySignature(
+          dateKey === selectedDateKey ? selectedDay : records[dateKey]
+        );
+        const vacDay = sanitizeDayForSave(createVacationDay(dateKey, vacationName, hours, vacationStatus, vacationDeductsAllowance));
+        const saveResult = await saveEntryAction(
+          vacDay,
+          known ? { confirmedBaselineUpdatedAt: known.confirmedBaselineUpdatedAt, expectedDraftRevision: known.revision } : undefined
+        );
         const savedDay = withClientIds(saveResult.day);
+        recordConfirmedDraftResult(dateKey, { ...saveResult, day: savedDay }, originalSnapSig, known?.revision);
 
         showNotionSyncError(saveResult.notionSyncError);
         savedDays.push(savedDay);
         onProgress?.(savedDays.length, total);
 
-        applySavedDays([savedDay]);
         setSelectedEntryIdByDate((current) => ({
           ...current,
           [savedDay.dateKey]: savedDay.entries[0]?.clientId ?? ""
@@ -1278,14 +1561,65 @@ export function TimesheetWorkspace({
           continue;
         }
 
-        const saveResult = await saveEntryAction(sanitizeDayForSave(updateVacationEntryForConnectedSave(sourceDay, vacationName, matchVacationName, matchVacationStatus, vacationStatus)));
+        const isOtherDate = dateKey !== selectedDateKey;
+        const known = todayDraftsRef.current[dateKey] ?? draftTombstonesRef.current[dateKey];
+        const activeDraft = todayDraftsRef.current[dateKey];
+        const preserveActiveWorkDraft = isOtherDate && Boolean(activeDraft);
+        const originalSnapSig = daySignature(sourceDay);
+        const expectedConfirmedDay = isOtherDate ? sourceDay : undefined;
+        const vacDay = sanitizeDayForSave(updateVacationEntryForConnectedSave(sourceDay, vacationName, matchVacationName, matchVacationStatus, vacationStatus));
+        const saveResult = await saveEntryAction(
+          vacDay,
+          known
+            ? {
+                confirmedBaselineUpdatedAt: known.confirmedBaselineUpdatedAt,
+                expectedConfirmedDay,
+                expectedDraftRevision: known.revision,
+                ...(isOtherDate ? { preserveActiveWorkDraft: true } : {})
+              }
+            : isOtherDate
+              ? { expectedConfirmedDay, preserveActiveWorkDraft: true }
+              : undefined
+        );
         const savedDay = withClientIds(saveResult.day);
+        if (preserveActiveWorkDraft && activeDraft) {
+          applyPreservedDraftVacationResult({
+            activeDraft,
+            dateKey,
+            getIsDirty: () => latestIsDirtyRef.current,
+            getLatestDraft: (key) => todayDraftsRef.current[key],
+            getLatestSnapshot: () => ({
+              dateKey: latestEditorRef.current.dateKey,
+              day: latestDayRef.current
+            }),
+            onUpdateDraft: (key, updatedDraft) => {
+              todayDraftsRef.current = { ...todayDraftsRef.current, [key]: updatedDraft };
+              setTodayDrafts((current) => ({ ...current, [key]: updatedDraft }));
+            },
+            onUpdateRecords: (key, canonicalDay, draftToOverlay) => {
+              setRecords((current) => ({
+                ...current,
+                [key]: overlayTodayDrafts({ [key]: canonicalDay }, [draftToOverlay])[key] ?? canonicalDay
+              }));
+            },
+            onUpdateSavedDay: (key, canonicalDay) => {
+              setSavedRecords((current) => ({ ...current, [key]: canonicalDay }));
+              setSavedEntryDateKeys((current) => new Set([...current, key]));
+            },
+            result: { ...saveResult, day: savedDay },
+            submittedDaySignature: originalSnapSig
+          });
+        } else if (isOtherDate && todayDraftsRef.current[dateKey]) {
+          // A draft loaded while this request was pending still belongs to the editor.
+          applySavedDays([savedDay]);
+        } else {
+          recordConfirmedDraftResult(dateKey, { ...saveResult, day: savedDay }, originalSnapSig, known?.revision);
+        }
 
         showNotionSyncError(saveResult.notionSyncError);
         savedDays.push(savedDay);
         onProgress?.(savedDays.length, total);
 
-        applySavedDays([savedDay]);
         setSelectedEntryIdByDate((current) => ({
           ...current,
           [savedDay.dateKey]: savedDay.entries.find((entry) => entry.kind === "VACATION")?.clientId ?? savedDay.entries[0]?.clientId ?? ""
@@ -1408,7 +1742,7 @@ export function TimesheetWorkspace({
           startDate: candidate?.startDate ?? "", status: candidate?.status ?? "",
           title: candidate?.title ?? "", workDayCount: candidate?.workDayCount ?? 0
         });
-        return { ...entry, notionCards: allocateEditedCards(entry.hours, nextLinks) };
+        return { ...entry, notionCards: allocateEditedCards(entry.hours, nextLinks), notionCardsTouched: true };
       });
 
       return {
@@ -1432,7 +1766,7 @@ export function TimesheetWorkspace({
         }
 
         const nextLinks = setEditedCardHours(entry.notionCards, notionPageId, allocatedHours);
-        return { ...entry, notionCards: allocateEditedCards(entry.hours, nextLinks) };
+        return { ...entry, notionCards: allocateEditedCards(entry.hours, nextLinks), notionCardsTouched: true };
       });
 
       return {
@@ -1460,7 +1794,8 @@ export function TimesheetWorkspace({
           notionCards: allocateNotionCardHours({
             entryHours: entry.hours,
             links: resetEditedCardHours(entry.notionCards)
-          })
+          }),
+          notionCardsTouched: true
         };
       });
 
@@ -1636,7 +1971,6 @@ export function TimesheetWorkspace({
       setVacationRangeState("idle");
       setVacationRangeConflictKeys([]);
       setVacationRangeMessage(`휴가 ${savedDays.length}일 저장됨${holidayKeys.length > 0 ? `, 공휴일 ${holidayKeys.length}일 제외` : ""}`);
-      setIsDirty(false);
       setSaveState("saved");
       setIsVacationRangeOpen(false);
     } catch {
@@ -1716,7 +2050,6 @@ export function TimesheetWorkspace({
       });
       setConnectedVacationPrompt(null);
       setConnectedVacationProgress({ completed: 0, total: 0 });
-      setIsDirty(false);
       setSaveState("saved");
     } catch {
       setSaveState("error");
@@ -1727,6 +2060,7 @@ export function TimesheetWorkspace({
   }
 
   function removeDeletedDates(dateKeys: string[]) {
+    forgetTodayDrafts(dateKeys);
     setRecords((current) => {
       const next = { ...current };
 
@@ -2050,14 +2384,91 @@ export function TimesheetWorkspace({
     }
   }
 
-  function applySavedDays(days: TimesheetDayDraft[]) {
-    if (!days.length) {
+  function rememberMonthDrafts(monthKey: string, drafts: TodayWorkDraftSnapshot[]) {
+    setTodayDrafts((current) => ({
+      ...Object.fromEntries(Object.entries(current).filter(([dateKey]) => !dateKey.startsWith(monthKey))),
+      ...Object.fromEntries(drafts.map((draft) => [draft.dateKey, draft]))
+    }));
+  }
+
+  function forgetTodayDrafts(dateKeys: string[]) {
+    const active = dateKeys.filter((dateKey) => todayDraftsRef.current[dateKey]);
+    if (active.length === 0) {
       return;
     }
-    const byDate = Object.fromEntries(days.map((day) => [day.dateKey, day]));
-    setRecords((current) => ({ ...current, ...byDate }));
-    setSavedRecords((current) => ({ ...current, ...byDate }));
-    setSavedEntryDateKeys((current) => new Set([...current, ...days.map((day) => day.dateKey)]));
+    draftEpochRef.current += 1;
+    setTodayDrafts((current) => {
+      const next = { ...current };
+      for (const dateKey of active) {
+        delete next[dateKey];
+      }
+      return next;
+    });
+  }
+
+  async function discardSelectedTodayDraft() {
+    const dateKey = selectedDateKey;
+    const known = todayDraftsRef.current[dateKey];
+    if (!known) {
+      return;
+    }
+    await executeDiscardTimesheetDraft({
+      clearEditorDraftAction,
+      dateKey,
+      getLatestSnapshot: () => ({
+        dateKey: latestEditorRef.current.dateKey,
+        day: latestDayRef.current
+      }),
+      known,
+      onClearedLocal: (restoreConfirmed) => {
+        draftEpochRef.current += 1;
+        delete lastSavedWorkSignatureRef.current[dateKey];
+        setTodayDrafts((current) => {
+          const next = { ...current };
+          delete next[dateKey];
+          return next;
+        });
+        setDraftSaveState("idle");
+        setDraftSaveError(null);
+        if (restoreConfirmed) {
+          setIsDirty(false);
+          setRecords((current) => {
+            const next = { ...current };
+            const saved = savedRecords[dateKey];
+            if (saved) {
+              next[dateKey] = { ...saved };
+            } else {
+              delete next[dateKey];
+            }
+            return next;
+          });
+        }
+      },
+      onError: (message) => {
+        setDraftSaveState("error");
+        setDraftSaveError({ action: "discard", message });
+      },
+      onTombstone: (tombstone) => {
+        draftTombstonesRef.current[dateKey] = tombstone;
+      }
+    });
+  }
+
+  function applySavedDays(days: TimesheetDayDraft[]) {
+    applyExternalSavedDays({
+      days,
+      getIsDirty: () => latestIsDirtyRef.current,
+      getSelectedDateKey: () => latestSelectedDateKeyRef.current,
+      getTodayDrafts: () => todayDraftsRef.current,
+      onClearWorkSignature: (key) => {
+        delete lastSavedWorkSignatureRef.current[key];
+      },
+      onUpdateRecords: setRecords,
+      onUpdateSavedDateKeys: (keys) => {
+        setSavedEntryDateKeys((current) => new Set([...current, ...keys]));
+      },
+      onUpdateSavedRecords: setSavedRecords
+    });
   }
 
   function mergeSavedDays(days: TimesheetDayDraft[]) {
@@ -2130,6 +2541,8 @@ export function TimesheetWorkspace({
   }
 
   async function saveSelectedDraft(options: { forceImmediateAiAfterSave?: boolean; overwriteAiAfterSave?: boolean; skipAiRewritePrompt?: boolean; skipConnectedVacation?: boolean; vacationActionLabel?: string; vacationStatus?: VacationStatus } = {}) {
+    const originalSourceSig = daySignature(selectedDay);
+
     if (selectedEntry?.kind === "VACATION" && !options.skipConnectedVacation) {
       try {
         const prompt = await findConnectedVacationPrompt(selectedEntry.vacationStatus, options.vacationActionLabel, options.vacationStatus ?? selectedEntry.vacationStatus);
@@ -2178,13 +2591,12 @@ export function TimesheetWorkspace({
     setDeleteError("");
 
     try {
-      const saveResult = await saveEntryAndNotify(entry);
+      const saveResult = await saveEntryAndNotify(entry, originalSourceSig);
       const savedEntry = withClientIds(saveResult.day);
 
       updateAiRewriteRequestsFromDays([savedEntry]);
       notionCandidates.updateCandidatesFromDay(savedEntry);
       showNotionSyncError(saveResult.notionSyncError);
-      applySavedDays([savedEntry]);
       setSelectedEntryIdByDate((current) => ({
         ...current,
         [savedEntry.dateKey]: savedEntry.entries[Math.max(selectedIndexBeforeSave, 0)]?.clientId ?? savedEntry.entries[0]?.clientId ?? ""
@@ -2192,7 +2604,6 @@ export function TimesheetWorkspace({
       if (isNewSavedDate) {
         setCelebratingDateKey(savedEntry.dateKey);
       }
-      setIsDirty(false);
       setSaveState("saved");
       if (
         options.forceImmediateAiAfterSave ||
@@ -2484,6 +2895,7 @@ export function TimesheetWorkspace({
           {viewMode === "calendar" ? (
             <CalendarView
               celebratingDateKey={celebratingDateKey}
+              pendingDraftDates={pendingDraftDates}
               rows={rows}
               selectedDateKey={selectedDateKey}
               setSelectedDateKey={selectDate}
@@ -2494,6 +2906,7 @@ export function TimesheetWorkspace({
           ) : (
             <ListView
               dateKeys={listDateKeys}
+              pendingDraftDates={pendingDraftDates}
               rows={rows}
               savedRecords={savedRecords}
               selectedDateKey={selectedDateKey}
@@ -2587,10 +3000,17 @@ export function TimesheetWorkspace({
             }}
             persistence={{
               canDelete: canDeleteSelected,
+              canDiscardDraft: pendingDraftDates.has(selectedDateKey),
+              canRetryDraftSave: canUseWorkDraft && isDirty && draftSaveState === "error" && draftSaveError?.action === "save",
               deleteError,
               deleteState,
+              draftSaveError: draftSaveError?.message ?? "",
+              draftSavedAt,
+              draftSaveState,
               isSaveDisabled: isSaveDisabled(),
+              onDiscardDraft: discardSelectedTodayDraft,
               onSave: (event) => void saveSelectedDraft({ forceImmediateAiAfterSave: event.ctrlKey || event.metaKey }),
+              onSaveDraft: () => void saveCurrentWorkDraft(selectedDateKey),
               onSaveWithVacationAction: (action) => void saveSelectedDraft({ vacationActionLabel: action.label, vacationStatus: action.status }),
               onRequestDelete: requestDeleteSelectedDate,
               primaryVacationSaveAction: primarySelectedVacationSaveAction,
@@ -2742,6 +3162,7 @@ export function TimesheetWorkspace({
 
       {pendingNavigation ? (
         <PendingNavigationConfirmModal
+          draftSaveFailed={canUseWorkDraft && draftSaveError?.action === "save"}
           kind={pendingNavigation.kind === "closeEditor" ? "closeEditor" : "navigate"}
           onCancel={cancelPendingNavigation}
           onConfirm={confirmPendingNavigation}

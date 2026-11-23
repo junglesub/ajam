@@ -5,6 +5,7 @@ import { CheckCircle2, Clipboard, RefreshCw, Webhook } from "lucide-react";
 
 import type { NotionWebhookSettings } from "@timesheet/db";
 import { Badge, Button, Input } from "@timesheet/ui";
+import { ModalShell, ShortcutHint } from "@/components/timesheet/timesheet-ui-primitives";
 
 export function NotionWebhookPanel({
   loadWebhookSettingsAction,
@@ -22,6 +23,7 @@ export function NotionWebhookPanel({
   const [origin, setOrigin] = useState("");
   const [verificationToken, setVerificationToken] = useState("");
   const [revealedToken, setRevealedToken] = useState("");
+  const [resetOpen, setResetOpen] = useState(false);
 
   async function load() {
     setError("");
@@ -34,9 +36,7 @@ export function NotionWebhookPanel({
   }
 
   async function reset() {
-    if (!window.confirm("기존 Notion webhook 구독을 삭제한 뒤 새 URL로 다시 설정해야 합니다. 계속할까요?")) {
-      return;
-    }
+    setResetOpen(false);
     setError("");
     try {
       setSettings(await resetWebhookSettingsAction());
@@ -84,6 +84,7 @@ export function NotionWebhookPanel({
       : "구독 설정 필요";
 
   return (
+    <>
     <section className="grid gap-5 p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex gap-3">
@@ -124,9 +125,21 @@ export function NotionWebhookPanel({
 
       <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
         <span>최근 이벤트: {settings?.lastEventAt || "없음"}</span>
-        <span className="flex gap-2"><Button onClick={() => void load()} type="button" variant="secondary"><RefreshCw className="size-4" />상태 새로고침</Button><Button onClick={() => void reset()} type="button" variant="danger">구독 재설정</Button></span>
+        <span className="flex gap-2"><Button onClick={() => void load()} type="button" variant="secondary"><RefreshCw className="size-4" />상태 새로고침</Button><Button onClick={() => setResetOpen(true)} type="button" variant="danger">구독 재설정</Button></span>
       </div>
     </section>
+    {resetOpen ? (
+      <ModalShell onClose={() => setResetOpen(false)} onConfirm={() => void reset()} title="구독 재설정">
+        <div className="space-y-4">
+          <p className="text-sm leading-6 text-slate-600">기존 Notion webhook 구독을 삭제한 뒤 새 URL로 다시 설정해야 합니다.</p>
+          <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+            <Button onClick={() => setResetOpen(false)} type="button" variant="secondary">취소<ShortcutHint keys={["Esc"]} /></Button>
+            <Button onClick={() => void reset()} type="button" variant="danger">재설정<ShortcutHint keys={["↵"]} /></Button>
+          </div>
+        </div>
+      </ModalShell>
+    ) : null}
+    </>
   );
 }
 

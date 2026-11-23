@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, RotateCcw, X } from "lucide-react";
+import { ExternalLink, Plus, RotateCcw, X } from "lucide-react";
 
 import type { NotionCardWorkDateRange, TimesheetEntryDraft } from "@timesheet/domain";
 import { getNotionCardWorkDateRole } from "@timesheet/domain";
@@ -53,6 +53,7 @@ export function NotionCardLinkSection({
           {entry.notionCards.map((link) => {
             const card = candidates.find((candidate) => candidate.notionPageId === link.notionPageId);
             const title = card?.title || link.title || missingTitleLabel || link.notionPageId;
+            const notionUrl = card?.url || (link.notionPageId ? `https://www.notion.so/${link.notionPageId.replaceAll("-", "")}` : "");
             const linkedHours = link.linkedHours ?? card?.linkedHours;
             const lastWorkedDate = link.lastWorkedDate ?? card?.lastWorkedDate;
             const hasMetrics = linkedHours !== undefined || Boolean(lastWorkedDate);
@@ -84,6 +85,18 @@ export function NotionCardLinkSection({
                       </span>
                     ) : null}
                     <span className="min-w-0 truncate font-bold text-slate-950">{title}</span>
+                    {notionUrl ? (
+                      <a
+                        aria-label={`${title} Notion에서 열기`}
+                        className="inline-flex shrink-0 items-center justify-center rounded p-0.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                        href={notionUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                        title="Notion에서 열기"
+                      >
+                        <ExternalLink aria-hidden="true" className="size-3" />
+                      </a>
+                    ) : null}
                   </span>
                   <span className="block truncate font-semibold text-slate-400">
                     {card?.status || link.status || "-"} · {card?.category || link.category || "미분류"}

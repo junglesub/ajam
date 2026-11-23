@@ -146,7 +146,7 @@ export function useTimesheetRecommendations({
 
     const entry = day?.entries[0];
 
-    if (entry?.kind === "WORK" && entry.notionCards.length === 0) {
+    if (entry?.kind === "WORK" && !entry.notionCardsTouched && entry.notionCards.length === 0) {
       const recommendationKey = `${dateKey}:${entry.clientId}`;
 
       if (previousNotionCardRecommendationKeys.current.has(recommendationKey)) {

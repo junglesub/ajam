@@ -14,6 +14,7 @@ import {
   findPreviousProjectAction,
   listTimesheetAiRewriteRequestsAction,
   loadNotionCardCandidatesAction,
+  clearTimesheetEditorDraftAction,
   loadTimesheetMonthAction,
   loadTimesheetVacationColorsAction,
   refreshNotionCardCandidatesAction,
@@ -21,6 +22,7 @@ import {
   resetHolidayCacheAction,
   runTimesheetAiCleanupAction,
   saveHolidayApiKeyAction,
+  saveTimesheetEditorDraftAction,
   saveTimesheetEntryAction,
   testHolidayApiKeyAction,
   testGeminiApiKeyAction,
@@ -61,6 +63,7 @@ export default async function TimesheetPage() {
   return (
     <TimesheetWorkspace
       addProjectAction={addProjectAction}
+      clearEditorDraftAction={clearTimesheetEditorDraftAction}
       createUserAction={createUserAction}
       currentUser={currentUser}
       deleteEntryAction={deleteTimesheetEntryAction}
@@ -82,6 +85,7 @@ export default async function TimesheetPage() {
       resetAllHolidayCacheAction={resetAllHolidayCacheAction}
       resetHolidayCacheAction={resetHolidayCacheAction}
       runAiCleanupAction={runTimesheetAiCleanupAction}
+      saveEditorDraftAction={saveTimesheetEditorDraftAction}
       saveEntryAction={saveTimesheetEntryAction}
       saveHolidayApiKeyAction={saveHolidayApiKeyAction}
       initialAiSetting={aiSetting}
