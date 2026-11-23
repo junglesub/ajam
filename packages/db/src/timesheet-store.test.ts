@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
+import { createEmptyEntryDraft } from "@timesheet/domain";
 
 import type { StoredTimesheetDay } from "./timesheet-store";
 
@@ -47,6 +48,34 @@ test("timesheet store operations", async (t) => {
   try {
     await ensureApplicationSchema();
     await store.ensureTimesheetSchema();
+
+    await t.test("linked Notion work day counts are JSON-safe when loading saved work", async () => {
+      const dateKey = "2026-11-12";
+      const userId = "user-linked-count";
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "User" ("id", "username", "passwordHash", "createdAt", "updatedAt") VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        userId,
+        userId,
+        "hash"
+      );
+      await store.saveTimesheetDay({
+        day: {
+          aiRewriteRequested: false,
+          dateKey,
+          entries: [{
+            ...createEmptyEntryDraft(),
+            content: "Linked work",
+            notionCards: [{ allocatedHours: 2, allocationMode: "manual", notionPageId: "linked-count-card", source: "manual" }]
+          }],
+          holidayName: "",
+          shortVersion: ""
+        },
+        userId
+      });
+      const [day] = await store.listTimesheetEntries({ endDateKey: dateKey, startDateKey: dateKey, userId });
+      assert.equal(day?.entries[0]?.notionCards[0]?.workDayCount, 1);
+      assert.doesNotThrow(() => JSON.stringify(day?.entries));
+    });
 
     await t.test("vacation deletion cleans up empty TimesheetDay rows and list skips ghost days", async () => {
       await prisma.$executeRawUnsafe(

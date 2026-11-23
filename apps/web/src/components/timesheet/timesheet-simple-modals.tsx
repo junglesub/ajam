@@ -6,23 +6,27 @@ import { ModalShell, ShortcutHint } from "./timesheet-ui-primitives";
 
 export function DeleteConfirmModal({
   dateKey,
-  isDeleting,
+  entryLabel,
+  isDeleting = false,
   onCancel,
   onConfirm
 }: {
-  dateKey: string;
-  isDeleting: boolean;
+  isDeleting?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
-}) {
+} & ({ dateKey: string; entryLabel?: never } | { dateKey?: never; entryLabel: string })) {
   return (
-    <ModalShell onClose={onCancel} onConfirm={onConfirm} title="기록 삭제">
+    <ModalShell onClose={onCancel} onConfirm={onConfirm} title={entryLabel === undefined ? "기록 삭제" : "업무 항목 삭제"}>
       <div className="space-y-4">
         <p className="text-sm leading-6 text-slate-600">
-          {formatKoreanDate(dateKey)}의 저장된 업무 기록을 삭제할까요? 이 날짜의 업무, 휴가, 공휴일 entry가 함께 삭제됩니다.
+          {dateKey === undefined
+            ? `‘${entryLabel}’ 항목을 삭제할까요?`
+            : `${formatKoreanDate(dateKey)}의 저장된 업무 기록을 삭제할까요? 이 날짜의 업무, 휴가, 공휴일 entry가 함께 삭제됩니다.`}
         </p>
         <div className="rounded-md border border-red-100 bg-red-50 px-3 py-2 text-sm font-semibold leading-6 text-red-700">
-          삭제 후에는 해당 날짜가 다시 미기입 상태로 돌아갑니다.
+          {dateKey === undefined
+            ? "삭제는 오늘 전체 요약과 임시 저장에 반영됩니다."
+            : "삭제 후에는 해당 날짜가 다시 미기입 상태로 돌아갑니다."}
         </div>
         <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
           <Button onClick={onCancel} type="button" variant="secondary">
@@ -64,19 +68,29 @@ export function NotionSyncErrorModal({ error, onClose }: { error: string; onClos
 }
 
 export function PendingNavigationConfirmModal({
+  draftSaveFailed = false,
   kind,
   onCancel,
   onConfirm
 }: {
-  kind: "closeEditor" | "navigate";
+  draftSaveFailed?: boolean;
+  kind: "closeEditor" | "comment" | "navigate";
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const action = kind === "closeEditor" ? "닫으면" : "이동하면";
+  const confirmLabel = kind === "closeEditor" ? "닫기" : "이동";
+  const message = kind === "comment"
+    ? "작성 중인 댓글이 있습니다. 저장하지 않고 이동하면 댓글 입력이 사라집니다."
+    : draftSaveFailed
+      ? `임시 저장에 실패했습니다. 저장하지 않고 ${action} 이번 수정은 버려지고, 마지막 확정 기록으로 되돌아갑니다.`
+      : `현재 날짜의 변경사항이 아직 저장되지 않았습니다. 저장하지 않고 ${action} 마지막 확정 기록으로 되돌아갑니다.`;
+
   return (
     <ModalShell onClose={onCancel} onConfirm={onConfirm} title="저장되지 않은 변경">
       <div className="space-y-4">
         <p className="text-sm leading-6 text-slate-600">
-          현재 날짜의 변경사항이 아직 저장되지 않았습니다. 저장하지 않고 {kind === "closeEditor" ? "닫으면" : "이동하면"} 마지막 저장 상태로 되돌아갑니다.
+          {message}
         </p>
         <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
           <Button onClick={onCancel} variant="secondary">
@@ -84,7 +98,7 @@ export function PendingNavigationConfirmModal({
             <ShortcutHint keys={["Esc"]} />
           </Button>
           <Button onClick={onConfirm} variant="danger">
-            저장하지 않고 {kind === "closeEditor" ? "닫기" : "이동"}
+            저장하지 않고 {confirmLabel}
             <ShortcutHint keys={["↵"]} />
           </Button>
         </div>

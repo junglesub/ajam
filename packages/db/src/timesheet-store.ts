@@ -125,8 +125,9 @@ type TimesheetAiRewriteRequestRow = {
   shortVersion: string;
 };
 
-type WorkEntryNotionCardRow = TimesheetEntryNotionCardDraft & {
+type WorkEntryNotionCardRow = Omit<TimesheetEntryNotionCardDraft, "workDayCount"> & {
   timesheetEntryId: string;
+  workDayCount: bigint | number;
 };
 
 type TimesheetTransaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
@@ -231,7 +232,7 @@ function normalizeNotionCards(links: TimesheetEntryNotionCardDraft[] | undefined
     .filter((link) => link.notionPageId);
 }
 
-function normalizeDay(day: StoredTimesheetDay): StoredTimesheetDay {
+export function normalizeDay(day: StoredTimesheetDay): StoredTimesheetDay {
   const hasWork = day.entries.some((entry) => entry.kind === "WORK");
 
   return {
@@ -474,7 +475,7 @@ function mapNotionCardLinks(rows: WorkEntryNotionCardRow[]): Map<string, Timeshe
       startDate: row.startDate,
       status: row.status,
       title: row.title,
-      workDayCount: row.workDayCount
+      workDayCount: Number(row.workDayCount)
     });
     linksByEntryId.set(row.timesheetEntryId, links);
   }
@@ -1005,7 +1006,7 @@ export async function applyTimesheetAiSummaryPatches(params: {
   }, { daysRequested: params.patches.length });
 }
 
-async function listTimesheetDaysInTransaction(params: {
+export async function listTimesheetDaysInTransaction(params: {
   dateKeys: string[];
   transaction: TimesheetTransaction;
   userId: string;
@@ -1089,7 +1090,7 @@ function getAiSummaryEntryId(entry: Pick<StoredTimesheetEntry, "clientId" | "id"
   return entry.id || entry.clientId;
 }
 
-async function saveTimesheetDayInTransaction(params: {
+export async function saveTimesheetDayInTransaction(params: {
   day: StoredTimesheetDay;
   transaction: TimesheetTransaction;
   userId: string;

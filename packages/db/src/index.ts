@@ -141,3 +141,26 @@ export type {
   UnreadLogSummary,
   VisibleOperationLog
 } from "./operation-log-store";
+export {
+  createNotionPageComment,
+  deleteNotionPageComment,
+  listNotionPageComments,
+  updateNotionPageComment
+} from "./notion-comments";
+export type { NotionCardComment, NotionPageCommentsResult } from "./notion-comments";
+export {
+  clearTodayDraft,
+  confirmTimesheetFullDay,
+  confirmTodayDraft,
+  ensureTodaySchema,
+  getTodayDraft,
+  listActiveTodayDrafts,
+  saveTodayDraft
+} from "./today-store";
+export type {
+  TodayDraftClearResult,
+  TodayDraftConfirmResult,
+  TodayDraftLoadResult,
+  TodayDraftSaveResult,
+  TodayWorkDraftRecord
+} from "./today-store";
