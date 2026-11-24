@@ -195,10 +195,12 @@ export async function listNotionPageComments(params: {
 }
 
 export async function createNotionPageComment(params: {
+  authorName: string;
   pageId: string;
   text: string;
   userId: string;
 }): Promise<NotionCardComment> {
+  const authorName = params.authorName.trim();
   const pageId = params.pageId.trim();
   const text = params.text.trim();
   if (!pageId) {
@@ -207,10 +209,14 @@ export async function createNotionPageComment(params: {
   if (!text) {
     throw new NotionApiError("댓글 내용을 입력하세요.", { status: 400 });
   }
+  if (!authorName) {
+    throw new NotionApiError("댓글 작성자 이름이 필요합니다.", { status: 400 });
+  }
 
-  const { botId, token } = await requireNotionCommentContext(params.userId, params.pageId.trim());
+  const { botId, token } = await requireNotionCommentContext(params.userId, pageId);
   const response = await requestNotionApi({
     body: {
+      display_name: { type: "custom", custom: { name: authorName } },
       parent: { page_id: pageId },
       rich_text: [{ text: { content: text }, type: "text" }]
     },

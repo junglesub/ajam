@@ -5,6 +5,7 @@ import {
   confirmTodayDraft,
   createNotionPageComment,
   deleteNotionPageComment,
+  getManagedUser,
   getTodayDraft,
   listNotionPageComments,
   listTimesheetEntries,
@@ -179,7 +180,12 @@ export async function createTodayCardCommentAction(params: {
   text: string;
 }): Promise<NotionCardComment> {
   const user = await requireSession();
+  const managedUser = await getManagedUser(user.id);
+  if (!managedUser?.username.trim()) {
+    throw new Error("댓글 작성자 이름이 필요합니다.");
+  }
   return createNotionPageComment({
+    authorName: managedUser.username,
     pageId: params.pageId,
     text: params.text,
     userId: user.id

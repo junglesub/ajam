@@ -32,7 +32,7 @@ test("notion-comments resolves /v1/users/me bot identity, enforces ownership on 
     email: "comments@example.com",
     password: "password123",
     role: "USER",
-    username: "comments-user"
+    username: "홍길동"
   });
 
   await upsertUserNotionConnection({
@@ -83,6 +83,15 @@ test("notion-comments resolves /v1/users/me bot identity, enforces ownership on 
 
   const originalFetch = globalThis.fetch;
   const calls: Array<{ method: string; url: string }> = [];
+  const createdComment = {
+    created_by: { id: "bot-ajam-1", name: "aJam", object: "user" },
+    created_time: "2026-11-17T03:00:00.000Z",
+    display_name: { resolved_name: user.username },
+    id: "comment-3",
+    last_edited_time: "2026-11-17T03:00:00.000Z",
+    rich_text: [{ plain_text: "Created comment" }]
+  };
+  let posted = false;
 
   try {
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -109,7 +118,8 @@ test("notion-comments resolves /v1/users/me bot identity, enforces ownership on 
                 id: "comment-2",
                 last_edited_time: "2026-11-17T02:00:00.000Z",
                 rich_text: [{ plain_text: "Second comment" }]
-              }
+              },
+              ...(posted ? [createdComment] : [])
             ]
           }),
           { status: 200 }
@@ -125,7 +135,7 @@ test("notion-comments resolves /v1/users/me bot identity, enforces ownership on 
               {
                 created_by: { id: "user-other-1", object: "user" },
                 created_time: "2026-11-17T01:00:00.000Z",
-                display_name: { resolved_name: "Alice" },
+                display_name: { resolved_name: user.username },
                 id: "comment-1",
                 last_edited_time: "2026-11-17T01:00:00.000Z",
                 rich_text: [{ plain_text: "First comment" }]
@@ -137,16 +147,14 @@ test("notion-comments resolves /v1/users/me bot identity, enforces ownership on 
       }
 
       if (method === "POST") {
-        return new Response(
-          JSON.stringify({
-            created_by: { id: "bot-ajam-1", name: "aJam", object: "user" },
-            created_time: "2026-11-17T03:00:00.000Z",
-            id: "comment-3",
-            last_edited_time: "2026-11-17T03:00:00.000Z",
-            rich_text: [{ plain_text: "Created comment" }]
-          }),
-          { status: 200 }
-        );
+        assert.equal(url, "https://api.notion.com/v1/comments");
+        assert.deepEqual(JSON.parse(String(init?.body)), {
+          display_name: { type: "custom", custom: { name: user.username } },
+          parent: { page_id: "page-1" },
+          rich_text: [{ text: { content: "Created comment" }, type: "text" }]
+        });
+        posted = true;
+        return new Response(JSON.stringify(createdComment), { status: 200 });
       }
 
       if (method === "PATCH") {
@@ -172,9 +180,12 @@ test("notion-comments resolves /v1/users/me bot identity, enforces ownership on 
     // 1. Paginated list & authorship flags using partial user IDs
     const listed = await listNotionPageComments({ pageId: "page-1", userId: user.id });
     assert.equal(listed.comments.length, 2);
-    assert.equal(listed.comments[0]?.authorName, "Alice");
+    assert.equal(listed.comments[0]?.authorName, user.username);
     assert.equal(listed.comments[0]?.canEdit, false);
+    assert.equal(listed.comments[0]?.canDelete, false);
+    assert.equal(listed.comments[1]?.authorName, "aJam");
     assert.equal(listed.comments[1]?.canEdit, true);
+    assert.equal(listed.comments[1]?.canDelete, true);
     assert.equal(listed.latestComment?.id, "comment-2");
 
     // 1b. Uncached/unauthorized pageId is rejected
@@ -195,13 +206,38 @@ test("notion-comments resolves /v1/users/me bot identity, enforces ownership on 
       /현재 aJam 연결이 작성한 댓글만/
     );
 
+    await assert.rejects(
+      () => deleteNotionPageComment({ commentId: "comment-1", pageId: "page-1", userId: user.id }),
+      /현재 aJam 연결이 작성한 댓글만/
+    );
+    assert.equal(calls.some(({ method }) => method === "PATCH" || method === "DELETE"), false);
+
     // 3. Create, Update, Delete own comment
+    await assert.rejects(
+      () =>
+        createNotionPageComment({
+          authorName: "  ",
+          pageId: "page-1",
+          text: "Created comment",
+          userId: user.id
+        }),
+      /댓글 작성자 이름이 필요합니다/
+    );
+    assert.equal(calls.some(({ method }) => method === "POST"), false);
+
     const created = await createNotionPageComment({
+      authorName: ` ${user.username} `,
       pageId: "page-1",
       text: "Created comment",
       userId: user.id
     });
     assert.equal(created.id, "comment-3");
+    assert.equal(created.authorName, user.username);
+    assert.equal(created.createdById, "bot-ajam-1");
+    assert.equal(created.canEdit, true);
+    assert.equal(created.canDelete, true);
+    const reloaded = await listNotionPageComments({ pageId: "page-1", userId: user.id });
+    assert.deepEqual(reloaded.latestComment, created);
 
     const updated = await updateNotionPageComment({
       commentId: "comment-2",
@@ -210,12 +246,14 @@ test("notion-comments resolves /v1/users/me bot identity, enforces ownership on 
       userId: user.id
     });
     assert.equal(updated.plainText, "Updated comment");
+    assert.equal(updated.authorName, "aJam");
 
     await deleteNotionPageComment({
       commentId: "comment-2",
       pageId: "page-1",
       userId: user.id
     });
+    assert.ok(calls.some(({ method, url }) => method === "DELETE" && url.endsWith("/v1/comments/comment-2")));
 
     // 4. Repeated cursor throws explicit error
     globalThis.fetch = (async () =>
@@ -243,6 +281,7 @@ test("notion-comments resolves /v1/users/me bot identity, enforces ownership on 
     await assert.rejects(
       () =>
         createNotionPageComment({
+          authorName: user.username,
           pageId: "page-1",
           text: "Ambiguous",
           userId: user.id

@@ -14,6 +14,17 @@
 
 **Execution status (2026-11-18):** The expanded Today/timesheet draft integration is **NO-GO**. Round 13 accepted an earlier implementation; Rounds 14–23 record the later corrections and outstanding issues. Latest source is `b89c12e`, which arrived while this remaining-work summary was prepared. Codex inspected its diff for this summary, but its completed verification report and final connected-path acceptance remain pending. The current checklist below supersedes the historical unchecked implementation tasks later in this document.
 
+## 후속 계획 — 오늘 Notion 댓글에 사용자 이름 표시 (2026-11-25)
+
+‘오늘’에서 새 댓글을 올리면 Notion 페이지와 aJam 댓글 이력에 게시 시점의 aJam 사용자 이름(`username`)을 표시한다. 기존 Notion 연결로 게시하며 Notion의 `created_by.id`는 연결 ID로 기록된다. Notion 계정 자체를 작성 주체로 기록해야 한다면 사용자 인증과 댓글 API의 동작을 별도로 검토한다. [Notion 댓글 표시 이름](https://developers.notion.com/reference/comment-display-name) · [Notion 댓글 객체](https://developers.notion.com/reference/comment-object)
+
+- [x] `apps/web/src/app/(app)/today/actions.ts`의 `createTodayCardCommentAction`에서 로그인 세션의 사용자 ID로 `getManagedUser`를 호출해 현재 `username`을 가져온다. 계정이 없거나 이름이 비어 있으면 게시 오류를 반환한다. 브라우저 요청은 지금처럼 `pageId`와 `text`만 받는다. 카드의 `댓글 추가`와 이력의 `Notion에 게시`가 이 액션을 함께 사용한다.
+- [x] `packages/db/src/notion-comments.ts`의 `createNotionPageComment`에 필수 `authorName: string`을 추가한다. 이름의 앞뒤 공백을 제거하고 빈 값은 거부한 뒤, `POST /v1/comments` 요청에 `display_name: { type: "custom", custom: { name: authorName } }`를 포함한다. 기존 매퍼가 생성·조회 응답의 `display_name.resolved_name`을 우선 읽고 화면은 `authorName`을 사용한다. 수정·삭제 권한 판정에는 계속 `created_by.id`를 사용한다. 변경 범위는 새 댓글부터 적용한다. [Notion 댓글 생성](https://developers.notion.com/reference/create-a-comment)
+- [x] `packages/db/src/notion-comments.test.ts`의 HTTP mock에 POST 요청 본문의 사용자 이름과 생성·재조회 응답의 `authorName` 검증을 추가한다. 한국어 이름, 빈 이름에서 POST 미호출, 예전 봇 댓글의 표시·수정·삭제, 표시 이름이 같아도 `created_by.id`가 다른 댓글의 수정·삭제 거부를 확인한다. `pnpm --filter @timesheet/db exec node --import tsx --test src/notion-comments.test.ts`로 실행한다.
+- [ ] 구현 후 테스트용 Notion 카드에서 카드 영역과 이력 팝업으로 각각 등록하고 Notion 페이지 및 aJam의 새로고침 후 이름을 확인한다. 게시 실패 시 작성 중인 텍스트가 남는지도 확인한다. 제품 빌드는 별도 요청 시 실행한다.
+
+Notion에서 댓글 작성자의 봇 프로필 이름과 이미지는 해당 내부 연결의 `Name`과 `Logo`에서 관리한다. 연결 소유자가 Notion의 `Settings`에서 `Developer Mode`를 켜고 사이드바의 개발자 섹션에서 `Connections`를 열어 aJam에 연결한 항목의 설정을 확인한다. 댓글별 `display_name`에는 이름만 지정할 수 있다. 변경이 반영된 aJam에서 새 테스트 댓글을 게시한 뒤에도 제목이 ‘이름 없는 봇’이면, aJam 이력의 표시 이름과 Notion 댓글 응답의 `display_name.resolved_name`을 비교해 댓글 표시 이름과 봇 프로필을 구분한다. [Notion 개발자 모드](https://www.notion.com/help/turn-on-developer-mode-to-use-developer-tools-in-notion) · [내부 연결 설정](https://www.notion.com/help/create-integrations-with-the-notion-api) · [댓글 표시 이름](https://developers.notion.com/reference/comment-display-name)
+
 ## 남은 수정·검증 체크리스트 (2026-11-18)
 
 기준은 `d22664e`까지의 독립 검수와 `b89c12e`의 추가 변경 확인이다. 실제 개발은 Antigravity, 기획·문서와 독립 판정은 Codex가 담당한다. 사용자 요청에 따라 수정 단위별 커밋을 유지한다.
